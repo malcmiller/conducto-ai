@@ -6,7 +6,12 @@ import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, get_type_hints
 
-from pydantic import ConfigDict, PydanticSchemaGenerationError, create_model
+from pydantic import (
+    ConfigDict,
+    PydanticInvalidForJsonSchema,
+    PydanticSchemaGenerationError,
+    create_model,
+)
 
 from .decorators import (
     AgentMetadata,
@@ -250,7 +255,7 @@ class BaseAgent:
                 **fields,
             )
             return parameter_model.model_json_schema()
-        except PydanticSchemaGenerationError as error:
+        except (PydanticSchemaGenerationError, PydanticInvalidForJsonSchema) as error:
             raise AgentRegistrationError(
                 f"Could not generate a parameter schema for "
                 f"{type(self).__name__}.{attribute_name}: {error}"

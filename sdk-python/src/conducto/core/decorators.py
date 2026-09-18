@@ -108,7 +108,7 @@ def a2a_agent(
         return agent_class
 
     if cls is None:
-            return decorate
+        return decorate
     return decorate(cls)
 
 

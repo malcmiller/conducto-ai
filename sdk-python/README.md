@@ -6,7 +6,7 @@ The **`conducto-ai`** Python SDK is the foundational client and server framework
 
 ## 🛠️ Requirements & Tooling
 
-* **Python:** 3.11+
+* **Python:** 3.12+
 * **Package & Project Manager:** [`uv`](https://github.com/astral-sh/uv?utm_source=gemini) (recommended) or `poetry` / `pip`
 * **Core Dependencies:**
 * `pydantic-ai` for dynamic model execution and structured outputs
