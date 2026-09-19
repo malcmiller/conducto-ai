@@ -2,22 +2,35 @@
 
 from __future__ import annotations
 
-import json
 import asyncio
 import dataclasses
 import enum
 import inspect
+import json
 import math
 import threading
-from copy import deepcopy
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, TypeAlias, cast
 from types import MappingProxyType
+from typing import Any, TypeAlias, cast
 
 from pydantic import BaseModel, ValidationError
 
 from .agent import BaseAgent
+from .provider import (
+    ChatMessage,
+    GenerationOptions,
+    MalformedStructuredOutputError,
+    ModelConfiguration,
+    ModelProvider,
+    ProviderError,
+    StructuredOutputRequest,
+    Usage,
+    complete_with_retries,
+    build_routing_schema,
+    parse_routing_selection,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +122,18 @@ class InvocationFailure:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class RoutingFailure:
+    """Typed failure from provider-backed capability selection."""
+
+    message: str
+    exception: BaseException = dataclasses.field(
+        repr=False, compare=False, hash=False
+    )
+    usage: Usage = dataclasses.field(default_factory=Usage)
+    retryable: bool = False
+
+
 InvocationResult: TypeAlias = (
     InvocationSuccess
     | InvocationValidationFailure
@@ -194,12 +219,77 @@ class OrchestratorAgent(BaseAgent):
     instructions.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        model_provider: ModelProvider | None = None,
+        model_config: ModelConfiguration | None = None,
+    ) -> None:
         self._registered_agents: dict[str, BaseAgent] = {}
         self._registered_capabilities: dict[str, BaseAgent] = {}
         self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._registry_lock = threading.RLock()
-        super().__init__()
+        super().__init__(model_config=model_config)
+        self.model_provider = model_provider
+
+    async def route(
+        self,
+        user_input: str,
+        *,
+        model_provider: ModelProvider | None = None,
+        model_config: ModelConfiguration | None = None,
+        timeout: float | None = None,
+        correlation_id: str = "",
+    ) -> InvocationResult | RoutingFailure:
+        """Select exactly one local capability with native structured output."""
+        provider = model_provider or self.model_provider
+        config = model_config or self.model_config
+        if provider is None or config is None:
+            raise ValueError("A model provider and typed model configuration are required")
+        request = StructuredOutputRequest(
+            name="conducto_capability_selection",
+            schema=build_routing_schema(self.get_routing_metadata()),
+        )
+        options = GenerationOptions(
+            model=config.model,
+            timeout=config.timeout if timeout is None else timeout,
+            retries=config.retries,
+        )
+        messages = (
+            ChatMessage(
+                role="system",
+                content=(
+                    "Select one capability from the structured local registry. "
+                    "Return only the requested schema."
+                ),
+            ),
+            ChatMessage(role="user", content=user_input),
+            ChatMessage(
+                role="system",
+                content=json.dumps(self.get_routing_metadata(), sort_keys=True),
+            ),
+        )
+        try:
+            result = await complete_with_retries(
+                provider,
+                messages,
+                options=options,
+                structured_output=request,
+            )
+            selection = parse_routing_selection(result)
+        except MalformedStructuredOutputError as error:
+            return RoutingFailure(str(error), error)
+        except ProviderError as error:
+            return RoutingFailure(
+                str(error), error, retryable=error.retryable
+            )
+        return await self.invoke(
+            selection.agent_id,
+            selection.capability_id,
+            selection.arguments,
+            timeout=timeout,
+            correlation_id=correlation_id,
+        )
 
     @property
     def registered_agents(self) -> tuple[BaseAgent, ...]:

@@ -23,6 +23,7 @@ from .decorators import (
     get_agent_metadata,
     get_method_metadata,
 )
+from .provider import ModelConfiguration
 
 
 class AgentRegistrationError(ValueError):
@@ -75,8 +76,13 @@ class BaseAgent:
         AgentRegistrationError: If a decorated method cannot be registered.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        model_config: ModelConfiguration | None = None,
+    ) -> None:
         """Initialize the agent and register its decorated methods."""
+        self.model_config = model_config
         self.agent_metadata = self._resolve_agent_metadata()
         self._registered_methods: dict[str, RegisteredMethod] = {}
         self._capabilities: dict[str, RegisteredMethod] = {}
