@@ -66,3 +66,71 @@ def test_agent_card_rejects_incomplete_metadata_and_endpoint() -> None:
 
     with pytest.raises(ValueError, match="requires a description"):
         NoDescriptionAgent().get_agent_card("https://example.test/a2a")
+
+
+def test_agent_card_validates_security_objects_and_uses_standard_security_field() -> None:
+    class SecureAgent(BaseAgent):
+        """A secure agent."""
+
+        @a2a_capability(name="lookup", description="Finds a value.")
+        def lookup(self, value: str) -> str:
+            return value
+
+    agent = SecureAgent()
+    card = agent.get_agent_card(
+        "https://example.test/a2a",
+        security_schemes={
+            "oauth": {
+                "type": "oauth2",
+                "flows": {
+                    "clientCredentials": {
+                        "scopes": {},
+                        "tokenUrl": "https://example.test/token",
+                    }
+                },
+            }
+        },
+        security_requirements=[{"oauth": ["read"]}],
+    )
+    assert card["security"] == [{"oauth": ["read"]}]
+    assert "securityRequirements" not in card
+
+    with pytest.raises(ValueError, match="scopes must be a sequence"):
+        agent.get_agent_card(
+            "https://example.test/a2a",
+            security_requirements=[{"oauth": "read"}],
+        )
+    with pytest.raises(ValueError, match="unsupported type"):
+        agent.get_agent_card(
+            "https://example.test/a2a",
+            security_schemes={"unknown": {"type": "unknown"}},
+        )
+    with pytest.raises(ValueError, match="requires a scope-description mapping"):
+        agent.get_agent_card(
+            "https://example.test/a2a",
+            security_schemes={
+                "oauth": {
+                    "type": "oauth2",
+                    "flows": {
+                        "clientCredentials": {
+                            "scopes": {"read": 1},
+                            "tokenUrl": "https://example.test/token",
+                        }
+                    },
+                }
+            },
+        )
+
+
+def test_agent_card_rejects_invalid_hostname_and_transport_whitespace() -> None:
+    class Agent(BaseAgent):
+        """An agent."""
+
+    agent = Agent()
+    with pytest.raises(ValueError, match="absolute http or https URL"):
+        agent.get_agent_card("http://:80")
+    with pytest.raises(ValueError, match="surrounding whitespace"):
+        agent.get_agent_card(
+            "https://example.test/a2a",
+            preferred_transport=" JSONRPC ",
+        )

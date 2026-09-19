@@ -132,13 +132,12 @@ class BaseAgent:
         input_modes = self._validate_modes(default_input_modes, "input")
         output_modes = self._validate_modes(default_output_modes, "output")
 
-        if security_schemes is not None and not isinstance(security_schemes, Mapping):
-            raise AgentRegistrationError("security_schemes must be a mapping")
-        if security_requirements is not None and (
-            isinstance(security_requirements, (str, bytes))
-            or not isinstance(security_requirements, Sequence)
-        ):
-            raise AgentRegistrationError("security_requirements must be a sequence")
+        normalized_security_schemes = self._validate_security_schemes(
+            security_schemes
+        )
+        normalized_security = self._validate_security_requirements(
+            security_requirements
+        )
 
         agent_capabilities = {
             "streaming": False,
@@ -194,11 +193,11 @@ class BaseAgent:
             "defaultInputModes": list(input_modes),
             "defaultOutputModes": list(output_modes),
             "skills": skills,
-            "securitySchemes": dict(security_schemes or {}),
-            "securityRequirements": list(security_requirements or []),
+            "securitySchemes": normalized_security_schemes,
+            "security": normalized_security,
             "x-conducto": {
                 "parameters": parameter_schemas,
-                "skillIdStrategy": "sha256(agent-name:capability-name)[:16]",
+                "skillIdStrategy": "conducto-<sha256(agent-name:capability-name)[:16]>",
             },
         }
         return card
@@ -217,13 +216,16 @@ class BaseAgent:
             raise AgentRegistrationError(
                 "Agent Card url must be an absolute http or https URL"
             )
-        parsed = urlparse(url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        if not self._is_absolute_http_url(url):
             raise AgentRegistrationError(
                 "Agent Card url must be an absolute http or https URL"
             )
         if not isinstance(preferred_transport, str) or not preferred_transport.strip():
             raise AgentRegistrationError("Agent Card preferred_transport cannot be empty")
+        if preferred_transport != preferred_transport.strip():
+            raise AgentRegistrationError(
+                "Agent Card preferred_transport cannot contain surrounding whitespace"
+            )
         if not self.agent_metadata.name.strip():
             raise AgentRegistrationError("Agent Card agent name cannot be empty")
         if not self.agent_metadata.version.strip():
@@ -232,6 +234,16 @@ class BaseAgent:
             raise AgentRegistrationError(
                 f"{type(self).__name__} requires a description for an A2A Agent Card"
             )
+
+    @staticmethod
+    def _is_absolute_http_url(value: Any) -> bool:
+        if not isinstance(value, str):
+            return False
+        try:
+            parsed = urlparse(value)
+        except ValueError:
+            return False
+        return parsed.scheme in {"http", "https"} and bool(parsed.hostname)
 
     @staticmethod
     def _validate_modes(modes: Sequence[str], label: str) -> tuple[str, ...]:
@@ -243,6 +255,127 @@ class BaseAgent:
                 f"default_{label}_modes must contain non-empty strings"
             )
         return normalized
+
+    @staticmethod
+    def _validate_security_schemes(
+        security_schemes: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        if security_schemes is None:
+            return {}
+        if not isinstance(security_schemes, Mapping):
+            raise AgentRegistrationError("security_schemes must be a mapping")
+
+        validated: dict[str, Any] = {}
+        for name, scheme in security_schemes.items():
+            if not isinstance(name, str) or not name.strip():
+                raise AgentRegistrationError(
+                    "security_schemes names must be non-empty strings"
+                )
+            if not isinstance(scheme, Mapping):
+                raise AgentRegistrationError(
+                    f"security scheme '{name}' must be an object"
+                )
+            scheme_type = scheme.get("type")
+            if scheme_type == "apiKey":
+                if not isinstance(scheme.get("name"), str) or not scheme["name"].strip():
+                    raise AgentRegistrationError(
+                        f"apiKey security scheme '{name}' requires a non-empty name"
+                    )
+                if scheme.get("in") not in {"header", "query", "cookie"}:
+                    raise AgentRegistrationError(
+                        f"apiKey security scheme '{name}' requires in=header, query, or cookie"
+                    )
+            elif scheme_type == "http":
+                if not isinstance(scheme.get("scheme"), str) or not scheme["scheme"].strip():
+                    raise AgentRegistrationError(
+                        f"http security scheme '{name}' requires a non-empty scheme"
+                    )
+            elif scheme_type == "oauth2":
+                flows = scheme.get("flows")
+                if not isinstance(flows, Mapping) or not flows:
+                    raise AgentRegistrationError(
+                        f"oauth2 security scheme '{name}' requires non-empty flows"
+                    )
+                for flow_name, flow in flows.items():
+                    if flow_name not in {
+                        "authorizationCode",
+                        "clientCredentials",
+                        "implicit",
+                        "password",
+                    } or not isinstance(flow, Mapping):
+                        raise AgentRegistrationError(
+                            f"oauth2 security scheme '{name}' has an invalid flow"
+                        )
+                    scopes = flow.get("scopes")
+                    if not isinstance(scopes, Mapping) or any(
+                        not isinstance(scope, str) or not isinstance(description, str)
+                        for scope, description in scopes.items()
+                    ):
+                        raise AgentRegistrationError(
+                            f"oauth2 security scheme '{name}' flow '{flow_name}' "
+                            "requires a scope-description mapping"
+                        )
+                    if flow_name in {"authorizationCode", "implicit"}:
+                        authorization_url = flow.get("authorizationUrl")
+                        if not BaseAgent._is_absolute_http_url(authorization_url):
+                            raise AgentRegistrationError(
+                                f"oauth2 security scheme '{name}' flow '{flow_name}' "
+                                "requires an absolute authorizationUrl"
+                            )
+                    if flow_name != "implicit":
+                        token_url = flow.get("tokenUrl")
+                        if not BaseAgent._is_absolute_http_url(token_url):
+                            raise AgentRegistrationError(
+                                f"oauth2 security scheme '{name}' flow '{flow_name}' "
+                                "requires an absolute tokenUrl"
+                        )
+            elif scheme_type == "openIdConnect":
+                connect_url = scheme.get("openIdConnectUrl")
+                if not BaseAgent._is_absolute_http_url(connect_url):
+                    raise AgentRegistrationError(
+                        f"openIdConnect security scheme '{name}' requires an absolute URL"
+                    )
+            else:
+                raise AgentRegistrationError(
+                    f"security scheme '{name}' has unsupported type {scheme_type!r}"
+                )
+            validated[name] = dict(scheme)
+        return validated
+
+    @staticmethod
+    def _validate_security_requirements(
+        security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
+    ) -> list[dict[str, list[str]]]:
+        if security_requirements is None:
+            return []
+        if isinstance(security_requirements, (str, bytes)) or not isinstance(
+            security_requirements, Sequence
+        ):
+            raise AgentRegistrationError("security_requirements must be a sequence")
+
+        validated: list[dict[str, list[str]]] = []
+        for index, requirement in enumerate(security_requirements):
+            if not isinstance(requirement, Mapping) or not requirement:
+                raise AgentRegistrationError(
+                    f"security requirement {index} must be a non-empty object"
+                )
+            normalized: dict[str, list[str]] = {}
+            for scheme_name, scopes in requirement.items():
+                if not isinstance(scheme_name, str) or not scheme_name.strip():
+                    raise AgentRegistrationError(
+                        f"security requirement {index} has an invalid scheme name"
+                    )
+                if isinstance(scopes, (str, bytes)) or not isinstance(scopes, Sequence):
+                    raise AgentRegistrationError(
+                        f"security requirement '{scheme_name}' scopes must be a sequence"
+                    )
+                if any(not isinstance(scope, str) for scope in scopes):
+                    raise AgentRegistrationError(
+                        f"security requirement '{scheme_name}' scopes must be strings"
+                    )
+                normalized[scheme_name] = list(scopes)
+            validated.append(normalized)
+        return validated
 
     def _skill_id(self, capability_name: str) -> str:
         """Return a stable, collision-resistant ID for a reflected capability."""
