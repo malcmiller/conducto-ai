@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, get_type_hints
+from typing import Any, cast, get_type_hints
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -134,12 +134,8 @@ class BaseAgent:
         input_modes = self._validate_modes(default_input_modes, "input")
         output_modes = self._validate_modes(default_output_modes, "output")
 
-        normalized_security_schemes = self._validate_security_schemes(
-            security_schemes
-        )
-        normalized_security = self._validate_security_requirements(
-            security_requirements
-        )
+        normalized_security_schemes = self._validate_security_schemes(security_schemes)
+        normalized_security = self._validate_security_requirements(security_requirements)
 
         agent_capabilities = {
             "streaming": False,
@@ -152,8 +148,7 @@ class BaseAgent:
             unknown = set(capabilities) - set(agent_capabilities)
             if unknown:
                 raise AgentRegistrationError(
-                    "Unsupported A2A capability flag(s): "
-                    + ", ".join(sorted(unknown))
+                    "Unsupported A2A capability flag(s): " + ", ".join(sorted(unknown))
                 )
             if any(not isinstance(value, bool) for value in capabilities.values()):
                 raise AgentRegistrationError("A2A capability flags must be booleans")
@@ -215,13 +210,9 @@ class BaseAgent:
 
     def _validate_card_metadata(self, url: str, preferred_transport: str) -> None:
         if not isinstance(url, str):
-            raise AgentRegistrationError(
-                "Agent Card url must be an absolute http or https URL"
-            )
+            raise AgentRegistrationError("Agent Card url must be an absolute http or https URL")
         if not self._is_absolute_http_url(url):
-            raise AgentRegistrationError(
-                "Agent Card url must be an absolute http or https URL"
-            )
+            raise AgentRegistrationError("Agent Card url must be an absolute http or https URL")
         if not isinstance(preferred_transport, str) or not preferred_transport.strip():
             raise AgentRegistrationError("Agent Card preferred_transport cannot be empty")
         if preferred_transport != preferred_transport.strip():
@@ -253,9 +244,7 @@ class BaseAgent:
             raise AgentRegistrationError(f"default_{label}_modes must be a sequence")
         normalized = tuple(mode.strip() for mode in modes if isinstance(mode, str))
         if len(normalized) != len(modes) or not normalized or any(not mode for mode in normalized):
-            raise AgentRegistrationError(
-                f"default_{label}_modes must contain non-empty strings"
-            )
+            raise AgentRegistrationError(f"default_{label}_modes must contain non-empty strings")
         return normalized
 
     @staticmethod
@@ -270,13 +259,9 @@ class BaseAgent:
         validated: dict[str, Any] = {}
         for name, scheme in security_schemes.items():
             if not isinstance(name, str) or not name.strip():
-                raise AgentRegistrationError(
-                    "security_schemes names must be non-empty strings"
-                )
+                raise AgentRegistrationError("security_schemes names must be non-empty strings")
             if not isinstance(scheme, Mapping):
-                raise AgentRegistrationError(
-                    f"security scheme '{name}' must be an object"
-                )
+                raise AgentRegistrationError(f"security scheme '{name}' must be an object")
             scheme_type = scheme.get("type")
             if scheme_type == "apiKey":
                 if not isinstance(scheme.get("name"), str) or not scheme["name"].strip():
@@ -330,7 +315,7 @@ class BaseAgent:
                             raise AgentRegistrationError(
                                 f"oauth2 security scheme '{name}' flow '{flow_name}' "
                                 "requires an absolute tokenUrl"
-                        )
+                            )
             elif scheme_type == "openIdConnect":
                 connect_url = scheme.get("openIdConnectUrl")
                 if not BaseAgent._is_absolute_http_url(connect_url):
@@ -383,7 +368,7 @@ class BaseAgent:
         """Return a stable, collision-resistant ID for a reflected capability."""
         import hashlib
 
-        value = f"{self.agent_metadata.name}:{capability_name}".encode("utf-8")
+        value = f"{self.agent_metadata.name}:{capability_name}".encode()
         return f"conducto-{hashlib.sha256(value).hexdigest()[:16]}"
 
     def _register_decorated_tools(self) -> None:
@@ -410,8 +395,7 @@ class BaseAgent:
             bound_method = getattr(self, attribute_name)
             if not callable(bound_method):
                 raise AgentRegistrationError(
-                    f"{type(self).__name__}.{attribute_name} is decorated "
-                    "but is not callable"
+                    f"{type(self).__name__}.{attribute_name} is decorated but is not callable"
                 )
 
             registered = RegisteredMethod(
@@ -519,23 +503,20 @@ class BaseAgent:
                     f"{type(self).__name__}.{attribute_name} parameter "
                     f"'{parameter.name}' must have a type annotation"
                 )
-            default = (
-                ...
-                if parameter.default is inspect.Parameter.empty
-                else parameter.default
-            )
+            default = ... if parameter.default is inspect.Parameter.empty else parameter.default
             fields[parameter.name] = (annotation, default)
         try:
-            return create_model(
+            model = create_model(
                 f"{type(self).__name__}_{attribute_name}_Parameters",
                 __config__=ConfigDict(extra="forbid"),
                 **fields,
-            )
+            )  # type: ignore[call-overload]
         except (PydanticSchemaGenerationError, PydanticInvalidForJsonSchema) as error:
             raise AgentRegistrationError(
                 f"Could not generate a parameter schema for "
                 f"{type(self).__name__}.{attribute_name}: {error}"
             ) from error
+        return model
 
     def _build_parameter_schema(
         self,

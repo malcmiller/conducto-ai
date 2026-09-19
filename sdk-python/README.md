@@ -106,23 +106,72 @@ if __name__ == "__main__":
 
 ## 🧪 Development & Testing
 
-1. **Install Dependencies:**
+Every command below is exactly what CI runs (see
+`../.github/workflows/python-ci.yml`), so a clean checkout can reproduce any
+CI failure locally.
+
+**Supported matrix:** Python `3.12` and `3.13` on `ubuntu-latest` and
+`windows-latest`.
+
+1. **Install dependencies (including dev tools), from the lockfile:**
 ```bash
-uv sync
+uv sync --locked --group dev
 
 ```
 
-
-2. **Run Unit & Integration Tests:**
+2. **Format check:**
 ```bash
-uv run pytest
+uv run ruff format --check .
 
 ```
 
-
-3. **Format & Lint:**
+3. **Lint:**
 ```bash
 uv run ruff check .
-uv run ruff format .
 
 ```
+
+4. **Static type-check:**
+```bash
+uv run mypy src
+
+```
+
+5. **Unit & schema/golden-fixture tests:**
+```bash
+uv run pytest -m "not acceptance"
+
+```
+
+6. **Milestone 1 quick-start acceptance suite** (the stable, story-level gate
+   for `@a2a_agent` / `@a2a_capability` / `get_agent_card()` / `OrchestratorAgent`):
+```bash
+uv run pytest -m acceptance
+
+```
+
+7. **Build the package:**
+```bash
+uv build
+
+```
+
+8. **Installed-wheel smoke test** (verifies the *built artifact* imports and
+   runs the quick-start flow with no dev dependencies on the path):
+```bash
+wheel=$(ls dist/*.whl)
+uv run --no-project --with "$wheel" python scripts/smoke_test.py
+
+```
+
+### Continuous Integration
+
+Pull requests and pushes to `main` run a single required check named
+**`Python CI (required)`**. It aggregates: formatting, linting, `mypy`,
+unit/schema tests, the Milestone 1 acceptance suite, and package build +
+installed-wheel smoke tests across the full OS/Python matrix. The check still
+reports (as a fast no-op success) on documentation-only or unrelated-path
+changes, so it is safe to mark as required in branch protection / repository
+rulesets. See `../.github/workflows/python-ci.yml` for details, and
+`../.github/README.md` for how to configure the required-check ruleset and
+how .NET CI will be added alongside it.

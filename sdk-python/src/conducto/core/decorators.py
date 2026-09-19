@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Callable, TypeVar, cast, Literal
-
+from typing import Any, Literal, TypeVar, cast
 
 _AGENT_METADATA_ATTRIBUTE = "__conducto_agent_metadata__"
 _METHOD_METADATA_ATTRIBUTE = "__conducto_method_metadata__"
@@ -94,10 +94,7 @@ def a2a_agent(
 
         agent_name = _normalize_optional_text(name) or agent_class.__name__
         agent_version = _require_text(version, "version")
-        agent_description = (
-            _normalize_optional_text(description)
-            or inspect.getdoc(agent_class)
-        )
+        agent_description = _normalize_optional_text(description) or inspect.getdoc(agent_class)
 
         metadata = AgentMetadata(
             name=agent_name,
@@ -143,6 +140,7 @@ def a2a_capability(
         description=description,
     )
 
+
 def tool(
     *,
     name: str | None = None,
@@ -173,6 +171,7 @@ def tool(
         name=name,
         description=description,
     )
+
 
 def get_agent_metadata(agent_class: type) -> AgentMetadata | None:
     """Return metadata declared directly on an agent class.
@@ -258,9 +257,7 @@ def _decorator_target(value: Any) -> Callable[..., Any]:
         value = value.__func__
 
     if not callable(value):
-        raise TypeError(
-            "Conducto method decorators can only decorate callables"
-        )
+        raise TypeError("Conducto method decorators can only decorate callables")
 
     return cast(Callable[..., Any], inspect.unwrap(value))
 

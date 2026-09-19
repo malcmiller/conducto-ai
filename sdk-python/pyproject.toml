@@ -11,5 +11,42 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.13.5",
+]
+
+[project.optional-dependencies]
+test = [
     "pytest>=9.1.1",
+]
+
+[dependency-groups]
+dev = [
+    "conducto-ai[test]",
+    "mypy>=1.14",
+    "ruff>=0.9",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# UP040/UP047 would require migrating to PEP 695 generic syntax, which is a
+# separate refactored outside the scope of CI enablement.
+ignore = ["UP040", "UP047"]
+
+[tool.mypy]
+python_version = "3.12"
+packages = ["conducto"]
+mypy_path = "src"
+strict = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "acceptance: Milestone 1 quick-start acceptance flow (stable aggregate check).",
+    "golden: Schema/golden-fixture tests pinning public wire contracts.",
 ]
