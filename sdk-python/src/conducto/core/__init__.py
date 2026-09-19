@@ -1,7 +1,16 @@
+# noinspection DuplicatedCode
 """Core public API for the Conducto Python SDK."""
 
 from .agent import A2A_AGENT_CARD_SPEC_VERSION, BaseAgent
 from .decorators import a2a_agent, a2a_capability, tool
+from .logging import (
+    DevelopmentFormatter,
+    JsonFormatter,
+    configure_logging,
+    emit_event,
+    get_log_context,
+    log_context,
+)
 from .orchestrator import (
     InvocationCancelled,
     InvocationFailure,
@@ -53,6 +62,12 @@ __all__ = [
     "a2a_agent",
     "a2a_capability",
     "tool",
+    "DevelopmentFormatter",
+    "JsonFormatter",
+    "configure_logging",
+    "emit_event",
+    "get_log_context",
+    "log_context",
     "ChatMessage",
     "FakeModel",
     "GenerationOptions",

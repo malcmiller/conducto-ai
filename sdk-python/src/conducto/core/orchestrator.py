@@ -9,6 +9,8 @@ import inspect
 import json
 import math
 import threading
+import time
+import uuid
 from collections.abc import Iterator, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
@@ -18,6 +20,19 @@ from typing import Any, TypeAlias
 from pydantic import BaseModel, ValidationError
 
 from .agent import BaseAgent
+from .logging import (
+    AGENT_DISCOVERED,
+    AGENT_REGISTERED,
+    ARGUMENTS_VALIDATED,
+    INVOCATION_CANCELLED,
+    INVOCATION_COMPLETED,
+    INVOCATION_FAILED,
+    INVOCATION_STARTED,
+    INVOCATION_TIMED_OUT,
+    MODEL_SELECTED,
+    emit_event,
+    log_context,
+)
 from .provider import (
     ChatMessage,
     GenerationOptions,
@@ -238,10 +253,22 @@ class OrchestratorAgent(BaseAgent):
         correlation_id: str = "",
     ) -> InvocationResult | RoutingFailure:
         """Select exactly one local capability with native structured output."""
+        correlation_id = correlation_id or str(uuid.uuid4())
         provider = model_provider or self.model_provider
         config = model_config or self.model_config
         if provider is None or config is None:
             raise ValueError("A model provider and typed model configuration are required")
+        resolution_source = (
+            "invocation_override" if model_config is not None else "orchestrator_default"
+        )
+        with log_context(correlation_id=correlation_id):
+            emit_event(
+                MODEL_SELECTED,
+                provider=config.provider,
+                model_reference=config.model,
+                resolution_source=resolution_source,
+                outcome="success",
+            )
         request = StructuredOutputRequest(
             name="conducto_capability_selection",
             schema=build_routing_schema(self.get_routing_metadata()),
@@ -402,6 +429,12 @@ class OrchestratorAgent(BaseAgent):
             self._registered_agents[agent_name] = agent
             for capability_name in sorted(agent.capabilities):
                 self._registered_capabilities[capability_name] = agent
+            emit_event(
+                AGENT_REGISTERED,
+                agent_id=agent_name,
+                outcome="success",
+                agent_count=len(self._registered_agents),
+            )
             return existing if existing is not None else None
 
     async def invoke(
@@ -458,6 +491,7 @@ class OrchestratorAgent(BaseAgent):
                 raise ValueError("Invocation timeout must be a finite positive number") from error
             if not math.isfinite(timeout_value) or timeout_value <= 0:
                 raise ValueError("Invocation timeout must be a finite positive number")
+        correlation_id = correlation_id or str(uuid.uuid4())
 
         with self._registry_lock:
             agent = self._registered_agents.get(agent_id)
@@ -470,6 +504,17 @@ class OrchestratorAgent(BaseAgent):
                         registered = candidate
                         break
         if agent is None or registered is None:
+            with log_context(
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                capability_id=capability_id,
+            ):
+                emit_event(
+                    INVOCATION_FAILED,
+                    level=20,
+                    outcome="failure",
+                    error_category="target_not_found",
+                )
             return InvocationTargetNotFound(correlation_id, agent_id, capability_id)
         target = registered.callable
         parameter_model = registered.parameter_model
@@ -478,59 +523,116 @@ class OrchestratorAgent(BaseAgent):
             threading.Lock(),
         )
 
-        try:
-            validated = parameter_model.model_validate(dict(arguments))
-        except ValidationError as error:
-            return InvocationValidationFailure(
-                correlation_id,
-                tuple(_freeze_mapping(item) for item in error.errors()),
-            )
-
-        async def execute() -> Any:
-            call_arguments = {
-                name: getattr(validated, name) for name in parameter_model.model_fields
-            }
+        with log_context(
+            correlation_id=correlation_id,
+            agent_id=agent_id,
+            capability_id=capability_name,
+        ):
             try:
-                if inspect.iscoroutinefunction(target):
-                    return await target(**call_arguments)
+                validated = parameter_model.model_validate(dict(arguments))
+            except ValidationError as error:
+                emit_event(
+                    ARGUMENTS_VALIDATED,
+                    outcome="failure",
+                    error_category="argument_validation",
+                )
+                emit_event(
+                    INVOCATION_FAILED,
+                    outcome="failure",
+                    error_category="argument_validation",
+                )
+                return InvocationValidationFailure(
+                    correlation_id,
+                    tuple(_freeze_mapping(item) for item in error.errors()),
+                )
+            emit_event(ARGUMENTS_VALIDATED, outcome="success")
 
-                def run_sync() -> Any:
-                    with execution_lock:
-                        return target(**call_arguments)
+            async def execute() -> Any:
+                call_arguments = {
+                    name: getattr(validated, name) for name in parameter_model.model_fields
+                }
+                try:
+                    if inspect.iscoroutinefunction(target):
+                        return await target(**call_arguments)
 
-                return await asyncio.to_thread(run_sync)
+                    def run_sync() -> Any:
+                        with execution_lock:
+                            return target(**call_arguments)
+
+                    return await asyncio.to_thread(run_sync)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as capability_error:
+                    raise _CapabilityExecutionError(capability_error) from capability_error
+
+            started = time.perf_counter()
+            emit_event(INVOCATION_STARTED)
+            try:
+                result = await asyncio.wait_for(execute(), timeout=timeout_value)
+                serialized = _serialize_result(result)
+                emit_event(
+                    INVOCATION_COMPLETED,
+                    outcome="success",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                )
+                return InvocationSuccess(correlation_id, serialized)
             except asyncio.CancelledError:
-                raise
-            except Exception as capability_error:
-                raise _CapabilityExecutionError(capability_error) from capability_error
-
-        try:
-            result = await asyncio.wait_for(execute(), timeout=timeout_value)
-            return InvocationSuccess(correlation_id, _serialize_result(result))
-        except asyncio.CancelledError:
-            # Preserve caller cancellation but report a capability that
-            # explicitly cooperatively canceled as a typed outcome.
-            current_task = asyncio.current_task()
-            if current_task is not None and current_task.cancelling():
-                raise
-            return InvocationCancelled(correlation_id)
-        except TimeoutError:
-            assert timeout_value is not None
-            return InvocationTimeout(correlation_id, timeout_value)
-        except _CapabilityExecutionError as error:
-            return InvocationFailure(
-                correlation_id,
-                "Capability execution failed",
-                error.exception,
-            )
-        except UnsupportedReturnValueError as error:
-            return InvocationFailure(correlation_id, str(error), error)
-        except Exception as error:
-            return InvocationFailure(
-                correlation_id,
-                "Capability execution failed",
-                error,
-            )
+                # Preserve caller cancellation but report a capability that
+                # explicitly cooperatively canceled as a typed outcome.
+                current_task = asyncio.current_task()
+                if current_task is not None and current_task.cancelling():
+                    raise
+                emit_event(
+                    INVOCATION_CANCELLED,
+                    outcome="cancelled",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                )
+                return InvocationCancelled(correlation_id)
+            except TimeoutError:
+                assert timeout_value is not None
+                emit_event(
+                    INVOCATION_TIMED_OUT,
+                    level=30,
+                    outcome="timeout",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    error_category="timeout",
+                )
+                return InvocationTimeout(correlation_id, timeout_value)
+            except _CapabilityExecutionError as error:
+                emit_event(
+                    INVOCATION_FAILED,
+                    level=40,
+                    outcome="failure",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    error_category="capability_exception",
+                )
+                return InvocationFailure(
+                    correlation_id,
+                    "Capability execution failed",
+                    error.exception,
+                )
+            except UnsupportedReturnValueError as error:
+                emit_event(
+                    INVOCATION_FAILED,
+                    level=30,
+                    outcome="failure",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    error_category="unsupported_return_value",
+                )
+                return InvocationFailure(correlation_id, str(error), error)
+            except Exception as error:
+                emit_event(
+                    INVOCATION_FAILED,
+                    level=40,
+                    outcome="failure",
+                    duration_ms=(time.perf_counter() - started) * 1000,
+                    error_category="internal_error",
+                )
+                return InvocationFailure(
+                    correlation_id,
+                    "Capability execution failed",
+                    error,
+                )
 
     async def invoke_capability(
         self,
@@ -718,6 +820,7 @@ class OrchestratorAgent(BaseAgent):
                     "capabilities": skills,
                 }
             )
+        emit_event(AGENT_DISCOVERED, level=10, outcome="success", agent_count=len(metadata))
         return metadata
 
     def discover_agents(self) -> tuple[BaseAgent, ...]:

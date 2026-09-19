@@ -14,6 +14,8 @@ Usage (from an environment with only the built wheel installed):
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import sys
 
 
@@ -21,10 +23,13 @@ def main() -> int:
     from conducto import (
         A2A_AGENT_CARD_SPEC_VERSION,
         BaseAgent,
+        FakeModel,
         InvocationSuccess,
+        ModelConfiguration,
         OrchestratorAgent,
         a2a_agent,
         a2a_capability,
+        configure_logging,
     )
 
     @a2a_agent(name="SmokeAgent", version="1.0.0", description="Installed-wheel smoke test agent.")
@@ -39,11 +44,23 @@ def main() -> int:
     assert card["name"] == "SmokeAgent"
 
     async def invoke() -> None:
-        orchestrator = OrchestratorAgent()
+        stream = io.StringIO()
+        configure_logging(format="json", stream=stream)
+        orchestrator = OrchestratorAgent(
+            model_provider=FakeModel(
+                {"agent_id": "SmokeAgent", "capability_id": "ping"},
+            ),
+            model_config=ModelConfiguration(provider="fake", model="smoke-model"),
+        )
         orchestrator.register_agent(agent)
-        result = await orchestrator.invoke("SmokeAgent", "ping", {}, correlation_id="smoke")
+        result = await orchestrator.route("ping", correlation_id="smoke")
         assert isinstance(result, InvocationSuccess)
         assert result.value == "pong"
+        events = [json.loads(line) for line in stream.getvalue().splitlines()]
+        assert {(event["event"], event.get("correlation_id")) for event in events} >= {
+            ("conducto.model.selected.v1", "smoke"),
+            ("conducto.capability.invocation_completed.v1", "smoke"),
+        }
 
     asyncio.run(invoke())
 

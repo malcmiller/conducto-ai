@@ -66,6 +66,30 @@ sdk-python/
 
 ## 🚀 Quick Usage
 
+### Logging
+
+Conducto emits versioned standard-library logging events but never configures
+the root logger or adds handlers during import. Applications can attach their
+own handler to the `conducto` logger, or opt in to a small development setup:
+
+```python
+from conducto import configure_logging
+
+configure_logging(format="json")  # or format="development"
+```
+
+Events carry schema version, correlation ID, agent/capability identifiers,
+outcome, duration, stable error category, and model provider/provenance where
+applicable. Discovery is `DEBUG`; normal lifecycle events are `INFO`; timeouts
+are `WARNING`; unexpected capability failures are `ERROR`. Prompts, model
+responses, capability arguments/results, credentials, tokens, approval data,
+and exception tracebacks are excluded by default. Sensitive payload logging is
+available only through both per-event and `configure_logging(
+include_sensitive_data=True)` opt-ins; enable it only in controlled
+development environments. See [the logging guide](docs/logging.md) for the
+event schema, formatter integration, context propagation, and compatibility
+guarantees.
+
 ### Defining an Agent
 
 ```python
