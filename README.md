@@ -2,6 +2,10 @@
 
 **Conducto** is a secure, polyglot (Python / C#) multi-agent orchestration framework designed to provide a standardized, developer-friendly "Agent2Agent" (A2A) abstraction layer. It brings native Object-Oriented Programming (OOP) paradigms (`@decorators` in Python, `[Attributes]` in C#) to multi-agent networking, governance, discovery, and execution.
 
+## Documentation
+
+The repository documentation lives in the [`docs/`](./docs/README.md) folder and covers the repository overview, architecture, SDK reference, security model, and local development workflow.
+
 ---
 
 ## 🌟 Key Features

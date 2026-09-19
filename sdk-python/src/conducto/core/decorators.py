@@ -10,7 +10,6 @@ from typing import Any, Literal, TypeVar, cast
 _AGENT_METADATA_ATTRIBUTE = "__conducto_agent_metadata__"
 _METHOD_METADATA_ATTRIBUTE = "__conducto_method_metadata__"
 
-# The kinds of method exports supported by the shared export decorator.
 ExportKind = Literal["capability", "tool"]
 F = TypeVar("F", bound=Callable[..., Any])
 T = TypeVar("T", bound=type)

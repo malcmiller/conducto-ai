@@ -516,7 +516,7 @@ class BaseAgent:
                 f"{type(self).__name__}_{attribute_name}_Parameters",
                 __config__=ConfigDict(extra="forbid"),
                 **fields,
-            )  # type: ignore[call-overload]
+            )
         except (PydanticSchemaGenerationError, PydanticInvalidForJsonSchema) as error:
             raise AgentRegistrationError(
                 f"Could not generate a parameter schema for "
