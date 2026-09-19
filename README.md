@@ -87,13 +87,18 @@ public class FinancialAgent : BaseAgent
 
 ## 📋 Development Roadmap & Milestones
 
-Development is tracked across seven milestones. Python establishes the reference
+Development is tracked across eight milestones. Python establishes the reference
 flow, followed by secure network interoperability, operations and deployment,
-.NET parity, and cross-organization federation.
+.NET parity, hybrid orchestration, and optional cross-organization federation.
 
-See [Cross-organization agent federation](./docs/cross-organization-federation.md)
-for the target topology, ownership boundaries, trust model, and complete
-delivery path.
+See [Deployment topologies and federation](./docs/deployment-and-federation.md)
+for the local, container, Microsoft Foundry, hybrid, and cross-organization
+topologies; ownership boundaries; trust model; and complete delivery path.
+
+The required promotion order is **local on one machine → local containers →
+Azure deployment → optional cross-organization federation**. Each stage uses
+the same agent capability contract and must pass before cloud-specific hosting
+is introduced.
 
 ### Milestone 1: Core Protocol & Reflection Discovery
 
@@ -123,8 +128,11 @@ delivery path.
 
 ### Milestone 5: Model Runtimes & Microsoft Foundry Deployment
 
-* Run agents against local Llama, self-hosted, or Microsoft Foundry models.
-* Package immutable agent containers with external model and trust configuration.
+* First run agents on one machine against local Llama or self-hosted models.
+* Next package and verify the same agents in local containers with external
+  model and trust configuration.
+* Then promote the proven artifacts to remote Azure containers or
+  same-organization Foundry hosting without requiring federation.
 * Preserve independent per-run model selection and execution context.
 
 ### Milestone 6: .NET SDK Parity
@@ -132,13 +140,22 @@ delivery path.
 * Bring .NET metadata, execution, security, transport, MCP, and contract behavior
   to parity with the Python reference implementation.
 
-### Milestone 7: Cross-Organization Federation & Workflow Orchestration
+### Milestone 7: Hybrid Deployment & Workflow Orchestration
 
-* Define global agent identity, signed discovery metadata, and federation trust.
-* Add a governed catalog with registration, refresh, quarantine, revocation, and
-  compatibility handling.
-* Add policy-aware multi-agent workflows and cross-organization conformance
-  scenarios.
+* Organize local, containerized, and Foundry-hosted agents through one
+  orchestrator without changing the agent programming model.
+* Add a governed remote-agent catalog with registration, refresh, quarantine,
+  revocation, and compatibility handling.
+* Add policy-aware workflows across mixed deployment types.
+
+### Milestone 8: Cross-Organization Federation
+
+* Layer optional federation over remotely deployed container or Microsoft
+  Foundry agents.
+* Define global agent identity, signed discovery metadata, and external trust
+  onboarding.
+* Verify multi-organization Azure discovery, delegation, audit, revocation, and
+  operations end to end.
 
 ---
 

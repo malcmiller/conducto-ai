@@ -2,6 +2,19 @@
 
 This document summarizes how the Conducto core architecture communicates across local, containerized, and Microsoft Foundry-backed deployments, and which standards it relies on at each hop.
 
+Deployment location and organizational ownership are independent. Agents can
+run in-process, in local or remote containers, or through Microsoft Foundry.
+Those agents can all belong to one organization. Cross-organization federation
+is an optional trust layer for remotely deployed agents, including agents
+hosted in separate Azure organizations or tenants; it is not implied by using
+containers or Foundry. See
+[Deployment topologies and federation](./deployment-and-federation.md).
+
+Implementation is local-first: prove the agent on one machine, place the same
+agent behind A2A transport in local containers, and only then promote it to
+Azure. Cloud hosting must preserve the locally verified contracts rather than
+introducing a separate agent programming model.
+
 ## Standards at a glance
 
 | Layer | Standard or mechanism | Purpose |
