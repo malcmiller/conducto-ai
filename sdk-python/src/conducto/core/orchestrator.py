@@ -12,8 +12,8 @@ import threading
 from copy import deepcopy
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import partial
 from typing import Any, TypeAlias, cast
+from types import MappingProxyType
 
 from pydantic import BaseModel, ValidationError
 
@@ -43,7 +43,7 @@ class InvocationValidationFailure:
     """
 
     correlation_id: str
-    errors: tuple[dict[str, Any], ...]
+    errors: tuple[Mapping[str, Any], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +123,14 @@ class UnsupportedReturnValueError(TypeError):
     """Raised when a capability result cannot be represented safely."""
 
 
+class _CapabilityExecutionError(Exception):
+    """Wrap an exception raised by a capability before deadline handling."""
+
+    def __init__(self, exception: Exception) -> None:
+        super().__init__(str(exception))
+        self.exception = exception
+
+
 def _serialize_result(value: Any) -> Any:
     """Convert supported capability results to canonical JSON-compatible data."""
     if value is None or isinstance(value, (str, bool, int)):
@@ -134,7 +142,12 @@ def _serialize_result(value: Any) -> Any:
     if isinstance(value, enum.Enum):
         return _serialize_result(value.value)
     if isinstance(value, BaseModel):
-        return _serialize_result(value.model_dump(mode="python"))
+        try:
+            return _serialize_result(value.model_dump(mode="json"))
+        except Exception as error:
+            raise UnsupportedReturnValueError(
+                f"Could not serialize Pydantic model: {type(value).__name__}"
+            ) from error
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return _serialize_result(dataclasses.asdict(value))
     if isinstance(value, Mapping):
@@ -158,6 +171,19 @@ def _serialize_result(value: Any) -> Any:
     )
 
 
+def _freeze_mapping(value: Any) -> Any:
+    """Recursively freeze validation details without changing their shape."""
+    if isinstance(value, dict):
+        return MappingProxyType(
+            {key: _freeze_mapping(item) for key, item in value.items()}
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_mapping(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_mapping(item) for item in value)
+    return value
+
+
 class OrchestratorAgent(BaseAgent):
     """A local registry of reflected agents for deterministic routing.
 
@@ -171,6 +197,7 @@ class OrchestratorAgent(BaseAgent):
     def __init__(self) -> None:
         self._registered_agents: dict[str, BaseAgent] = {}
         self._registered_capabilities: dict[str, BaseAgent] = {}
+        self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._registry_lock = threading.RLock()
         super().__init__()
 
@@ -311,49 +338,81 @@ class OrchestratorAgent(BaseAgent):
 
         Raises:
             TypeError: If ``arguments`` is not a mapping.
-            ValueError: If ``timeout`` is not positive.
+            ValueError: If ``timeout`` is not a finite positive number or is
+                a boolean.
             asyncio.CancelledError: If the caller's asyncio task is canceled.
 
         Notes:
             Arguments are validated before the target is executed. Synchronous
             capabilities run in a worker thread, while asynchronous
-            capabilities run on the current event loop. Registry state is
-            snapshotted before execution, so replacement or removal affects
-            only later invocations. Registered agent instances remain owned by
-            the caller.
+            capabilities run on the current event loop. Synchronous workers
+            cannot be force-stopped after timeout or cancellation; a
+            per-agent capability lock prevents a later invocation from
+            overlapping that worker. Registry state is snapshotted before
+            execution, so replacement or removal affects only later
+            invocations. Registered agent instances remain owned by the caller.
         """
         if not isinstance(arguments, Mapping):
             raise TypeError("Invocation arguments must be a mapping")
-        if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
-            raise ValueError("Invocation timeout must be positive")
-        timeout_value = float(timeout) if timeout is not None else None
+        if timeout is None:
+            timeout_value = None
+        elif isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise ValueError("Invocation timeout must be a finite positive number")
+        else:
+            try:
+                timeout_value = float(timeout)
+            except (OverflowError, ValueError) as error:
+                raise ValueError(
+                    "Invocation timeout must be a finite positive number"
+                ) from error
+            if not math.isfinite(timeout_value) or timeout_value <= 0:
+                raise ValueError("Invocation timeout must be a finite positive number")
 
         with self._registry_lock:
             agent = self._registered_agents.get(agent_id)
+            capability_name = capability_id
             registered = agent.capabilities.get(capability_id) if agent else None
             if registered is None and agent is not None:
                 for candidate_name, candidate in agent.capabilities.items():
                     if agent._skill_id(candidate_name) == capability_id:
+                        capability_name = candidate_name
                         registered = candidate
                         break
         if agent is None or registered is None:
             return InvocationTargetNotFound(correlation_id, agent_id, capability_id)
         target = registered.callable
         parameter_model = registered.parameter_model
+        execution_lock = self._execution_locks.setdefault(
+            (id(agent), capability_name),
+            threading.Lock(),
+        )
 
         try:
             validated = parameter_model.model_validate(dict(arguments))
         except ValidationError as error:
             return InvocationValidationFailure(
                 correlation_id,
-                tuple(error.errors()),
+                tuple(_freeze_mapping(item) for item in error.errors()),
             )
 
         async def execute() -> Any:
-            call_arguments = validated.model_dump()
-            if inspect.iscoroutinefunction(target):
-                return await target(**call_arguments)
-            return await asyncio.to_thread(partial(target, **call_arguments))
+            call_arguments = {
+                name: getattr(validated, name)
+                for name in parameter_model.model_fields
+            }
+            try:
+                if inspect.iscoroutinefunction(target):
+                    return await target(**call_arguments)
+
+                def run_sync() -> Any:
+                    with execution_lock:
+                        return target(**call_arguments)
+
+                return await asyncio.to_thread(run_sync)
+            except asyncio.CancelledError:
+                raise
+            except Exception as capability_error:
+                raise _CapabilityExecutionError(capability_error) from capability_error
 
         try:
             result = await asyncio.wait_for(execute(), timeout=timeout_value)
@@ -368,6 +427,12 @@ class OrchestratorAgent(BaseAgent):
         except asyncio.TimeoutError:
             assert timeout_value is not None
             return InvocationTimeout(correlation_id, timeout_value)
+        except _CapabilityExecutionError as error:
+            return InvocationFailure(
+                correlation_id,
+                "Capability execution failed",
+                error.exception,
+            )
         except UnsupportedReturnValueError as error:
             return InvocationFailure(
                 correlation_id, str(error), error
@@ -391,7 +456,7 @@ class OrchestratorAgent(BaseAgent):
         """Invoke a capability through the explicit capability API.
 
         This method has the same validation, serialization, timeout,
-        cancellation, and concurrency behavior as :meth: 'invoke`.
+        cancellation, and concurrency behavior as :meth:`invoke`.
 
         Args:
             agent_id: Published agent name used as the stable agent identifier.
@@ -401,11 +466,12 @@ class OrchestratorAgent(BaseAgent):
             correlation_id: Caller-supplied identifier copied into the result.
 
         Returns:
-            The typed invocation result returned by :meth: 'invoke`.
+            The typed invocation result returned by :meth:`invoke`.
 
         Raises:
             TypeError: If ``arguments`` is not a mapping.
-            ValueError: If ``timeout`` is not positive.
+            ValueError: If ``timeout`` is not a finite positive number or is
+                a boolean.
             asyncio.CancelledError: If the caller's asyncio task is canceled.
         """
         return await self.invoke(

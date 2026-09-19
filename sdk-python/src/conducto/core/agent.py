@@ -561,10 +561,16 @@ class BaseAgent:
                 parameter is unsupported or unannotated, or Pydantic cannot
                 generate the schema.
         """
-        return self._build_parameter_model(
-            attribute_name,
-            method,
-        ).model_json_schema()
+        try:
+            return self._build_parameter_model(
+                attribute_name,
+                method,
+            ).model_json_schema()
+        except (PydanticSchemaGenerationError, PydanticInvalidForJsonSchema) as error:
+            raise AgentRegistrationError(
+                f"Could not generate a parameter schema for "
+                f"{type(self).__name__}.{attribute_name}: {error}"
+            ) from error
 
     def _resolve_agent_metadata(self) -> AgentMetadata:
         """Resolve declared agent metadata or provide default metadata.
