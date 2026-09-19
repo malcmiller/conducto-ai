@@ -3,10 +3,185 @@
 from __future__ import annotations
 
 import json
+import asyncio
+import dataclasses
+import enum
+import inspect
+import math
+import threading
 from copy import deepcopy
-from typing import Any, cast
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, TypeAlias, cast
+from types import MappingProxyType
+
+from pydantic import BaseModel, ValidationError
 
 from .agent import BaseAgent
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationSuccess:
+    """Successful capability invocation result.
+
+    Attributes:
+        correlation_id: Caller-supplied identifier for matching the response.
+        value: Deterministically serialized capability return value.
+    """
+
+    correlation_id: str
+    value: Any
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationValidationFailure:
+    """Result returned when capability arguments fail Pydantic validation.
+
+    Attributes:
+        correlation_id: Caller-supplied identifier for matching the response.
+        errors: Immutable field-level Pydantic validation errors.
+    """
+
+    correlation_id: str
+    errors: tuple[Mapping[str, Any], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationTargetNotFound:
+    """Result returned when the requested agent or capability is unavailable.
+
+    Attributes:
+        correlation_id: Caller-supplied identifier for matching the response.
+        agent_id: Stable identifier that was requested.
+        capability_id: Capability name or generated skill identifier requested.
+    """
+
+    correlation_id: str
+    agent_id: str
+    capability_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationTimeout:
+    """Result returned when a capability exceeds its invocation timeout.
+
+    Attributes:
+        correlation_id: Caller-supplied identifier for matching the response.
+        timeout: Timeout duration in seconds.
+    """
+
+    correlation_id: str
+    timeout: float
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationCancelled:
+    """Result returned when a capability cooperatively reports cancellation.
+
+    External cancellation of the caller's asyncio task is propagated instead of
+    being converted to this result.
+
+    Attributes:
+        correlation_id: Caller-supplied identifier for matching the response.
+    """
+
+    correlation_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationFailure:
+    """Safe result for a capability exception or unsupported return value.
+
+    The public ``message`` intentionally omits exception details. The original
+    exception remains available through ``exception`` for local diagnostics.
+
+    Attributes:
+        correlation_id: Caller-supplied identifier for matching the response.
+        message: Safe, non-sensitive description suitable for callers.
+        exception: Original local exception, excluded from representation and
+            equality comparisons.
+    """
+
+    correlation_id: str
+    message: str
+    exception: BaseException = dataclasses.field(
+        repr=False, compare=False, hash=False
+    )
+
+
+InvocationResult: TypeAlias = (
+    InvocationSuccess
+    | InvocationValidationFailure
+    | InvocationTargetNotFound
+    | InvocationTimeout
+    | InvocationCancelled
+    | InvocationFailure
+)
+
+
+class UnsupportedReturnValueError(TypeError):
+    """Raised when a capability result cannot be represented safely."""
+
+
+class _CapabilityExecutionError(Exception):
+    """Wrap an exception raised by a capability before deadline handling."""
+
+    def __init__(self, exception: Exception) -> None:
+        super().__init__(str(exception))
+        self.exception = exception
+
+
+def _serialize_result(value: Any) -> Any:
+    """Convert supported capability results to canonical JSON-compatible data."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise UnsupportedReturnValueError("Non-finite floats are unsupported")
+        return value
+    if isinstance(value, enum.Enum):
+        return _serialize_result(value.value)
+    if isinstance(value, BaseModel):
+        try:
+            return _serialize_result(value.model_dump(mode="json"))
+        except Exception as error:
+            raise UnsupportedReturnValueError(
+                f"Could not serialize Pydantic model: {type(value).__name__}"
+            ) from error
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _serialize_result(dataclasses.asdict(value))
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise UnsupportedReturnValueError("Mapping keys must be strings")
+        return {
+            key: _serialize_result(value[key])
+            for key in sorted(value)
+        }
+    if isinstance(value, (list, tuple)):
+        return [_serialize_result(item) for item in value]
+    if isinstance(value, (set, frozenset)):
+        serialized = [_serialize_result(item) for item in value]
+        return sorted(serialized, key=lambda item: json.dumps(
+            item, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+        ))
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_serialize_result(item) for item in value]
+    raise UnsupportedReturnValueError(
+        f"Unsupported capability return value: {type(value).__name__}"
+    )
+
+
+def _freeze_mapping(value: Any) -> Any:
+    """Recursively freeze validation details without changing their shape."""
+    if isinstance(value, dict):
+        return MappingProxyType(
+            {key: _freeze_mapping(item) for key, item in value.items()}
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_mapping(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_mapping(item) for item in value)
+    return value
 
 
 class OrchestratorAgent(BaseAgent):
@@ -22,19 +197,23 @@ class OrchestratorAgent(BaseAgent):
     def __init__(self) -> None:
         self._registered_agents: dict[str, BaseAgent] = {}
         self._registered_capabilities: dict[str, BaseAgent] = {}
+        self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
+        self._registry_lock = threading.RLock()
         super().__init__()
 
     @property
     def registered_agents(self) -> tuple[BaseAgent, ...]:
         """Return the registered local agents in deterministic order."""
-        return tuple(
-            self._registered_agents[name] for name in sorted(self._registered_agents)
-        )
+        with self._registry_lock:
+            return tuple(
+                self._registered_agents[name] for name in sorted(self._registered_agents)
+            )
 
     @property
     def registered_capabilities(self) -> dict[str, BaseAgent]:
         """Return the capability-name mapping for the active local registry."""
-        return dict(sorted(self._registered_capabilities.items()))
+        with self._registry_lock:
+            return dict(sorted(self._registered_capabilities.items()))
 
     @property
     def agents(self) -> tuple[BaseAgent, ...]:
@@ -53,7 +232,8 @@ class OrchestratorAgent(BaseAgent):
 
     def __len__(self) -> int:
         """Return the number of registered agents."""
-        return len(self._registered_agents)
+        with self._registry_lock:
+            return len(self._registered_agents)
 
     def __iter__(self):
         """Yield registered agents in deterministic order."""
@@ -61,11 +241,12 @@ class OrchestratorAgent(BaseAgent):
 
     def __contains__(self, agent: object) -> bool:
         """Report whether an agent instance or published name is registered."""
-        if isinstance(agent, BaseAgent):
-            return any(existing is agent for existing in self.registered_agents)
-        if isinstance(agent, str):
-            return agent in self._registered_agents
-        return False
+        with self._registry_lock:
+            if isinstance(agent, BaseAgent):
+                return any(existing is agent for existing in self._registered_agents.values())
+            if isinstance(agent, str):
+                return agent in self._registered_agents
+            return False
 
     def register_agent(
         self,
@@ -88,6 +269,11 @@ class OrchestratorAgent(BaseAgent):
             TypeError: If ``agent`` is not a ``BaseAgent`` instance.
             ValueError: If an agent with the same name is already registered and
                 ``replace`` is ``False``.
+
+        Notes:
+            The orchestrator retains the caller's instance; it does not clone,
+            own, or dispose of the agent. Registry updates are atomic with
+            respect to invocation snapshots.
         """
         if not isinstance(agent, BaseAgent):
             raise TypeError("OrchestratorAgent.register_agent() requires a BaseAgent instance")
@@ -99,72 +285,277 @@ class OrchestratorAgent(BaseAgent):
         # Validate the complete card before changing either registry mapping.
         agent.get_agent_card(self._card_url_for(agent))
 
-        existing = self._registered_agents.get(agent_name)
-        if existing is not None:
-            if existing is agent:
+        with self._registry_lock:
+            existing = self._registered_agents.get(agent_name)
+            if existing is not None:
+                if existing is agent:
+                    if not replace:
+                        raise ValueError(f"Agent '{agent_name}' is already registered")
                 if not replace:
                     raise ValueError(f"Agent '{agent_name}' is already registered")
-            if not replace:
-                raise ValueError(f"Agent '{agent_name}' is already registered")
-            self._remove_agent_mapping(cast(BaseAgent, existing))
+                self._remove_agent_mapping(cast(BaseAgent, existing))
 
-        conflicts = self._conflicting_capabilities(agent)
-        if conflicts and not replace:
-            raise ValueError(
-                "Capability name conflict(s): " + ", ".join(sorted(conflicts))
+            conflicts = self._conflicting_capabilities(agent)
+            if conflicts and not replace:
+                raise ValueError(
+                    "Capability name conflict(s): " + ", ".join(sorted(conflicts))
+                )
+            if conflicts and replace:
+                for conflicting_name in sorted(conflicts):
+                    conflicting_agent = self._registered_capabilities.get(conflicting_name)
+                    if conflicting_agent is not None and conflicting_agent is not agent:
+                        self._remove_agent_mapping(cast(BaseAgent, conflicting_agent))
+
+            self._registered_agents[agent_name] = agent
+            for capability_name in sorted(agent.capabilities):
+                self._registered_capabilities[capability_name] = agent
+            return existing if existing is not None else None
+
+    async def invoke(
+        self,
+        agent_id: str,
+        capability_id: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        correlation_id: str = "",
+    ) -> InvocationResult:
+        """Invoke a registered capability using a stable local contract.
+
+        Args:
+            agent_id: Published agent name used as the stable agent identifier.
+            capability_id: Capability name or generated ``conducto-...`` skill ID.
+            arguments: Structured keyword arguments to validate and pass to the
+                capability.
+            timeout: Optional positive timeout in seconds. ``None`` disables
+                the invocation timeout.
+            correlation_id: Caller-supplied identifier copied into every result.
+
+        Returns:
+            An immutable result envelope. Invalid arguments, missing targets,
+            timeouts, capability failures, and unsupported return values are
+            represented as typed results.
+
+        Raises:
+            TypeError: If ``arguments`` is not a mapping.
+            ValueError: If ``timeout`` is not a finite positive number or is
+                a boolean.
+            asyncio.CancelledError: If the caller's asyncio task is canceled.
+
+        Notes:
+            Arguments are validated before the target is executed. Synchronous
+            capabilities run in a worker thread, while asynchronous
+            capabilities run on the current event loop. Synchronous workers
+            cannot be force-stopped after timeout or cancellation; a
+            per-agent capability lock prevents a later invocation from
+            overlapping that worker. Registry state is snapshotted before
+            execution, so replacement or removal affects only later
+            invocations. Registered agent instances remain owned by the caller.
+        """
+        if not isinstance(arguments, Mapping):
+            raise TypeError("Invocation arguments must be a mapping")
+        if timeout is None:
+            timeout_value = None
+        elif isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
+            raise ValueError("Invocation timeout must be a finite positive number")
+        else:
+            try:
+                timeout_value = float(timeout)
+            except (OverflowError, ValueError) as error:
+                raise ValueError(
+                    "Invocation timeout must be a finite positive number"
+                ) from error
+            if not math.isfinite(timeout_value) or timeout_value <= 0:
+                raise ValueError("Invocation timeout must be a finite positive number")
+
+        with self._registry_lock:
+            agent = self._registered_agents.get(agent_id)
+            capability_name = capability_id
+            registered = agent.capabilities.get(capability_id) if agent else None
+            if registered is None and agent is not None:
+                for candidate_name, candidate in agent.capabilities.items():
+                    if agent._skill_id(candidate_name) == capability_id:
+                        capability_name = candidate_name
+                        registered = candidate
+                        break
+        if agent is None or registered is None:
+            return InvocationTargetNotFound(correlation_id, agent_id, capability_id)
+        target = registered.callable
+        parameter_model = registered.parameter_model
+        execution_lock = self._execution_locks.setdefault(
+            (id(agent), capability_name),
+            threading.Lock(),
+        )
+
+        try:
+            validated = parameter_model.model_validate(dict(arguments))
+        except ValidationError as error:
+            return InvocationValidationFailure(
+                correlation_id,
+                tuple(_freeze_mapping(item) for item in error.errors()),
             )
-        if conflicts and replace:
-            for conflicting_name in sorted(conflicts):
-                conflicting_agent = self._registered_capabilities.get(conflicting_name)
-                if conflicting_agent is not None and conflicting_agent is not agent:
-                    self._remove_agent_mapping(cast(BaseAgent, conflicting_agent))
 
-        self._registered_agents[agent_name] = agent
-        for capability_name in sorted(agent.capabilities):
-            self._registered_capabilities[capability_name] = agent
-        return existing if existing is not None else None
+        async def execute() -> Any:
+            call_arguments = {
+                name: getattr(validated, name)
+                for name in parameter_model.model_fields
+            }
+            try:
+                if inspect.iscoroutinefunction(target):
+                    return await target(**call_arguments)
+
+                def run_sync() -> Any:
+                    with execution_lock:
+                        return target(**call_arguments)
+
+                return await asyncio.to_thread(run_sync)
+            except asyncio.CancelledError:
+                raise
+            except Exception as capability_error:
+                raise _CapabilityExecutionError(capability_error) from capability_error
+
+        try:
+            result = await asyncio.wait_for(execute(), timeout=timeout_value)
+            return InvocationSuccess(correlation_id, _serialize_result(result))
+        except asyncio.CancelledError:
+            # Preserve caller cancellation but report a capability that
+            # explicitly cooperatively canceled as a typed outcome.
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                raise
+            return InvocationCancelled(correlation_id)
+        except asyncio.TimeoutError:
+            assert timeout_value is not None
+            return InvocationTimeout(correlation_id, timeout_value)
+        except _CapabilityExecutionError as error:
+            return InvocationFailure(
+                correlation_id,
+                "Capability execution failed",
+                error.exception,
+            )
+        except UnsupportedReturnValueError as error:
+            return InvocationFailure(
+                correlation_id, str(error), error
+            )
+        except Exception as error:
+            return InvocationFailure(
+                correlation_id,
+                "Capability execution failed",
+                error,
+            )
+
+    async def invoke_capability(
+        self,
+        agent_id: str,
+        capability_id: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        correlation_id: str = "",
+    ) -> InvocationResult:
+        """Invoke a capability through the explicit capability API.
+
+        This method has the same validation, serialization, timeout,
+        cancellation, and concurrency behavior as :meth: 'invoke`.
+
+        Args:
+            agent_id: Published agent name used as the stable agent identifier.
+            capability_id: Capability name or generated skill identifier.
+            arguments: Structured keyword arguments for the capability.
+            timeout: Optional positive timeout in seconds.
+            correlation_id: Caller-supplied identifier copied into the result.
+
+        Returns:
+            The typed invocation result returned by :meth: 'invoke`.
+
+        Raises:
+            TypeError: If ``arguments`` is not a mapping.
+            ValueError: If ``timeout`` is not a finite positive number or is
+                a boolean.
+            asyncio.CancelledError: If the caller's asyncio task is canceled.
+        """
+        return await self.invoke(
+            agent_id,
+            capability_id,
+            arguments,
+            timeout=timeout,
+            correlation_id=correlation_id,
+        )
 
     def replace_agent(self, agent: BaseAgent) -> BaseAgent | None:
-        """Replace an identified agent by name and return the displaced one."""
+        """Replace an agent with the same published name.
+
+        Args:
+            agent: Replacement agent instance.
+
+        Returns:
+            The displaced agent, or ``None`` when no agent had that name.
+
+        Raises:
+            TypeError: If ``agent`` is not a ``BaseAgent`` instance.
+            ValueError: If the replacement has conflicting capabilities, that
+                cannot be resolved under registry rules.
+        """
         return self.register_agent(agent, replace=True)
 
     def remove_agent(self, agent: BaseAgent | str) -> BaseAgent:
-        """Remove an agent by instance or by published name."""
-        if isinstance(agent, BaseAgent):
-            candidate_name = agent.agent_metadata.name
-            removed = next(
-                (
-                    existing
-                    for name, existing in self._registered_agents.items()
-                    if existing is agent
-                ),
-                None,
-            )
-            if removed is None:
-                raise KeyError(f"Agent '{candidate_name}' is not registered")
+        """Remove a registered agent by identity or published name.
+
+        Args:
+            agent: The registered instance or its published name.
+
+        Returns:
+            The removed caller-owned agent instance.
+
+        Raises:
+            KeyError: If the instance or name is not registered.
+            TypeError: If ``agent`` is neither a ``BaseAgent`` nor a string.
+        """
+        with self._registry_lock:
+            if isinstance(agent, BaseAgent):
+                candidate_name = agent.agent_metadata.name
+                removed = next(
+                    (existing for existing in self._registered_agents.values() if existing is agent),
+                    None,
+                )
+                if removed is None:
+                    raise KeyError(f"Agent '{candidate_name}' is not registered")
+                self._remove_agent_mapping(removed)
+                return removed
+
+            if not isinstance(agent, str):
+                raise TypeError("Agent removal requires a BaseAgent instance or agent name")
+            if agent not in self._registered_agents:
+                raise KeyError(f"Agent '{agent}' is not registered")
+            removed = self._registered_agents.pop(agent)
             self._remove_agent_mapping(removed)
             return removed
 
-        if not isinstance(agent, str):
-            raise TypeError("Agent removal requires a BaseAgent instance or agent name")
-        if agent not in self._registered_agents:
-            raise KeyError(f"Agent '{agent}' is not registered")
-        removed = self._registered_agents.pop(agent)
-        self._remove_agent_mapping(removed)
-        return removed
-
     def clear_agents(self) -> None:
-        """Remove all local agents from the registry."""
-        self._registered_agents.clear()
-        self._registered_capabilities.clear()
+        """Remove all agents and capability mappings from the registry.
+
+        Registered instances remain caller-owned and are not disposed of.
+        """
+        with self._registry_lock:
+            self._registered_agents.clear()
+            self._registered_capabilities.clear()
 
     def get_agent_by_name(self, name: str) -> BaseAgent | None:
-        """Return the registered agent matching a published name, if any."""
-        return self._registered_agents.get(name)
+        """Return the registered agent matching a published name, if any.
+
+        Args:
+            name: Published agent name to look up.
+
+        Returns:
+            The caller-owned registered instance, or ``None`` when absent.
+        """
+        with self._registry_lock:
+            return self._registered_agents.get(name)
 
     def get_registered_agent_names(self) -> tuple[str, ...]:
         """Return the registered agent names in deterministic order."""
-        return tuple(sorted(self._registered_agents))
+        with self._registry_lock:
+            return tuple(sorted(self._registered_agents))
 
     def _conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
         """Return capability names that collide with currently registered agents."""
@@ -198,10 +589,20 @@ class OrchestratorAgent(BaseAgent):
                 del self._registered_capabilities[capability_name]
 
     def get_routing_metadata(self) -> list[dict[str, Any]]:
-        """Return routing metadata built from each registered agent card."""
+        """Return independent routing metadata built from registered agent cards.
+
+        Returns:
+            A name-sorted list of card-derived dictionaries. Nested values are
+            copied so callers can modify the result without changing the registry
+            state.
+        """
         metadata: list[dict[str, Any]] = []
-        for agent_name in sorted(self._registered_agents):
-            agent = self._registered_agents[agent_name]
+        with self._registry_lock:
+            agents = tuple(
+                self._registered_agents[name]
+                for name in sorted(self._registered_agents)
+            )
+        for agent in agents:
             card = agent.get_agent_card(self._card_url_for(agent))
             parameter_map = card.get("x-conducto", {}).get("parameters", {})
             skills: list[dict[str, Any]] = []
@@ -229,7 +630,11 @@ class OrchestratorAgent(BaseAgent):
         return metadata
 
     def discover_agents(self) -> tuple[BaseAgent, ...]:
-        """Alias for the deterministic, local discovery view."""
+        """Return registered agents in deterministic published-name order.
+
+        Returns:
+            A tuple containing the caller-owned registered instances.
+        """
         return self.registered_agents
 
     def get_routing_prompt_context(self) -> str:
@@ -262,7 +667,12 @@ class OrchestratorAgent(BaseAgent):
         )
 
     def get_routing_context(self) -> str:
-        """Backward-compatibility alias for the routing prompt context."""
+        """Return the backward-compatible routing prompt context alias.
+
+        Returns:
+            The same prompt-safe string produced by
+            :meth: 'get_routing_prompt_context`.
+        """
         return self.get_routing_prompt_context()
 
     @staticmethod

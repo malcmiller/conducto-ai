@@ -1,6 +1,19 @@
+import asyncio
+import math
+import threading
+import time
+from dataclasses import dataclass
+
 import pytest
+from pydantic import BaseModel
 
 from conducto import BaseAgent, OrchestratorAgent, a2a_agent, a2a_capability
+from conducto import (
+    InvocationFailure,
+    InvocationSuccess,
+    InvocationTimeout,
+    InvocationValidationFailure,
+)
 
 
 def test_orchestrator_registers_agents_deterministically_and_renders_prompt_context() -> None:
@@ -170,3 +183,136 @@ def test_orchestrator_escapes_prompt_delimiters_in_agent_data() -> None:
     context = orchestrator.get_routing_prompt_context()
 
     assert context.count(marker) == 1
+
+
+def test_orchestrator_invokes_sync_and_async_capabilities_with_validation() -> None:
+    class Details(BaseModel):
+        value: int
+
+    @a2a_agent(name="InvocationAgent", version="1.0.0", description="Invocation.")
+    class InvocationAgent(BaseAgent):
+        @a2a_capability(name="sync", description="Runs synchronously.")
+        def sync(self, details: Details) -> Details:
+            assert isinstance(details, Details)
+            return details
+
+        @a2a_capability(name="async", description="Runs asynchronously.")
+        async def async_capability(self, value: int) -> int:
+            return value * 2
+
+    async def exercise() -> None:
+        orchestrator = OrchestratorAgent()
+        orchestrator.register_agent(InvocationAgent())
+
+        sync_result = await orchestrator.invoke(
+            "InvocationAgent",
+            "sync",
+            {"details": {"value": 3}},
+            correlation_id="sync-id",
+        )
+        assert isinstance(sync_result, InvocationSuccess)
+        assert sync_result.value == {"value": 3}
+
+        async_result = await orchestrator.invoke(
+            "InvocationAgent",
+            "async",
+            {"value": 4},
+            correlation_id="async-id",
+        )
+        assert isinstance(async_result, InvocationSuccess)
+        assert async_result.value == 8
+
+        invalid_result = await orchestrator.invoke(
+            "InvocationAgent",
+            "async",
+            {"value": "not-an-int"},
+            correlation_id="invalid-id",
+        )
+        assert isinstance(invalid_result, InvocationValidationFailure)
+        assert invalid_result.correlation_id == "invalid-id"
+        assert invalid_result.errors[0]["loc"] == ("value",)
+
+    asyncio.run(exercise())
+
+
+def test_orchestrator_distinguishes_capability_timeout_and_rejects_invalid_deadlines() -> None:
+    @a2a_agent(name="DeadlineAgent", version="1.0.0", description="Deadlines.")
+    class DeadlineAgent(BaseAgent):
+        @a2a_capability(name="raises", description="Raises timeout.")
+        def raises(self) -> str:
+            raise TimeoutError("capability timeout")
+
+    async def exercise() -> None:
+        orchestrator = OrchestratorAgent()
+        orchestrator.register_agent(DeadlineAgent())
+
+        result = await orchestrator.invoke(
+            "DeadlineAgent",
+            "raises",
+            {},
+            correlation_id="failure-id",
+        )
+        assert isinstance(result, InvocationFailure)
+        assert isinstance(result.exception, TimeoutError)
+        assert result.message == "Capability execution failed"
+
+        for timeout in (math.nan, math.inf, True, 0, -1):
+            with pytest.raises(ValueError, match="finite positive"):
+                await orchestrator.invoke(
+                    "DeadlineAgent",
+                    "raises",
+                    {},
+                    timeout=timeout,
+                    correlation_id="invalid-deadline",
+                )
+
+    asyncio.run(exercise())
+
+
+def test_orchestrator_serializes_dataclasses_and_serializes_sync_workers() -> None:
+    @dataclass
+    class Result:
+        value: int
+
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    @a2a_agent(name="WorkerAgent", version="1.0.0", description="Workers.")
+    class WorkerAgent(BaseAgent):
+        @a2a_capability(name="work", description="Does blocking work.")
+        def work(self, delay: float) -> Result:
+            nonlocal active, maximum_active
+            with lock:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(delay)
+            with lock:
+                active -= 1
+            return Result(1)
+
+    async def exercise() -> None:
+        orchestrator = OrchestratorAgent()
+        orchestrator.register_agent(WorkerAgent())
+
+        first = await orchestrator.invoke(
+            "WorkerAgent",
+            "work",
+            {"delay": 0.05},
+            timeout=0.001,
+            correlation_id="first",
+        )
+        assert isinstance(first, InvocationTimeout)
+
+        second = await orchestrator.invoke(
+            "WorkerAgent",
+            "work",
+            {"delay": 0},
+            timeout=0.001,
+            correlation_id="second",
+        )
+        assert isinstance(second, InvocationTimeout)
+        await asyncio.sleep(0.08)
+        assert maximum_active == 1
+
+    asyncio.run(exercise())
