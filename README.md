@@ -122,7 +122,7 @@ We welcome contributions from both Python and .NET developers!
 3. **Local Setup (Python):**
 ```bash
 cd sdk-python
-uv sync
+uv sync --locked --group dev
 uv run pytest
 
 ```
@@ -137,7 +137,11 @@ dotnet test
 ```
 
 
-5. **Submit a PR:** Ensure unit tests pass, type-checking is clean, and code conforms to repo linters (`ruff` for Python, `dotnet format` for C#).
+5. **Submit a PR:** Every pull request must pass the single required
+   **`Python CI (required)`** check (formatting, linting, `mypy`, unit and
+   schema/golden-fixture tests, the Milestone 1 acceptance suite, and package
+   build + installed-wheel smoke tests — see `sdk-python/README.md` and
+   `.github/README.md`).
 
 ---
 
