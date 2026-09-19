@@ -1,10 +1,13 @@
-"""Agent registration and parameter-schema generation."""
+"""Agent registration, parameter schemas, and A2A Agent Card generation."""
 
 from __future__ import annotations
 
 import inspect
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Callable, get_type_hints
+from urllib.parse import urlparse
 
 from pydantic import (
     ConfigDict,
@@ -27,6 +30,14 @@ class AgentRegistrationError(ValueError):
     This includes unsupported method signatures, unresolved or missing type
     annotations, invalid parameter schemas, and duplicate export names.
     """
+
+
+# The card shape is pinned independently of the SDK version, so Python and .NET
+# exporters can share fixtures. This is the A2A specification version used by
+# the Agent Card JSON schema.
+A2A_AGENT_CARD_SPEC_VERSION = "0.3.0"
+_DEFAULT_INPUT_MODES = ("text",)
+_DEFAULT_OUTPUT_MODES = ("text",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +95,161 @@ class BaseAgent:
     def tools(self) -> dict[str, RegisteredMethod]:
         """Return the registered Conducto tools keyed by export name."""
         return dict(self._tools)
+
+    def get_agent_card(
+        self,
+        url: str,
+        *,
+        preferred_transport: str = "JSONRPC",
+        security_schemes: Mapping[str, Any] | None = None,
+        security_requirements: Sequence[Mapping[str, Sequence[str]]] | None = None,
+        default_input_modes: Sequence[str] = _DEFAULT_INPUT_MODES,
+        default_output_modes: Sequence[str] = _DEFAULT_OUTPUT_MODES,
+        capabilities: Mapping[str, bool] | None = None,
+    ) -> dict[str, Any]:
+        """Generate a standards-conformant A2A Agent Card.
+
+        ``parameter_schema`` is not a standard A2A ``AgentSkill`` field. It is
+        therefore carried in ``x-conducto.parameters`` so consumers can use
+        reflected schemas without making the card invalid against the A2A
+        schema.
+
+        Args:
+            url: The absolute HTTP (S) endpoint serving the agent.
+            preferred_transport: A2A transport identifier, normally
+                ``"JSONRPC"``.
+            security_schemes: A2A security scheme definitions.
+            security_requirements: A2A security requirements.
+            default_input_modes: MIME-like modes accepted by the agent.
+            default_output_modes: MIME-like modes produced by the agent.
+            capabilities: A2A capability flags.
+
+        Raises:
+            AgentRegistrationError: If the endpoint, metadata, modes, or
+                security definitions are incomplete or invalid.
+        """
+        self._validate_card_metadata(url, preferred_transport)
+        input_modes = self._validate_modes(default_input_modes, "input")
+        output_modes = self._validate_modes(default_output_modes, "output")
+
+        if security_schemes is not None and not isinstance(security_schemes, Mapping):
+            raise AgentRegistrationError("security_schemes must be a mapping")
+        if security_requirements is not None and (
+            isinstance(security_requirements, (str, bytes))
+            or not isinstance(security_requirements, Sequence)
+        ):
+            raise AgentRegistrationError("security_requirements must be a sequence")
+
+        agent_capabilities = {
+            "streaming": False,
+            "pushNotifications": False,
+            "stateTransitionHistory": False,
+        }
+        if capabilities is not None and not isinstance(capabilities, Mapping):
+            raise AgentRegistrationError("capabilities must be a mapping")
+        if capabilities is not None:
+            unknown = set(capabilities) - set(agent_capabilities)
+            if unknown:
+                raise AgentRegistrationError(
+                    "Unsupported A2A capability flag(s): "
+                    + ", ".join(sorted(unknown))
+                )
+            if any(not isinstance(value, bool) for value in capabilities.values()):
+                raise AgentRegistrationError("A2A capability flags must be booleans")
+            agent_capabilities.update(capabilities)
+
+        skills: list[dict[str, Any]] = []
+        parameter_schemas: dict[str, dict[str, Any]] = {}
+        for capability_name, registered in self._capabilities.items():
+            metadata = registered.capability
+            assert metadata is not None
+            description = metadata.description
+            if not description:
+                raise AgentRegistrationError(
+                    f"{type(self).__name__}.{registered.attribute_name} capability "
+                    "description is required for an A2A Agent Card"
+                )
+
+            skill_id = self._skill_id(capability_name)
+            skills.append(
+                {
+                    "id": skill_id,
+                    "name": capability_name,
+                    "description": description,
+                    "tags": [skill_id],
+                    "inputModes": list(input_modes),
+                    "outputModes": list(output_modes),
+                }
+            )
+            parameter_schemas[skill_id] = registered.parameter_schema
+
+        card: dict[str, Any] = {
+            "protocolVersion": A2A_AGENT_CARD_SPEC_VERSION,
+            "name": self.agent_metadata.name,
+            "description": self.agent_metadata.description,
+            "url": url,
+            "preferredTransport": preferred_transport,
+            "version": self.agent_metadata.version,
+            "capabilities": agent_capabilities,
+            "defaultInputModes": list(input_modes),
+            "defaultOutputModes": list(output_modes),
+            "skills": skills,
+            "securitySchemes": dict(security_schemes or {}),
+            "securityRequirements": list(security_requirements or []),
+            "x-conducto": {
+                "parameters": parameter_schemas,
+                "skillIdStrategy": "sha256(agent-name:capability-name)[:16]",
+            },
+        }
+        return card
+
+    def get_agent_card_json(self, url: str, **kwargs: Any) -> str:
+        """Serialize an Agent Card canonically for golden fixtures."""
+        return json.dumps(
+            self.get_agent_card(url, **kwargs),
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    def _validate_card_metadata(self, url: str, preferred_transport: str) -> None:
+        if not isinstance(url, str):
+            raise AgentRegistrationError(
+                "Agent Card url must be an absolute http or https URL"
+            )
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise AgentRegistrationError(
+                "Agent Card url must be an absolute http or https URL"
+            )
+        if not isinstance(preferred_transport, str) or not preferred_transport.strip():
+            raise AgentRegistrationError("Agent Card preferred_transport cannot be empty")
+        if not self.agent_metadata.name.strip():
+            raise AgentRegistrationError("Agent Card agent name cannot be empty")
+        if not self.agent_metadata.version.strip():
+            raise AgentRegistrationError("Agent Card agent version cannot be empty")
+        if not self.agent_metadata.description:
+            raise AgentRegistrationError(
+                f"{type(self).__name__} requires a description for an A2A Agent Card"
+            )
+
+    @staticmethod
+    def _validate_modes(modes: Sequence[str], label: str) -> tuple[str, ...]:
+        if isinstance(modes, (str, bytes)) or not isinstance(modes, Sequence):
+            raise AgentRegistrationError(f"default_{label}_modes must be a sequence")
+        normalized = tuple(mode.strip() for mode in modes if isinstance(mode, str))
+        if len(normalized) != len(modes) or not normalized or any(not mode for mode in normalized):
+            raise AgentRegistrationError(
+                f"default_{label}_modes must contain non-empty strings"
+            )
+        return normalized
+
+    def _skill_id(self, capability_name: str) -> str:
+        """Return a stable, collision-resistant ID for a reflected capability."""
+        import hashlib
+
+        value = f"{self.agent_metadata.name}:{capability_name}".encode("utf-8")
+        return f"conducto-{hashlib.sha256(value).hexdigest()[:16]}"
 
     def _register_decorated_tools(self) -> None:
         """Reflect and register every decorated method on the agent.
@@ -276,7 +442,11 @@ class BaseAgent:
         return AgentMetadata(
             name=type(self).__name__,
             version="0.1.0",
-            description=inspect.getdoc(type(self)),
+            description=(
+                inspect.cleandoc(type(self).__dict__["__doc__"])
+                if isinstance(type(self).__dict__.get("__doc__"), str)
+                else None
+            ),
         )
 
     @staticmethod

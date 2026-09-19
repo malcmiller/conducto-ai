@@ -2,6 +2,14 @@
 
 The **`conducto-ai`** Python SDK is the foundational client and server framework for **Conducto**. It provides runtime reflection, Pydantic-based schema generation, security guardrails, and A2A (Agent2Agent) protocol transport for Python-based agents.
 
+Agent Cards are generated against the pinned **A2A Agent Card specification
+0.3.0** (`A2A_AGENT_CARD_SPEC_VERSION`). Use
+`BaseAgent.get_agent_card("https://agent.example/a2a")` to produce the
+standards-conformant card dictionary, or `get_agent_card_json()` for canonical
+golden fixtures. Reflected parameter schemas are available under the
+documented `x-conducto.parameters` extension because they are not part of the
+standard `AgentSkill` object.
+
 ---
 
 ## 🛠️ Requirements & Tooling
