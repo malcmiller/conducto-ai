@@ -456,7 +456,7 @@ class OrchestratorAgent(BaseAgent):
         """Invoke a capability through the explicit capability API.
 
         This method has the same validation, serialization, timeout,
-        cancellation, and concurrency behavior as :meth:`invoke`.
+        cancellation, and concurrency behavior as :meth: 'invoke`.
 
         Args:
             agent_id: Published agent name used as the stable agent identifier.
@@ -466,7 +466,7 @@ class OrchestratorAgent(BaseAgent):
             correlation_id: Caller-supplied identifier copied into the result.
 
         Returns:
-            The typed invocation result returned by :meth:`invoke`.
+            The typed invocation result returned by :meth: 'invoke`.
 
         Raises:
             TypeError: If ``arguments`` is not a mapping.
