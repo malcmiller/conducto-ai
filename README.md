@@ -87,7 +87,13 @@ public class FinancialAgent : BaseAgent
 
 ## 📋 Development Roadmap & Milestones
 
-Development is tracked across four core milestones. Python implementation leads each phase, followed by C# parity checks.
+Development is tracked across seven milestones. Python establishes the reference
+flow, followed by secure network interoperability, operations and deployment,
+.NET parity, and cross-organization federation.
+
+See [Cross-organization agent federation](./docs/cross-organization-federation.md)
+for the target topology, ownership boundaries, trust model, and complete
+delivery path.
 
 ### Milestone 1: Core Protocol & Reflection Discovery
 
@@ -114,6 +120,25 @@ Development is tracked across four core milestones. Python implementation leads 
 * **Story 4.1 (Python):** Build `@mcp_tool` exporter allowing capability methods to serve as MCP tools.
 * **Story 4.2 (Polyglot):** Add OpenTelemetry W3C trace context propagation across JSON-RPC headers.
 * **Story 4.3 (C#):** Implement `to_mcp_server()` exporter in `Conducto.NET`.
+
+### Milestone 5: Model Runtimes & Microsoft Foundry Deployment
+
+* Run agents against local Llama, self-hosted, or Microsoft Foundry models.
+* Package immutable agent containers with external model and trust configuration.
+* Preserve independent per-run model selection and execution context.
+
+### Milestone 6: .NET SDK Parity
+
+* Bring .NET metadata, execution, security, transport, MCP, and contract behavior
+  to parity with the Python reference implementation.
+
+### Milestone 7: Cross-Organization Federation & Workflow Orchestration
+
+* Define global agent identity, signed discovery metadata, and federation trust.
+* Add a governed catalog with registration, refresh, quarantine, revocation, and
+  compatibility handling.
+* Add policy-aware multi-agent workflows and cross-organization conformance
+  scenarios.
 
 ---
 
