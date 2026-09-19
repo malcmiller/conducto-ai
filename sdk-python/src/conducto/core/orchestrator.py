@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from typing import Any, cast
 
 from .agent import BaseAgent
@@ -95,10 +96,14 @@ class OrchestratorAgent(BaseAgent):
         if not agent_name or not agent_name.strip():
             raise ValueError("Agent name cannot be empty")
 
+        # Validate the complete card before changing either registry mapping.
+        agent.get_agent_card(self._card_url_for(agent))
+
         existing = self._registered_agents.get(agent_name)
         if existing is not None:
             if existing is agent:
-                return None
+                if not replace:
+                    raise ValueError(f"Agent '{agent_name}' is already registered")
             if not replace:
                 raise ValueError(f"Agent '{agent_name}' is already registered")
             self._remove_agent_mapping(cast(BaseAgent, existing))
@@ -131,7 +136,7 @@ class OrchestratorAgent(BaseAgent):
                 (
                     existing
                     for name, existing in self._registered_agents.items()
-                    if existing is agent or name == candidate_name
+                    if existing is agent
                 ),
                 None,
             )
@@ -207,9 +212,9 @@ class OrchestratorAgent(BaseAgent):
                         "id": skill_id,
                         "name": skill.get("name"),
                         "description": skill.get("description"),
-                        "inputModes": skill.get("inputModes", []),
-                        "outputModes": skill.get("outputModes", []),
-                        "parameter_schema": parameter_map.get(skill_id),
+                        "inputModes": deepcopy(skill.get("inputModes", [])),
+                        "outputModes": deepcopy(skill.get("outputModes", [])),
+                        "parameter_schema": deepcopy(parameter_map.get(skill_id)),
                     }
                 )
             metadata.append(
@@ -236,6 +241,9 @@ class OrchestratorAgent(BaseAgent):
         """
         routing = self.get_routing_metadata()
         payload = json.dumps(routing, ensure_ascii=True, sort_keys=True)
+        # Keep the JSON parseable while preventing agent-authored text from
+        # producing the prompt boundary markers verbatim.
+        payload = payload.replace("[", "\\u005b").replace("]", "\\u005d")
         if not routing:
             return (
                 "You are the local Conducto orchestrator. No local agents are "
