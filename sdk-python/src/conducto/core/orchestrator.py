@@ -18,6 +18,20 @@ from typing import Any, TypeAlias
 from pydantic import BaseModel, ValidationError
 
 from .agent import BaseAgent
+from .provider import (
+    ChatMessage,
+    GenerationOptions,
+    MalformedStructuredOutputError,
+    ModelConfiguration,
+    ModelProvider,
+    ProviderError,
+    ProviderResult,
+    StructuredOutputRequest,
+    Usage,
+    build_routing_schema,
+    complete_with_retries,
+    parse_routing_selection,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +45,7 @@ class InvocationSuccess:
 
     correlation_id: str
     value: Any
+    usage: Usage = dataclasses.field(default_factory=Usage)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +120,16 @@ class InvocationFailure:
     correlation_id: str
     message: str
     exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
+
+
+@dataclass(frozen=True, slots=True)
+class RoutingFailure:
+    """Typed failure from provider-backed capability selection."""
+
+    message: str
+    exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
+    usage: Usage = dataclasses.field(default_factory=Usage)
+    retryable: bool = False
 
 
 InvocationResult: TypeAlias = (
@@ -190,12 +215,86 @@ class OrchestratorAgent(BaseAgent):
     instructions.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        model_provider: ModelProvider | None = None,
+        model_config: ModelConfiguration | None = None,
+    ) -> None:
         self._registered_agents: dict[str, BaseAgent] = {}
         self._registered_capabilities: dict[str, BaseAgent] = {}
         self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._registry_lock = threading.RLock()
-        super().__init__()
+        super().__init__(model_config=model_config)
+        self.model_provider = model_provider
+
+    async def route(
+        self,
+        user_input: str,
+        *,
+        model_provider: ModelProvider | None = None,
+        model_config: ModelConfiguration | None = None,
+        timeout: float | None = None,
+        correlation_id: str = "",
+    ) -> InvocationResult | RoutingFailure:
+        """Select exactly one local capability with native structured output."""
+        provider = model_provider or self.model_provider
+        config = model_config or self.model_config
+        if provider is None or config is None:
+            raise ValueError("A model provider and typed model configuration are required")
+        request = StructuredOutputRequest(
+            name="conducto_capability_selection",
+            schema=build_routing_schema(self.get_routing_metadata()),
+        )
+        options = GenerationOptions(
+            model=config.model,
+            timeout=config.timeout if timeout is None else timeout,
+            retries=config.retries,
+        )
+        messages = (
+            ChatMessage(
+                role="system",
+                content=(
+                    "Choose one capability from the structured local registry. "
+                    "Return only the requested schema."
+                ),
+            ),
+            ChatMessage(role="user", content=user_input),
+            ChatMessage(
+                role="system",
+                content=json.dumps(self.get_routing_metadata(), sort_keys=True),
+            ),
+        )
+        provider_result: ProviderResult | None = None
+        try:
+            result = await complete_with_retries(
+                provider,
+                messages,
+                options=options,
+                structured_output=request,
+            )
+            provider_result = result
+            selection = parse_routing_selection(result)
+        except MalformedStructuredOutputError as error:
+            usage = provider_result.usage if provider_result is not None else Usage()
+            return RoutingFailure(str(error), error, usage=usage)
+        except ProviderError as error:
+            return RoutingFailure(
+                str(error),
+                error,
+                usage=provider_result.usage if provider_result is not None else Usage(),
+                retryable=error.retryable,
+            )
+        invocation = await self.invoke(
+            selection.agent_id,
+            selection.capability_id,
+            selection.arguments,
+            timeout=timeout,
+            correlation_id=correlation_id,
+        )
+        if isinstance(invocation, InvocationSuccess):
+            return dataclasses.replace(invocation, usage=result.usage)
+        return invocation
 
     @property
     def registered_agents(self) -> tuple[BaseAgent, ...]:
@@ -287,6 +386,7 @@ class OrchestratorAgent(BaseAgent):
                         raise ValueError(f"Agent '{agent_name}' is already registered")
                 if not replace:
                     raise ValueError(f"Agent '{agent_name}' is already registered")
+                assert isinstance(existing, BaseAgent)
                 self._remove_agent_mapping(existing)
 
             conflicts = self._conflicting_capabilities(agent)
@@ -296,6 +396,7 @@ class OrchestratorAgent(BaseAgent):
                 for conflicting_name in sorted(conflicts):
                     conflicting_agent = self._registered_capabilities.get(conflicting_name)
                     if conflicting_agent is not None and conflicting_agent is not agent:
+                        assert isinstance(conflicting_agent, BaseAgent)
                         self._remove_agent_mapping(conflicting_agent)
 
             self._registered_agents[agent_name] = agent

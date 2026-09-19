@@ -6,7 +6,7 @@ import inspect
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast, get_type_hints
+from typing import Any, get_type_hints
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -23,6 +23,7 @@ from .decorators import (
     get_agent_metadata,
     get_method_metadata,
 )
+from .provider import ModelConfiguration
 
 
 class AgentRegistrationError(ValueError):
@@ -75,8 +76,13 @@ class BaseAgent:
         AgentRegistrationError: If a decorated method cannot be registered.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        model_config: ModelConfiguration | None = None,
+    ) -> None:
         """Initialize the agent and register its decorated methods."""
+        self.model_config = model_config
         self.agent_metadata = self._resolve_agent_metadata()
         self._registered_methods: dict[str, RegisteredMethod] = {}
         self._capabilities: dict[str, RegisteredMethod] = {}
@@ -506,7 +512,7 @@ class BaseAgent:
             default = ... if parameter.default is inspect.Parameter.empty else parameter.default
             fields[parameter.name] = (annotation, default)
         try:
-            model = create_model(
+            model: type[BaseModel] = create_model(
                 f"{type(self).__name__}_{attribute_name}_Parameters",
                 __config__=ConfigDict(extra="forbid"),
                 **fields,
@@ -516,7 +522,7 @@ class BaseAgent:
                 f"Could not generate a parameter schema for "
                 f"{type(self).__name__}.{attribute_name}: {error}"
             ) from error
-        return cast(type[BaseModel], model)
+        return model
 
     def _build_parameter_schema(
         self,

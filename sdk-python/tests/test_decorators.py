@@ -40,15 +40,17 @@ def test_a2a_agent_uses_defaults_and_strips_metadata_text() -> None:
 
     with pytest.raises(ValueError, match="version cannot be empty"):
 
-        @a2a_agent(version="   ")
         class InvalidVersionAgent:
             pass
 
+        a2a_agent(version="   ")(InvalidVersionAgent)
+
     with pytest.raises(ValueError, match="Decorator metadata cannot contain empty text"):
 
-        @a2a_agent(name="  ")
         class InvalidNameAgent:
             pass
+
+        a2a_agent(name="  ")(InvalidNameAgent)
 
 
 def test_method_decorators_store_metadata_for_regular_and_descriptor_methods() -> None:
@@ -85,14 +87,14 @@ def test_metadata_accessors_reject_invalid_values() -> None:
         get_method_metadata(123)
 
     class InvalidMethodMetadata:
-        pass
+        __conducto_method_metadata__: object = None
 
     InvalidMethodMetadata.__conducto_method_metadata__ = object()
     with pytest.raises(TypeError, match="Invalid Conducto method metadata"):
         get_method_metadata(InvalidMethodMetadata)
 
     class InvalidAgentMetadata:
-        pass
+        __conducto_agent_metadata__: object = None
 
     InvalidAgentMetadata.__conducto_agent_metadata__ = object()
     with pytest.raises(TypeError, match="Invalid Conducto agent metadata"):
