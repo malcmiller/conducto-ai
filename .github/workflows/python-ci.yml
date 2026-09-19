@@ -14,9 +14,9 @@
 #     skipped rather than absent.
 #   - The `required` job is the one status check that should be marked
 #     "required" in branch protection / repository rulesets: it always runs
-#     and fails if any dependency failed or was cancelled, but succeeds when
+#     and fails if any dependency failed or was canceled, but succeeds when
 #     dependencies were only skipped (no relevant changes).
-#   - No job requests write permissions and no publishing credentials are
+#   - No job requests write permissions, and no publishing credentials are
 #     used anywhere in this workflow.
 #   - When .NET parity work begins, add a parallel `dotnet-ci.yml` workflow
 #     (or a `dotnet` job gated by its own `changes` filter) and add it to the
@@ -32,20 +32,29 @@ permissions:
   contents: read
 
 concurrency:
-  # Cancel superseded pull-request runs, but never cancel an in-progress run
+  # Cancel superseded pull-request runs but never cancel an in-progress run
   # against a protected branch (main) triggered by push.
   group: python-ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('branch-{0}', github.ref) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # Supported/documented matrix (kept in sync with sdk-python/README.md).
-  PYTHON_VERSIONS: '["3.12", "3.13"]'
-  OPERATING_SYSTEMS: '["ubuntu-latest", "windows-latest"]'
+  # Supported/documented Python & OS matrix (kept in sync with the `matrix:`
+  # blocks below and sdk-python/README.md). GitHub Actions cannot expand
+  # `env.*` inside `strategy.matrix`, so the matrix values are duplicated per
+  # job rather than referenced from here; update both together.
+  PYTHON_VERSIONS: "3.12, 3.13"
+  OPERATING_SYSTEMS: "ubuntu-latest, windows-latest"
 
 jobs:
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
+    permissions:
+      # dorny/paths-filter falls back to the GitHub REST API (instead of a
+      # local git diff) to list a pull request's changed files, which needs
+      # read access to the pull request. Scoped to only this job.
+      contents: read
+      pull-requests: read
     outputs:
       python: ${{ steps.filter.outputs.python }}
     steps:
@@ -121,6 +130,7 @@ jobs:
         run: uv sync --locked --group dev
       - name: Run unit & schema/golden tests
         run: |
+          mkdir -p reports
           uv run pytest -m "not acceptance" \
             --junit-xml=reports/pytest-results.xml \
             -o junit_family=legacy
@@ -159,6 +169,7 @@ jobs:
         run: uv sync --locked --group dev
       - name: Run Milestone 1 quick-start acceptance suite
         run: |
+          mkdir -p reports
           uv run pytest -m acceptance \
             --junit-xml=reports/pytest-acceptance.xml \
             -o junit_family=legacy

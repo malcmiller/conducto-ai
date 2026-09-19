@@ -516,7 +516,7 @@ class BaseAgent:
                 f"Could not generate a parameter schema for "
                 f"{type(self).__name__}.{attribute_name}: {error}"
             ) from error
-        return model
+        return cast(type[BaseModel], model)
 
     def _build_parameter_schema(
         self,

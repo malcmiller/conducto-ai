@@ -34,7 +34,7 @@ extend-exclude = ["*.md"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 # UP040/UP047 would require migrating to PEP 695 generic syntax, which is a
-# separate refactored outside the scope of CI enablement.
+# separate refactor outside the scope of CI enablement.
 ignore = ["UP040", "UP047"]
 
 [tool.mypy]

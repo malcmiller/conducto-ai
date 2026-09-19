@@ -168,10 +168,11 @@ uv run --no-project --with "$wheel" python scripts/smoke_test.py
 
 Pull requests and pushes to `main` run a single required check named
 **`Python CI (required)`**. It aggregates: formatting, linting, `mypy`,
-unit/schema tests, the Milestone 1 acceptance suite, and package build +
-installed-wheel smoke tests across the full OS/Python matrix. The check still
-reports (as a fast no-op success) on documentation-only or unrelated-path
-changes, so it is safe to mark as required in branch protection / repository
-rulesets. See `../.github/workflows/python-ci.yml` for details, and
+unit/schema tests, and package build + installed-wheel smoke tests across
+the full OS/Python matrix, plus the Milestone 1 acceptance suite across the
+OS matrix (Python 3.12 only). The check still reports (as a fast no-op
+success) on documentation-only or unrelated-path changes, so it is safe to
+mark as required in branch protection / repository rulesets. See
+`../.github/workflows/python-ci.yml` for details, and
 `../.github/README.md` for how to configure the required-check ruleset and
 how .NET CI will be added alongside it.
