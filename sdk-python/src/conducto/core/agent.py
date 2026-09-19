@@ -6,7 +6,7 @@ import inspect
 import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, cast, get_type_hints
+from typing import Any, get_type_hints
 from urllib.parse import urlparse
 
 from pydantic import (
@@ -512,7 +512,7 @@ class BaseAgent:
             default = ... if parameter.default is inspect.Parameter.empty else parameter.default
             fields[parameter.name] = (annotation, default)
         try:
-            model = create_model(
+            model: type[BaseModel] = create_model(
                 f"{type(self).__name__}_{attribute_name}_Parameters",
                 __config__=ConfigDict(extra="forbid"),
                 **fields,
@@ -522,7 +522,7 @@ class BaseAgent:
                 f"Could not generate a parameter schema for "
                 f"{type(self).__name__}.{attribute_name}: {error}"
             ) from error
-        return cast(type[BaseModel], model)
+        return model
 
     def _build_parameter_schema(
         self,

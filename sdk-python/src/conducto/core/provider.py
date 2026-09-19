@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, Sequence
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -22,15 +23,27 @@ class GenerationOptions(BaseModel):
     retries: int = Field(default=0, ge=0)
 
 
-class StructuredOutputRequest(BaseModel):
+@dataclass(frozen=True)
+class StructuredOutputRequest:
     name: str
-    json_schema: dict[str, Any] = Field(alias="schema")
+    schema: dict[str, Any]
 
-    model_config = ConfigDict(populate_by_name=True)
+    def __init__(
+        self,
+        name: str,
+        schema: dict[str, Any] | None = None,
+        *,
+        json_schema: dict[str, Any] | None = None,
+    ) -> None:
+        resolved_schema = schema if schema is not None else json_schema
+        if resolved_schema is None:
+            raise ValueError("StructuredOutputRequest requires 'schema' or 'json_schema'")
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "schema", resolved_schema)
 
     @property
-    def schema(self) -> dict[str, Any]:
-        return self.json_schema
+    def json_schema(self) -> dict[str, Any]:
+        return self.schema
 
 
 class Usage(BaseModel):
@@ -75,7 +88,12 @@ class ProviderAuthenticationError(ProviderError):
 
 
 class ProviderRateLimitError(ProviderError):
-    def __init__(self, message: str = "Provider rate limit exceeded", *, accepted: bool = False) -> None:
+    def __init__(
+        self,
+        message: str = "Provider rate limit exceeded",
+        *,
+        accepted: bool = False,
+    ) -> None:
         super().__init__(message, retryable=True, accepted=accepted)
 
 
@@ -84,7 +102,12 @@ class ProviderContentPolicyError(ProviderError):
 
 
 class ProviderTimeoutError(ProviderError):
-    def __init__(self, message: str = "Provider request timed out", *, accepted: bool = False) -> None:
+    def __init__(
+        self,
+        message: str = "Provider request timed out",
+        *,
+        accepted: bool = False,
+    ) -> None:
         super().__init__(message, retryable=True, accepted=accepted)
 
 
@@ -109,15 +132,43 @@ class ModelProvider(Protocol):
         ...
 
 
-def build_routing_schema(routing_metadata: Sequence[dict[str, Any]] | None = None) -> dict[str, Any]:
+def build_routing_schema(
+    routing_metadata: Sequence[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     """Return the constrained selection schema used for model routing."""
     schema = RoutingSelection.model_json_schema()
     if routing_metadata is not None:
-        allowed_agents = sorted(
-            str(entry["name"]) for entry in routing_metadata if entry.get("name")
-        )
-        if allowed_agents:
-            schema["properties"]["agent_id"]["enum"] = allowed_agents
+        branches: list[dict[str, Any]] = []
+        for entry in routing_metadata:
+            agent_id = entry.get("name")
+            if not agent_id:
+                continue
+            capability_ids = sorted(
+                {
+                    str(capability_id)
+                    for capability in entry.get("capabilities", [])
+                    for capability_id in (
+                        capability.get("id"),
+                        capability.get("name"),
+                    )
+                    if capability_id
+                }
+            )
+            if not capability_ids:
+                continue
+            branches.append(
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "agent_id": {"const": str(agent_id)},
+                        "capability_id": {"enum": capability_ids},
+                        "arguments": {"type": "object"},
+                    },
+                    "required": ["agent_id", "capability_id"],
+                }
+            )
+        schema = {"oneOf": branches}
     return schema
 
 
@@ -171,6 +222,7 @@ class FakeModel:
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
     ) -> ProviderResult:
+        _ = (messages, options, structured_output)
         self.calls += 1
         if isinstance(self.selection, str):
             return ProviderResult(
@@ -197,7 +249,7 @@ def validate_provider_contract(
         raise UnsupportedProviderCapabilityError(
             "Provider does not support required native structured output"
         )
-    if not structured_output.schema:
+    if not structured_output.json_schema:
         raise ValueError("Structured output schema cannot be empty")
 
 
@@ -233,8 +285,11 @@ async def complete_with_retries(
             if options.timeout is not None:
                 return await asyncio.wait_for(completion, options.timeout)
             return await completion
-        except asyncio.TimeoutError as error:
-            raise ProviderTimeoutError() from error
+        except TimeoutError as error:
+            timeout_error = ProviderTimeoutError()
+            if attempt == attempts - 1:
+                raise timeout_error from error
+            await asyncio.sleep(0)
         except ProviderError as error:
             if not error.retryable or error.accepted or attempt == attempts - 1:
                 raise

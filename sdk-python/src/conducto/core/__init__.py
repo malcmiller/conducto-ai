@@ -20,6 +20,7 @@ from .provider import (
     GenerationOptions,
     MalformedStructuredOutputError,
     ModelConfiguration,
+    ModelProvider,
     ProviderAuthenticationError,
     ProviderCapabilities,
     ProviderContentPolicyError,
@@ -32,6 +33,8 @@ from .provider import (
     UnsupportedProviderCapabilityError,
     Usage,
     build_routing_schema,
+    complete_with_retries,
+    parse_routing_selection,
 )
 
 __all__ = [
@@ -54,6 +57,7 @@ __all__ = [
     "FakeModel",
     "GenerationOptions",
     "MalformedStructuredOutputError",
+    "ModelProvider",
     "ModelConfiguration",
     "ProviderAuthenticationError",
     "ProviderCapabilities",
@@ -67,4 +71,6 @@ __all__ = [
     "UnsupportedProviderCapabilityError",
     "Usage",
     "build_routing_schema",
+    "complete_with_retries",
+    "parse_routing_selection",
 ]

@@ -25,10 +25,11 @@ from .provider import (
     ModelConfiguration,
     ModelProvider,
     ProviderError,
+    ProviderResult,
     StructuredOutputRequest,
     Usage,
-    complete_with_retries,
     build_routing_schema,
+    complete_with_retries,
     parse_routing_selection,
 )
 
@@ -44,6 +45,7 @@ class InvocationSuccess:
 
     correlation_id: str
     value: Any
+    usage: Usage = dataclasses.field(default_factory=Usage)
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,7 +257,7 @@ class OrchestratorAgent(BaseAgent):
             ChatMessage(
                 role="system",
                 content=(
-                    "Select one capability from the structured local registry. "
+                    "Choose one capability from the structured local registry. "
                     "Return only the requested schema."
                 ),
             ),
@@ -265,6 +267,7 @@ class OrchestratorAgent(BaseAgent):
                 content=json.dumps(self.get_routing_metadata(), sort_keys=True),
             ),
         )
+        provider_result: ProviderResult | None = None
         try:
             result = await complete_with_retries(
                 provider,
@@ -272,20 +275,28 @@ class OrchestratorAgent(BaseAgent):
                 options=options,
                 structured_output=request,
             )
+            provider_result = result
             selection = parse_routing_selection(result)
         except MalformedStructuredOutputError as error:
-            return RoutingFailure(str(error), error)
+            usage = provider_result.usage if provider_result is not None else Usage()
+            return RoutingFailure(str(error), error, usage=usage)
         except ProviderError as error:
             return RoutingFailure(
-                str(error), error, retryable=error.retryable
+                str(error),
+                error,
+                usage=provider_result.usage if provider_result is not None else Usage(),
+                retryable=error.retryable,
             )
-        return await self.invoke(
+        invocation = await self.invoke(
             selection.agent_id,
             selection.capability_id,
             selection.arguments,
             timeout=timeout,
             correlation_id=correlation_id,
         )
+        if isinstance(invocation, InvocationSuccess):
+            return dataclasses.replace(invocation, usage=result.usage)
+        return invocation
 
     @property
     def registered_agents(self) -> tuple[BaseAgent, ...]:
@@ -377,6 +388,7 @@ class OrchestratorAgent(BaseAgent):
                         raise ValueError(f"Agent '{agent_name}' is already registered")
                 if not replace:
                     raise ValueError(f"Agent '{agent_name}' is already registered")
+                assert isinstance(existing, BaseAgent)
                 self._remove_agent_mapping(existing)
 
             conflicts = self._conflicting_capabilities(agent)
@@ -386,6 +398,7 @@ class OrchestratorAgent(BaseAgent):
                 for conflicting_name in sorted(conflicts):
                     conflicting_agent = self._registered_capabilities.get(conflicting_name)
                     if conflicting_agent is not None and conflicting_agent is not agent:
+                        assert isinstance(conflicting_agent, BaseAgent)
                         self._remove_agent_mapping(conflicting_agent)
 
             self._registered_agents[agent_name] = agent

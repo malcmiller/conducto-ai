@@ -2,6 +2,7 @@ import asyncio
 import math
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import pytest
@@ -9,13 +10,27 @@ from pydantic import BaseModel
 
 from conducto import (
     BaseAgent,
+    ChatMessage,
+    FakeModel,
+    GenerationOptions,
     InvocationFailure,
     InvocationSuccess,
+    InvocationTargetNotFound,
     InvocationTimeout,
     InvocationValidationFailure,
+    ModelConfiguration,
+    ModelProvider,
     OrchestratorAgent,
+    ProviderCapabilities,
+    ProviderResult,
+    ProviderTimeoutError,
+    RoutingFailure,
+    StructuredOutputRequest,
+    Usage,
     a2a_agent,
     a2a_capability,
+    build_routing_schema,
+    complete_with_retries,
 )
 
 
@@ -313,5 +328,158 @@ def test_orchestrator_serializes_dataclasses_and_serializes_sync_workers() -> No
         assert isinstance(second, InvocationTimeout)
         await asyncio.sleep(0.08)
         assert maximum_active == 1
+
+    asyncio.run(exercise())
+
+
+def test_orchestrator_routes_with_structured_output_and_preserves_usage() -> None:
+    @a2a_agent(name="GreetingAgent", version="1.0.0", description="Greets people.")
+    class GreetingAgent(BaseAgent):
+        @a2a_capability(name="greet", description="Greets a person.")
+        def greet(self, name: str) -> str:
+            return f"hello {name}"
+
+    async def exercise() -> None:
+        usage = Usage(input_tokens=4, output_tokens=2, total_tokens=6)
+        model = FakeModel(
+            {"agent_id": "GreetingAgent", "capability_id": "greet", "arguments": {"name": "Ada"}},
+            usage=usage,
+        )
+        orchestrator = OrchestratorAgent(
+            model_provider=model,
+            model_config=ModelConfiguration(provider="fake", model="test"),
+        )
+        orchestrator.register_agent(GreetingAgent())
+
+        result = await orchestrator.route("Say hello", correlation_id="route-id")
+
+        assert isinstance(result, InvocationSuccess)
+        assert result.correlation_id == "route-id"
+        assert result.value == "hello Ada"
+        assert result.usage == usage
+
+    asyncio.run(exercise())
+
+
+def test_orchestrator_routes_malformed_output_and_preserves_usage() -> None:
+    async def exercise() -> None:
+        usage = Usage(input_tokens=3, output_tokens=1, total_tokens=4)
+        model = FakeModel("not structured", usage=usage)
+        orchestrator = OrchestratorAgent(
+            model_provider=model,
+            model_config=ModelConfiguration(provider="fake", model="test"),
+        )
+
+        result = await orchestrator.route("Anything")
+
+        assert isinstance(result, RoutingFailure)
+        assert result.usage == usage
+
+    asyncio.run(exercise())
+
+
+def test_orchestrator_route_reports_unsupported_provider_unknown_target_and_invalid_args() -> None:
+    @a2a_agent(name="RouteAgent", version="1.0.0", description="Routes requests.")
+    class RouteAgent(BaseAgent):
+        @a2a_capability(name="add", description="Adds values.")
+        def add(self, value: int) -> int:
+            return value + 1
+
+    async def exercise() -> None:
+        config = ModelConfiguration(provider="fake", model="test")
+
+        class UnsupportedModel(FakeModel):
+            capabilities = ProviderCapabilities()
+
+        unsupported = OrchestratorAgent(
+            model_provider=UnsupportedModel({}),
+            model_config=config,
+        )
+        unsupported_result = await unsupported.route("Anything")
+        assert isinstance(unsupported_result, RoutingFailure)
+
+        for selection, expected_type in (
+            (
+                {"agent_id": "MissingAgent", "capability_id": "add", "arguments": {}},
+                InvocationTargetNotFound,
+            ),
+            (
+                {"agent_id": "RouteAgent", "capability_id": "add", "arguments": {"value": "bad"}},
+                InvocationValidationFailure,
+            ),
+        ):
+            orchestrator = OrchestratorAgent(
+                model_provider=FakeModel(selection),
+                model_config=config,
+            )
+            orchestrator.register_agent(RouteAgent())
+            result = await orchestrator.route("Anything")
+            assert isinstance(result, expected_type)
+
+    asyncio.run(exercise())
+
+
+def test_routing_schema_constrains_capability_ids_to_their_agent() -> None:
+    schema = build_routing_schema(
+        [
+            {
+                "name": "First",
+                "capabilities": [{"id": "first-skill", "name": "first"}],
+            },
+            {
+                "name": "Second",
+                "capabilities": [{"id": "second-skill", "name": "second"}],
+            },
+        ]
+    )
+
+    assert len(schema["oneOf"]) == 2
+    assert schema["oneOf"][0]["properties"]["agent_id"]["const"] == "First"
+    assert schema["oneOf"][0]["properties"]["capability_id"]["enum"] == [
+        "first",
+        "first-skill",
+    ]
+
+
+def test_complete_with_retries_retries_provider_timeouts() -> None:
+    class TimeoutThenSuccess(ModelProvider):
+        capabilities = ProviderCapabilities(structured_output=True)
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def complete(
+            self,
+            messages: Sequence[ChatMessage],
+            *,
+            options: GenerationOptions,
+            structured_output: StructuredOutputRequest,
+        ) -> ProviderResult:
+            _ = (messages, options, structured_output)
+            self.calls += 1
+            if self.calls == 1:
+                await asyncio.sleep(0.01)
+            return ProviderResult(structured={"agent_id": "a", "capability_id": "c"})
+
+    async def exercise() -> None:
+        provider = TimeoutThenSuccess()
+        result = await complete_with_retries(
+            provider,
+            (),
+            options=GenerationOptions(model="test", timeout=0.001, retries=1),
+            structured_output=StructuredOutputRequest(name="test", schema={"type": "object"}),
+        )
+        assert result.structured == {"agent_id": "a", "capability_id": "c"}
+        assert provider.calls == 2
+
+        with pytest.raises(ProviderTimeoutError):
+            await complete_with_retries(
+                TimeoutThenSuccess(),
+                (),
+                options=GenerationOptions(model="test", timeout=0.001, retries=0),
+                structured_output=StructuredOutputRequest(
+                    name="test", schema={"type": "object"}
+                ),
+            )
 
     asyncio.run(exercise())

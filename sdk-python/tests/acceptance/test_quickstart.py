@@ -35,6 +35,7 @@ pytestmark = pytest.mark.acceptance
 class AuditAgent(BaseAgent):
     @a2a_capability(description="Evaluates transaction risk against compliance rules.")
     def evaluate_transaction_risk(self, vendor_id: str, amount: float) -> dict:
+        _ = amount
         return {
             "vendor_id": vendor_id,
             "status": "APPROVED",
