@@ -24,6 +24,8 @@ dist/
 htmlcov/
 .tox/
 .nox/
+reports/
+.smoke-venv/
 
 # IDE/editor files
 .idea/

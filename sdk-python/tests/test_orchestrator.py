@@ -7,12 +7,15 @@ from dataclasses import dataclass
 import pytest
 from pydantic import BaseModel
 
-from conducto import BaseAgent, OrchestratorAgent, a2a_agent, a2a_capability
 from conducto import (
+    BaseAgent,
     InvocationFailure,
     InvocationSuccess,
     InvocationTimeout,
     InvocationValidationFailure,
+    OrchestratorAgent,
+    a2a_agent,
+    a2a_capability,
 )
 
 
@@ -152,15 +155,11 @@ def test_orchestrator_returns_independent_routing_metadata() -> None:
     orchestrator.register_agent(SnapshotAgent())
 
     metadata = orchestrator.get_routing_metadata()
-    metadata[0]["capabilities"][0]["parameter_schema"]["properties"]["value"][
-        "type"
-    ] = "integer"
+    metadata[0]["capabilities"][0]["parameter_schema"]["properties"]["value"]["type"] = "integer"
 
     refreshed = orchestrator.get_routing_metadata()
     assert (
-        refreshed[0]["capabilities"][0]["parameter_schema"]["properties"]["value"][
-            "type"
-        ]
+        refreshed[0]["capabilities"][0]["parameter_schema"]["properties"]["value"]["type"]
         == "string"
     )
 

@@ -9,11 +9,11 @@ import inspect
 import json
 import math
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, TypeAlias, cast
+from typing import Any, TypeAlias
 
 from pydantic import BaseModel, ValidationError
 
@@ -117,9 +117,7 @@ class InvocationFailure:
 
     correlation_id: str
     message: str
-    exception: BaseException = dataclasses.field(
-        repr=False, compare=False, hash=False
-    )
+    exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,17 +176,17 @@ def _serialize_result(value: Any) -> Any:
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
             raise UnsupportedReturnValueError("Mapping keys must be strings")
-        return {
-            key: _serialize_result(value[key])
-            for key in sorted(value)
-        }
+        return {key: _serialize_result(value[key]) for key in sorted(value)}
     if isinstance(value, (list, tuple)):
         return [_serialize_result(item) for item in value]
     if isinstance(value, (set, frozenset)):
         serialized = [_serialize_result(item) for item in value]
-        return sorted(serialized, key=lambda item: json.dumps(
-            item, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-        ))
+        return sorted(
+            serialized,
+            key=lambda item: json.dumps(
+                item, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+            ),
+        )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         return [_serialize_result(item) for item in value]
     raise UnsupportedReturnValueError(
@@ -199,9 +197,7 @@ def _serialize_result(value: Any) -> Any:
 def _freeze_mapping(value: Any) -> Any:
     """Recursively freeze validation details without changing their shape."""
     if isinstance(value, dict):
-        return MappingProxyType(
-            {key: _freeze_mapping(item) for key, item in value.items()}
-        )
+        return MappingProxyType({key: _freeze_mapping(item) for key, item in value.items()})
     if isinstance(value, list):
         return tuple(_freeze_mapping(item) for item in value)
     if isinstance(value, tuple):
@@ -295,9 +291,7 @@ class OrchestratorAgent(BaseAgent):
     def registered_agents(self) -> tuple[BaseAgent, ...]:
         """Return the registered local agents in deterministic order."""
         with self._registry_lock:
-            return tuple(
-                self._registered_agents[name] for name in sorted(self._registered_agents)
-            )
+            return tuple(self._registered_agents[name] for name in sorted(self._registered_agents))
 
     @property
     def registered_capabilities(self) -> dict[str, BaseAgent]:
@@ -325,7 +319,7 @@ class OrchestratorAgent(BaseAgent):
         with self._registry_lock:
             return len(self._registered_agents)
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[BaseAgent]:
         """Yield registered agents in deterministic order."""
         return iter(self.registered_agents)
 
@@ -383,18 +377,16 @@ class OrchestratorAgent(BaseAgent):
                         raise ValueError(f"Agent '{agent_name}' is already registered")
                 if not replace:
                     raise ValueError(f"Agent '{agent_name}' is already registered")
-                self._remove_agent_mapping(cast(BaseAgent, existing))
+                self._remove_agent_mapping(existing)
 
             conflicts = self._conflicting_capabilities(agent)
             if conflicts and not replace:
-                raise ValueError(
-                    "Capability name conflict(s): " + ", ".join(sorted(conflicts))
-                )
+                raise ValueError("Capability name conflict(s): " + ", ".join(sorted(conflicts)))
             if conflicts and replace:
                 for conflicting_name in sorted(conflicts):
                     conflicting_agent = self._registered_capabilities.get(conflicting_name)
                     if conflicting_agent is not None and conflicting_agent is not agent:
-                        self._remove_agent_mapping(cast(BaseAgent, conflicting_agent))
+                        self._remove_agent_mapping(conflicting_agent)
 
             self._registered_agents[agent_name] = agent
             for capability_name in sorted(agent.capabilities):
@@ -452,9 +444,7 @@ class OrchestratorAgent(BaseAgent):
             try:
                 timeout_value = float(timeout)
             except (OverflowError, ValueError) as error:
-                raise ValueError(
-                    "Invocation timeout must be a finite positive number"
-                ) from error
+                raise ValueError("Invocation timeout must be a finite positive number") from error
             if not math.isfinite(timeout_value) or timeout_value <= 0:
                 raise ValueError("Invocation timeout must be a finite positive number")
 
@@ -487,8 +477,7 @@ class OrchestratorAgent(BaseAgent):
 
         async def execute() -> Any:
             call_arguments = {
-                name: getattr(validated, name)
-                for name in parameter_model.model_fields
+                name: getattr(validated, name) for name in parameter_model.model_fields
             }
             try:
                 if inspect.iscoroutinefunction(target):
@@ -514,7 +503,7 @@ class OrchestratorAgent(BaseAgent):
             if current_task is not None and current_task.cancelling():
                 raise
             return InvocationCancelled(correlation_id)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             assert timeout_value is not None
             return InvocationTimeout(correlation_id, timeout_value)
         except _CapabilityExecutionError as error:
@@ -524,9 +513,7 @@ class OrchestratorAgent(BaseAgent):
                 error.exception,
             )
         except UnsupportedReturnValueError as error:
-            return InvocationFailure(
-                correlation_id, str(error), error
-            )
+            return InvocationFailure(correlation_id, str(error), error)
         except Exception as error:
             return InvocationFailure(
                 correlation_id,
@@ -605,7 +592,11 @@ class OrchestratorAgent(BaseAgent):
             if isinstance(agent, BaseAgent):
                 candidate_name = agent.agent_metadata.name
                 removed = next(
-                    (existing for existing in self._registered_agents.values() if existing is agent),
+                    (
+                        existing
+                        for existing in self._registered_agents.values()
+                        if existing is agent
+                    ),
                     None,
                 )
                 if removed is None:
@@ -670,7 +661,7 @@ class OrchestratorAgent(BaseAgent):
                     del self._registered_capabilities[capability_name]
             return
 
-        for name, existing in list(self._registered_agents.items()):
+        for name, _existing in list(self._registered_agents.items()):
             if name == agent.agent_metadata.name:
                 del self._registered_agents[name]
                 break
@@ -689,8 +680,7 @@ class OrchestratorAgent(BaseAgent):
         metadata: list[dict[str, Any]] = []
         with self._registry_lock:
             agents = tuple(
-                self._registered_agents[name]
-                for name in sorted(self._registered_agents)
+                self._registered_agents[name] for name in sorted(self._registered_agents)
             )
         for agent in agents:
             card = agent.get_agent_card(self._card_url_for(agent))
