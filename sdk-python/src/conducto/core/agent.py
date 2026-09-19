@@ -10,6 +10,7 @@ from typing import Any, Callable, get_type_hints
 from urllib.parse import urlparse
 
 from pydantic import (
+    BaseModel,
     ConfigDict,
     PydanticInvalidForJsonSchema,
     PydanticSchemaGenerationError,
@@ -55,6 +56,7 @@ class RegisteredMethod:
     attribute_name: str
     callable: Callable[..., Any]
     parameter_schema: dict[str, Any]
+    parameter_model: type[BaseModel]
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
 
@@ -419,6 +421,10 @@ class BaseAgent:
                     attribute_name,
                     bound_method,
                 ),
+                parameter_model=self._build_parameter_model(
+                    attribute_name,
+                    bound_method,
+                ),
                 capability=self._resolve_export_metadata(
                     attribute_name,
                     bound_method,
@@ -481,6 +487,56 @@ class BaseAgent:
 
         return sorted(resolved.items(), key=lambda item: item[0])
 
+    def _build_parameter_model(
+        self,
+        attribute_name: str,
+        method: Callable[..., Any],
+    ) -> type[BaseModel]:
+        signature = inspect.signature(method)
+        try:
+            type_hints = get_type_hints(method)
+        except (NameError, TypeError) as error:
+            raise AgentRegistrationError(
+                f"Could not resolve type annotations for "
+                f"{type(self).__name__}.{attribute_name}: {error}"
+            ) from error
+
+        fields: dict[str, tuple[Any, Any]] = {}
+        for parameter in signature.parameters.values():
+            if parameter.kind in {
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+                inspect.Parameter.POSITIONAL_ONLY,
+            }:
+                raise AgentRegistrationError(
+                    f"{type(self).__name__}.{attribute_name} uses unsupported "
+                    f"parameter '{parameter.name}' of kind "
+                    f"{parameter.kind.description}"
+                )
+            annotation = type_hints.get(parameter.name)
+            if annotation is None:
+                raise AgentRegistrationError(
+                    f"{type(self).__name__}.{attribute_name} parameter "
+                    f"'{parameter.name}' must have a type annotation"
+                )
+            default = (
+                ...
+                if parameter.default is inspect.Parameter.empty
+                else parameter.default
+            )
+            fields[parameter.name] = (annotation, default)
+        try:
+            return create_model(
+                f"{type(self).__name__}_{attribute_name}_Parameters",
+                __config__=ConfigDict(extra="forbid"),
+                **fields,
+            )
+        except (PydanticSchemaGenerationError, PydanticInvalidForJsonSchema) as error:
+            raise AgentRegistrationError(
+                f"Could not generate a parameter schema for "
+                f"{type(self).__name__}.{attribute_name}: {error}"
+            ) from error
+
     def _build_parameter_schema(
         self,
         attribute_name: str,
@@ -505,60 +561,10 @@ class BaseAgent:
                 parameter is unsupported or unannotated, or Pydantic cannot
                 generate the schema.
         """
-        signature = inspect.signature(method)
-
-        try:
-            type_hints = get_type_hints(method)
-        except (NameError, TypeError) as error:
-            raise AgentRegistrationError(
-                f"Could not resolve type annotations for "
-                f"{type(self).__name__}.{attribute_name}: {error}"
-            ) from error
-
-        fields: dict[str, tuple[Any, Any]] = {}
-
-        for parameter in signature.parameters.values():
-            if parameter.kind in {
-                inspect.Parameter.VAR_POSITIONAL,
-                inspect.Parameter.VAR_KEYWORD,
-                inspect.Parameter.POSITIONAL_ONLY,
-            }:
-                raise AgentRegistrationError(
-                    f"{type(self).__name__}.{attribute_name} uses unsupported "
-                    f"parameter '{parameter.name}' of kind "
-                    f"{parameter.kind.description}"
-                )
-
-            annotation = type_hints.get(parameter.name)
-            if annotation is None:
-                raise AgentRegistrationError(
-                    f"{type(self).__name__}.{attribute_name} parameter "
-                    f"'{parameter.name}' must have a type annotation"
-                )
-
-            default = (
-                ...
-                if parameter.default is inspect.Parameter.empty
-                else parameter.default
-            )
-            fields[parameter.name] = (annotation, default)
-
-        model_name = (
-            f"{type(self).__name__}_{attribute_name}_Parameters"
-        )
-
-        try:
-            parameter_model = create_model(
-                model_name,
-                __config__=ConfigDict(extra="forbid"),
-                **fields,
-            )
-            return parameter_model.model_json_schema()
-        except (PydanticSchemaGenerationError, PydanticInvalidForJsonSchema) as error:
-            raise AgentRegistrationError(
-                f"Could not generate a parameter schema for "
-                f"{type(self).__name__}.{attribute_name}: {error}"
-            ) from error
+        return self._build_parameter_model(
+            attribute_name,
+            method,
+        ).model_json_schema()
 
     def _resolve_agent_metadata(self) -> AgentMetadata:
         """Resolve declared agent metadata or provide default metadata.
