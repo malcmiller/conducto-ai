@@ -269,59 +269,59 @@ class OrchestratorAgent(BaseAgent):
                 resolution_source=resolution_source,
                 outcome="success",
             )
-        request = StructuredOutputRequest(
-            name="conducto_capability_selection",
-            schema=build_routing_schema(self.get_routing_metadata()),
-        )
-        options = GenerationOptions(
-            model=config.model,
-            timeout=config.timeout if timeout is None else timeout,
-            retries=config.retries,
-        )
-        messages = (
-            ChatMessage(
-                role="system",
-                content=(
-                    "Choose one capability from the structured local registry. "
-                    "Return only the requested schema."
+            request = StructuredOutputRequest(
+                name="conducto_capability_selection",
+                schema=build_routing_schema(self.get_routing_metadata()),
+            )
+            options = GenerationOptions(
+                model=config.model,
+                timeout=config.timeout if timeout is None else timeout,
+                retries=config.retries,
+            )
+            messages = (
+                ChatMessage(
+                    role="system",
+                    content=(
+                        "Choose one capability from the structured local registry. "
+                        "Return only the requested schema."
+                    ),
                 ),
-            ),
-            ChatMessage(role="user", content=user_input),
-            ChatMessage(
-                role="system",
-                content=json.dumps(self.get_routing_metadata(), sort_keys=True),
-            ),
-        )
-        provider_result: ProviderResult | None = None
-        try:
-            result = await complete_with_retries(
-                provider,
-                messages,
-                options=options,
-                structured_output=request,
+                ChatMessage(role="user", content=user_input),
+                ChatMessage(
+                    role="system",
+                    content=json.dumps(self.get_routing_metadata(), sort_keys=True),
+                ),
             )
-            provider_result = result
-            selection = parse_routing_selection(result)
-        except MalformedStructuredOutputError as error:
-            usage = provider_result.usage if provider_result is not None else Usage()
-            return RoutingFailure(str(error), error, usage=usage)
-        except ProviderError as error:
-            return RoutingFailure(
-                str(error),
-                error,
-                usage=provider_result.usage if provider_result is not None else Usage(),
-                retryable=error.retryable,
+            provider_result: ProviderResult | None = None
+            try:
+                result = await complete_with_retries(
+                    provider,
+                    messages,
+                    options=options,
+                    structured_output=request,
+                )
+                provider_result = result
+                selection = parse_routing_selection(result)
+            except MalformedStructuredOutputError as error:
+                usage = provider_result.usage if provider_result is not None else Usage()
+                return RoutingFailure(str(error), error, usage=usage)
+            except ProviderError as error:
+                return RoutingFailure(
+                    str(error),
+                    error,
+                    usage=provider_result.usage if provider_result is not None else Usage(),
+                    retryable=error.retryable,
+                )
+            invocation = await self.invoke(
+                selection.agent_id,
+                selection.capability_id,
+                selection.arguments,
+                timeout=timeout,
+                correlation_id=correlation_id,
             )
-        invocation = await self.invoke(
-            selection.agent_id,
-            selection.capability_id,
-            selection.arguments,
-            timeout=timeout,
-            correlation_id=correlation_id,
-        )
-        if isinstance(invocation, InvocationSuccess):
-            return dataclasses.replace(invocation, usage=result.usage)
-        return invocation
+            if isinstance(invocation, InvocationSuccess):
+                return dataclasses.replace(invocation, usage=result.usage)
+            return invocation
 
     @property
     def registered_agents(self) -> tuple[BaseAgent, ...]:

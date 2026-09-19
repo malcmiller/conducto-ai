@@ -21,6 +21,7 @@ from typing import Any, Final, Literal
 
 LOG_SCHEMA_VERSION: Final = "1"
 LOGGER_NAME: Final = "conducto"
+_SENSITIVE_LOGGER_NAME: Final = "conducto.sensitive"
 
 AGENT_REGISTERED: Final = "conducto.agent.registered.v1"
 AGENT_DISCOVERED: Final = "conducto.agent.discovered.v1"
@@ -66,6 +67,8 @@ _RECORD_FIELDS: Final = (
     "resolution_source",
     "agent_count",
 )
+_PACKAGE_LOGGER = logging.getLogger(LOGGER_NAME)
+_PACKAGE_LOGGER.addHandler(logging.NullHandler())
 
 
 @contextmanager
@@ -110,6 +113,7 @@ def emit_event(
     does not pass payloads, so its default records never contain them.
     """
 
+    _validate_event_fields(fields)
     logger = logging.getLogger(f"{LOGGER_NAME}.events")
     if not logger.isEnabledFor(level):
         return
@@ -125,9 +129,9 @@ def emit_event(
         values["duration_ms"] = round(duration_ms, 3)
     if error_category is not None:
         values["error_category"] = error_category
-    if payload is not None and include_sensitive_data and _allows_sensitive_data(logger):
-        values["payload"] = payload
     logger.log(level, event, extra=values)
+    if payload is not None and include_sensitive_data:
+        _emit_sensitive_payload(event, level=level, values=values, payload=payload)
 
 
 class JsonFormatter(logging.Formatter):
@@ -145,6 +149,9 @@ class JsonFormatter(logging.Formatter):
             value = getattr(record, field, None)
             if value is not None:
                 event[field] = value
+        payload = getattr(record, "payload", None)
+        if payload is not None:
+            event["payload"] = payload
         return json.dumps(event, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
 
 
@@ -157,6 +164,9 @@ class DevelopmentFormatter(logging.Formatter):
             value = getattr(record, field, None)
             if value is not None:
                 parts.append(f"{field}={value}")
+        payload = getattr(record, "payload", None)
+        if payload is not None:
+            parts.append(f"payload={payload!r}")
         return " ".join(parts)
 
 
@@ -176,29 +186,76 @@ def configure_logging(
     """
 
     logger = logging.getLogger(LOGGER_NAME)
-    for handler in tuple(logger.handlers):
-        if getattr(handler, "_conducto_owned", False):
-            logger.removeHandler(handler)
-            handler.close()
+    sensitive_logger = logging.getLogger(_SENSITIVE_LOGGER_NAME)
+    for active_logger in (logger, sensitive_logger):
+        for handler in tuple(active_logger.handlers):
+            if getattr(handler, "_conducto_owned", False):
+                active_logger.removeHandler(handler)
+                handler.close()
+    handler = _create_handler(
+        format=format,
+        stream=stream,
+        include_sensitive_data=False,
+    )
+    logger.addHandler(handler)
+    logger.setLevel(level)
+    logger.propagate = False
+    sensitive_logger.propagate = False
+    if include_sensitive_data:
+        sensitive_handler = _create_handler(
+            format=format,
+            stream=stream,
+            include_sensitive_data=True,
+        )
+        sensitive_logger.addHandler(sensitive_handler)
+        sensitive_logger.setLevel(level)
+        sensitive_logger.propagate = False
+    return handler
+
+
+def _create_handler(
+    *,
+    format: Literal["json", "development"],
+    stream: Any,
+    include_sensitive_data: bool,
+) -> logging.Handler:
     handler = logging.StreamHandler(stream if stream is not None else sys.stderr)
     handler._conducto_owned = True  # type: ignore[attr-defined]
     handler._conducto_include_sensitive_data = include_sensitive_data  # type: ignore[attr-defined]
     handler.setFormatter(JsonFormatter() if format == "json" else DevelopmentFormatter())
-    logger.addHandler(handler)
-    logger.setLevel(level)
-    logger.propagate = False
     return handler
 
 
+def _validate_event_fields(fields: Mapping[str, Any]) -> None:
+    invalid = set(fields) & _SENSITIVE_NAMES
+    if invalid:
+        raise ValueError(f"Sensitive logging fields are not allowed: {sorted(invalid)!r}")
+    permitted = set(_RECORD_FIELDS) - {
+        "schema_version",
+        "event",
+        "outcome",
+        "duration_ms",
+        "error_category",
+    }
+    unsupported = set(fields) - permitted
+    if unsupported:
+        raise ValueError(f"Unsupported logging fields: {sorted(unsupported)!r}")
+
+
+def _emit_sensitive_payload(
+    event: str,
+    *,
+    level: int,
+    values: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> None:
+    logger = logging.getLogger(_SENSITIVE_LOGGER_NAME)
+    if not logger.isEnabledFor(level) or not _allows_sensitive_data(logger):
+        return
+    logger.log(level, event, extra={**values, "payload": payload})
+
+
 def _allows_sensitive_data(logger: logging.Logger) -> bool:
-    current: logging.Logger | None = logger
-    while current is not None:
-        if any(
-            getattr(handler, "_conducto_include_sensitive_data", False)
-            for handler in current.handlers
-        ):
-            return True
-        if not current.propagate:
-            break
-        current = current.parent
-    return False
+    return any(
+        getattr(handler, "_conducto_include_sensitive_data", False) for handler in logger.handlers
+    )

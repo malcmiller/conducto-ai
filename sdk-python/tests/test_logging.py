@@ -1,7 +1,11 @@
 import asyncio
 import io
 import logging
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 from conducto import (
     BaseAgent,
@@ -16,23 +20,26 @@ from conducto import (
 )
 
 
-def _event_records(catalog: object) -> list[logging.LogRecord]:
-    return [
-        record
-        for record in catalog.records  # type: ignore[attr-defined]
-        if record.name == "conducto.events"
-    ]
+def _event_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.name == "conducto.events"]
 
 
 def test_import_does_not_configure_root_logging() -> None:
-    root = logging.getLogger()
-    before_handlers = tuple(root.handlers)
-    before_level = root.level
-
-    __import__("conducto")
-
-    assert tuple(root.handlers) == before_handlers
-    assert root.level == before_level
+    script = """
+import logging
+root = logging.getLogger()
+before_handlers = len(root.handlers)
+before_level = root.level
+import conducto
+assert len(root.handlers) == before_handlers
+assert root.level == before_level
+"""
+    subprocess.run(
+        [sys.executable, "-c", script],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_json_events_match_golden_fixture() -> None:
@@ -62,9 +69,13 @@ def test_json_events_match_golden_fixture() -> None:
 
 def test_configure_logging_replaces_only_owned_handler() -> None:
     logger = logging.getLogger("conducto")
+    sensitive_logger = logging.getLogger("conducto.sensitive")
     original_handlers = tuple(logger.handlers)
+    original_sensitive_handlers = tuple(sensitive_logger.handlers)
     original_level = logger.level
     original_propagate = logger.propagate
+    original_sensitive_level = sensitive_logger.level
+    original_sensitive_propagate = sensitive_logger.propagate
     external = logging.NullHandler()
     logger.addHandler(external)
     try:
@@ -82,18 +93,27 @@ def test_configure_logging_replaces_only_owned_handler() -> None:
         for handler in original_handlers:
             if handler not in logger.handlers:
                 logger.addHandler(handler)
+        for handler in tuple(sensitive_logger.handlers):
+            if getattr(handler, "_conducto_owned", False):
+                sensitive_logger.removeHandler(handler)
+                handler.close()
+        for handler in original_sensitive_handlers:
+            if handler not in sensitive_logger.handlers:
+                sensitive_logger.addHandler(handler)
         logger.setLevel(original_level)
         logger.propagate = original_propagate
+        sensitive_logger.setLevel(original_sensitive_level)
+        sensitive_logger.propagate = original_sensitive_propagate
 
 
-def test_default_events_redact_payloads_and_exceptions(catalog: object) -> None:
-    with catalog.at_level(logging.INFO, logger="conducto"):  # type: ignore[attr-defined]
+def test_default_events_redact_payloads_and_exceptions(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO, logger="conducto"):
         emit_event(
             "conducto.test.v1",
             payload={"token": "secret-token", "prompt": "sensitive prompt"},
         )
 
-    record = _event_records(catalog)[0]
+    record = _event_records(caplog)[0]
     assert not hasattr(record, "payload")
     assert record.exc_info is None
     assert record.exc_text is None
@@ -109,7 +129,61 @@ def test_disabled_logging_skips_extra_field_construction() -> None:
         logger.setLevel(previous_level)
 
 
-def test_concurrent_async_and_sync_invocations_keep_context_isolated(catalog: object) -> None:
+def test_sensitive_fields_are_rejected() -> None:
+    with pytest.raises(ValueError, match="Sensitive logging fields"):
+        emit_event("conducto.test.v1", token="secret")
+
+
+def test_opted_in_payload_isolated_to_sensitive_handler() -> None:
+    normal_stream = io.StringIO()
+    sensitive_stream = io.StringIO()
+    logger = logging.getLogger("conducto")
+    sensitive_logger = logging.getLogger("conducto.sensitive")
+    original_handlers = tuple(logger.handlers)
+    original_sensitive_handlers = tuple(sensitive_logger.handlers)
+    original_level = logger.level
+    original_sensitive_level = sensitive_logger.level
+    original_propagate = logger.propagate
+    original_sensitive_propagate = sensitive_logger.propagate
+    try:
+        configure_logging(format="json", stream=normal_stream, include_sensitive_data=False)
+        sensitive_handler = logging.StreamHandler(sensitive_stream)
+        sensitive_handler._conducto_owned = True  # type: ignore[attr-defined]
+        sensitive_handler._conducto_include_sensitive_data = True  # type: ignore[attr-defined]
+        sensitive_handler.setFormatter(JsonFormatter())
+        sensitive_logger.addHandler(sensitive_handler)
+        sensitive_logger.setLevel(logging.INFO)
+        sensitive_logger.propagate = False
+
+        emit_event(
+            "conducto.test.v1",
+            payload={"token": "secret-token"},
+            include_sensitive_data=True,
+        )
+
+        assert "secret-token" not in normal_stream.getvalue()
+        assert "secret-token" in sensitive_stream.getvalue()
+    finally:
+        for active_logger, handlers in (
+            (logger, original_handlers),
+            (sensitive_logger, original_sensitive_handlers),
+        ):
+            for handler in tuple(active_logger.handlers):
+                if handler not in handlers:
+                    active_logger.removeHandler(handler)
+                    handler.close()
+            for handler in handlers:
+                if handler not in active_logger.handlers:
+                    active_logger.addHandler(handler)
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+        sensitive_logger.setLevel(original_sensitive_level)
+        sensitive_logger.propagate = original_sensitive_propagate
+
+
+def test_concurrent_async_and_sync_invocations_keep_context_isolated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     @a2a_agent(name="ContextAgent", version="1.0", description="Tests context.")
     class ContextAgent(BaseAgent):
         @a2a_capability(name="sync", description="Returns a supplied value.")
@@ -129,12 +203,12 @@ def test_concurrent_async_and_sync_invocations_keep_context_isolated(catalog: ob
             orchestrator.invoke("ContextAgent", "async", {"value": "two"}, correlation_id="two"),
         )
 
-    with catalog.at_level(logging.INFO, logger="conducto"):  # type: ignore[attr-defined]
+    with caplog.at_level(logging.DEBUG, logger="conducto"):
         asyncio.run(exercise())
 
     completed = [
         record
-        for record in _event_records(catalog)
+        for record in _event_records(caplog)
         if getattr(record, "event", None) == "conducto.capability.invocation_completed.v1"
     ]
     assert {
@@ -146,7 +220,9 @@ def test_concurrent_async_and_sync_invocations_keep_context_isolated(catalog: ob
     }
 
 
-def test_concurrent_model_overrides_keep_provenance_isolated(catalog: object) -> None:
+def test_concurrent_model_overrides_keep_provenance_isolated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     @a2a_agent(name="ModelAgent", version="1.0", description="Tests model provenance.")
     class ModelAgent(BaseAgent):
         @a2a_capability(name="ping", description="Replies with pong.")
@@ -171,12 +247,12 @@ def test_concurrent_model_overrides_keep_provenance_isolated(catalog: object) ->
             ),
         )
 
-    with catalog.at_level(logging.INFO, logger="conducto"):  # type: ignore[attr-defined]
+    with caplog.at_level(logging.DEBUG, logger="conducto"):
         asyncio.run(exercise())
 
     models = [
         record
-        for record in _event_records(catalog)
+        for record in _event_records(caplog)
         if getattr(record, "event", None) == "conducto.model.selected.v1"
     ]
     assert {
@@ -190,4 +266,14 @@ def test_concurrent_model_overrides_keep_provenance_isolated(catalog: object) ->
     } == {
         ("first-correlation", "first", "model-one", "invocation_override"),
         ("second-correlation", "second", "model-two", "invocation_override"),
+    }
+
+    discovered = [
+        record
+        for record in _event_records(caplog)
+        if getattr(record, "event", None) == "conducto.agent.discovered.v1"
+    ]
+    assert {getattr(record, "correlation_id", None) for record in discovered} == {
+        "first-correlation",
+        "second-correlation",
     }

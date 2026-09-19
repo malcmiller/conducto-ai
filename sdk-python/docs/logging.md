@@ -48,9 +48,10 @@ logger.setLevel(logging.INFO)
 logger.propagate = False
 ```
 
-The SDK does not add a `NullHandler`. With no configured handlers, normal
-Python logger propagation applies and no events are emitted unless the
-application configures an ancestor logger.
+The SDK adds a package-level `NullHandler` on import. This prevents Python's
+fallback `lastResort` handler from writing warnings and errors to stderr when
+the application has not configured logging, while normal propagation still
+allows application-owned ancestor handlers to receive events.
 
 ## Event contract
 
@@ -137,6 +138,8 @@ emit_event(
 )
 ```
 
+Payloads are emitted only to Conducto's separate `conducto.sensitive` logger
+and its opt-in handler, never to ordinary application handlers on `conducto`.
 This is intended only for controlled development diagnostics. Treat payload
 logging as a security decision: avoid it in production and ensure any
 destination, retention policy, and access controls are appropriate.
