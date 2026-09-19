@@ -90,6 +90,50 @@ development environments. See [the logging guide](docs/logging.md) for the
 event schema, formatter integration, context propagation, and compatibility
 guarantees.
 
+### Per-run model configuration
+
+Provider clients and credentials belong to a runtime-owned `ProviderRegistry`.
+Agents and callers use opaque `ModelReference` values. Resolution is deterministic:
+**call override → run override → agent default → runtime default**.
+
+```python
+from conducto import (
+    ModelConfiguration,
+    ModelReference,
+    ProviderRegistry,
+    RunConfig,
+    Runtime,
+    RuntimeConfig,
+)
+
+registry = ProviderRegistry()
+registry.register(
+    "fast",
+    provider_client,  # Credentials stay inside this runtime-owned client.
+    ModelConfiguration(provider="example", model="fast-model"),
+)
+runtime = Runtime(
+    provider_registry=registry,
+    config=RuntimeConfig(default_model=ModelReference("fast")),
+)
+
+result = await orchestrator.invoke(
+    "Worker",
+    "work",
+    {},
+    run_config=RunConfig(model=ModelReference("fast")),
+)
+```
+
+`RunContext`, `RunConfig`, `RuntimeConfig`, `AgentModelConfig`, and
+`InvocationMetadata` are immutable public contracts. `RunContext.to_dict()`
+includes only model provenance, timing, cancellation state, and
+provider-neutral metadata; it excludes provider clients and configuration.
+Use `model_required=False` on `@a2a_agent` or `@a2a_capability` for
+deterministic work. A runtime policy callback can deny selections using agent,
+caller, environment, cost-tier, and data-classification facts before any
+provider request or capability invocation.
+
 ### Defining an Agent
 
 ```python

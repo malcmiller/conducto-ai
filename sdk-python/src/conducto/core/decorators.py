@@ -23,11 +23,17 @@ class AgentMetadata:
         name: The agent's published name.
         version: The agent's published version.
         description: An optional description of the agent.
+        default_model: Credential-free model reference used as the agent
+            default when no call-level or run-level override is supplied.
+        model_required: Whether capabilities require a resolved model unless
+            they explicitly opt out.
     """
 
     name: str
     version: str
     description: str | None = None
+    default_model: str | None = None
+    model_required: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,10 +43,13 @@ class ExportMetadata:
     Attributes:
         name: The published export name, if one was provided.
         description: The published export description, if one was provided.
+        model_required: Per-export model requirement. ``None`` inherits the
+            agent requirement; ``False`` declares deterministic execution.
     """
 
     name: str | None = None
     description: str | None = None
+    model_required: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +71,8 @@ def a2a_agent(
     name: str | None = None,
     version: str = "0.1.0",
     description: str | None = None,
+    default_model: str | None = None,
+    model_required: bool = False,
 ) -> T | Callable[[T], T]:
     """Declare a class as an A2A agent.
 
@@ -76,6 +87,10 @@ def a2a_agent(
         version: The published agent version. Defaults to ``"0.1.0"``.
         description: An optional published description. Defaults to the
             class docstring.
+        default_model: Optional credential-free model reference for the agent.
+            The runtime resolves it through its provider registry.
+        model_required: Whether exports require a model by default. Individual
+            capabilities and tools may override this setting.
 
     Returns:
         The decorated class, or a decorator when called with keyword
@@ -99,6 +114,8 @@ def a2a_agent(
             name=agent_name,
             version=agent_version,
             description=agent_description,
+            default_model=_normalize_optional_text(default_model),
+            model_required=model_required,
         )
         setattr(agent_class, _AGENT_METADATA_ATTRIBUTE, metadata)
         return agent_class
@@ -112,6 +129,7 @@ def a2a_capability(
     *,
     name: str | None = None,
     description: str | None = None,
+    model_required: bool | None = None,
 ) -> Callable[[F], F]:
     """Expose a method as an A2A capability.
 
@@ -123,6 +141,9 @@ def a2a_capability(
     Args:
         name: An optional published capability name.
         description: An optional published capability description.
+        model_required: Whether the capability requires a model. ``None``
+            inherits the agent setting; ``False`` explicitly permits
+            deterministic execution without a configured model.
 
     Returns:
         A decorator that preserves and returns the decorated callable.
@@ -137,6 +158,7 @@ def a2a_capability(
         kind="capability",
         name=name,
         description=description,
+        model_required=model_required,
     )
 
 
@@ -144,6 +166,7 @@ def tool(
     *,
     name: str | None = None,
     description: str | None = None,
+    model_required: bool | None = None,
 ) -> Callable[[F], F]:
     """Register a method as an internal Conducto tool.
 
@@ -155,6 +178,9 @@ def tool(
     Args:
         name: An optional tool name.
         description: An optional tool description.
+        model_required: Whether the tool requires a model. ``None`` inherits
+            the agent setting; ``False`` explicitly permits deterministic
+            execution without a configured model.
 
     Returns:
         A decorator that preserves and returns the decorated callable.
@@ -169,6 +195,7 @@ def tool(
         kind="tool",
         name=name,
         description=description,
+        model_required=model_required,
     )
 
 
@@ -227,12 +254,14 @@ def _export_decorator(
     kind: ExportKind,
     name: str | None,
     description: str | None,
+    model_required: bool | None,
 ) -> Callable[[F], F]:
     """Create a decorator for one of the supported method export kinds."""
 
     export = ExportMetadata(
         name=_normalize_optional_text(name),
         description=_normalize_optional_text(description),
+        model_required=model_required,
     )
 
     def decorate(value: F) -> F:

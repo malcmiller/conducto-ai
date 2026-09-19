@@ -24,6 +24,7 @@ from .decorators import (
     get_method_metadata,
 )
 from .provider import ModelConfiguration
+from .runtime import AgentModelConfig, ModelReference, ModelRequirement
 
 
 class AgentRegistrationError(ValueError):
@@ -80,14 +81,61 @@ class BaseAgent:
         self,
         *,
         model_config: ModelConfiguration | None = None,
+        model_reference: ModelReference | str | None = None,
+        agent_config: AgentModelConfig | None = None,
     ) -> None:
-        """Initialize the agent and register its decorated methods."""
-        self.model_config = model_config
+        """Initialize immutable model defaults and register decorated methods.
+
+        Args:
+            model_config: Legacy provider-neutral configuration. Its model name
+                becomes the agent reference only when no explicit or decorated
+                reference is present. Provider clients and credentials do not
+                belong to the agent.
+            model_reference: Explicit credential-free agent default. This takes
+                precedence over the reference declared by ``@a2a_agent`` and
+                the legacy ``model_config`` model name.
+            agent_config: Complete immutable agent model policy. When supplied,
+                it controls model defaults and requirements.
+
+        Raises:
+            AgentRegistrationError: If a decorated method cannot be reflected
+                into a valid registration.
+            ValueError: If a model reference is empty.
+
+        Notes:
+            Construction never resolves a provider or mutates these defaults
+            during execution. Resolution is performed by the runtime for each
+            run, keeping concurrent overrides isolated.
+        """
         self.agent_metadata = self._resolve_agent_metadata()
+        declared_reference = model_reference or self.agent_metadata.default_model
+        if declared_reference is None and model_config is not None:
+            declared_reference = model_config.model
+        if isinstance(declared_reference, str):
+            declared_reference = ModelReference(declared_reference)
+        self._agent_config = agent_config or AgentModelConfig(
+            default_model=declared_reference,
+            requirement=(
+                ModelRequirement.REQUIRED
+                if self.agent_metadata.model_required
+                else ModelRequirement.NONE
+            ),
+        )
+        self._model_config = model_config
         self._registered_methods: dict[str, RegisteredMethod] = {}
         self._capabilities: dict[str, RegisteredMethod] = {}
         self._tools: dict[str, RegisteredMethod] = {}
         self._register_decorated_tools()
+
+    @property
+    def agent_config(self) -> AgentModelConfig:
+        """Return the immutable model policy declared for this agent."""
+        return self._agent_config
+
+    @property
+    def model_config(self) -> ModelConfiguration | None:
+        """Return the legacy immutable provider-neutral model configuration."""
+        return self._model_config
 
     @property
     def registered_methods(self) -> tuple[RegisteredMethod, ...]:
@@ -605,6 +653,7 @@ class BaseAgent:
         return ExportMetadata(
             name=metadata.name or attribute_name,
             description=metadata.description or inspect.getdoc(method),
+            model_required=metadata.model_required,
         )
 
     def _add_export(

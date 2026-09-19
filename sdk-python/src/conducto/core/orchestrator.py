@@ -30,6 +30,7 @@ from .logging import (
     INVOCATION_STARTED,
     INVOCATION_TIMED_OUT,
     MODEL_SELECTED,
+    MODEL_USAGE_RECORDED,
     emit_event,
     log_context,
 )
@@ -47,6 +48,17 @@ from .provider import (
     complete_with_retries,
     parse_routing_selection,
 )
+from .runtime import (
+    AgentModelConfig,
+    IncompatibleProviderCapabilitiesError,
+    InvocationMetadata,
+    ModelReference,
+    ModelRequirement,
+    ProviderRegistry,
+    RunConfig,
+    Runtime,
+    use_run_context,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,11 +68,14 @@ class InvocationSuccess:
     Attributes:
         correlation_id: Caller-supplied identifier for matching the response.
         value: Deterministically serialized capability return value.
+        usage: Provider-neutral usage from orchestration model selection.
+        metadata: Credential-free run and effective-model provenance.
     """
 
     correlation_id: str
     value: Any
     usage: Usage = dataclasses.field(default_factory=Usage)
+    metadata: InvocationMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,10 +85,12 @@ class InvocationValidationFailure:
     Attributes:
         correlation_id: Caller-supplied identifier for matching the response.
         errors: Immutable field-level Pydantic validation errors.
+        metadata: Credential-free run and effective-model provenance.
     """
 
     correlation_id: str
     errors: tuple[Mapping[str, Any], ...]
+    metadata: InvocationMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,11 +101,14 @@ class InvocationTargetNotFound:
         correlation_id: Caller-supplied identifier for matching the response.
         agent_id: Stable identifier that was requested.
         capability_id: Capability name or generated skill identifier requested.
+        metadata: Credential-free run and effective-model provenance when a
+            run context was created.
     """
 
     correlation_id: str
     agent_id: str
     capability_id: str
+    metadata: InvocationMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,10 +118,12 @@ class InvocationTimeout:
     Attributes:
         correlation_id: Caller-supplied identifier for matching the response.
         timeout: Timeout duration in seconds.
+        metadata: Credential-free run and effective-model provenance.
     """
 
     correlation_id: str
     timeout: float
+    metadata: InvocationMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,9 +135,11 @@ class InvocationCancelled:
 
     Attributes:
         correlation_id: Caller-supplied identifier for matching the response.
+        metadata: Credential-free run and effective-model provenance.
     """
 
     correlation_id: str
+    metadata: InvocationMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,21 +154,33 @@ class InvocationFailure:
         message: Safe, non-sensitive description suitable for callers.
         exception: Original local exception, excluded from representation and
             equality comparisons.
+        metadata: Credential-free run and effective-model provenance.
     """
 
     correlation_id: str
     message: str
     exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
+    metadata: InvocationMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class RoutingFailure:
-    """Typed failure from provider-backed capability selection."""
+    """Typed failure from provider-backed capability selection.
+
+    Attributes:
+        message: Safe failure description.
+        exception: Original local provider or parsing error, excluded from
+            representation and equality.
+        usage: Usage reported before the failure, when available.
+        retryable: Whether retrying is safe under the provider contract.
+        metadata: Credential-free routing model provenance.
+    """
 
     message: str
     exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
     usage: Usage = dataclasses.field(default_factory=Usage)
     retryable: bool = False
+    metadata: InvocationMetadata | None = None
 
 
 InvocationResult: TypeAlias = (
@@ -227,7 +263,9 @@ class OrchestratorAgent(BaseAgent):
     structured routing metadata without requiring any network I/O. Agent
     descriptions are treated as untrusted content when rendered into the routing
     prompt context, so they are clearly delimited from the orchestration
-    instructions.
+    instructions. Its orchestration model is resolved independently of the
+    selected agent's model, allowing both stages of one workflow to use
+    different providers or model references.
     """
 
     def __init__(
@@ -235,13 +273,64 @@ class OrchestratorAgent(BaseAgent):
         *,
         model_provider: ModelProvider | None = None,
         model_config: ModelConfiguration | None = None,
+        model_reference: ModelReference | str | None = None,
+        runtime: Runtime | None = None,
     ) -> None:
+        """Initialize the local registry and model runtime.
+
+        Args:
+            model_provider: Legacy direct provider client. Prefer registering
+                the client with ``runtime.provider_registry``.
+            model_config: Legacy non-secret provider configuration required
+                with ``model_provider``.
+            model_reference: Credential-free default reference for the
+                orchestration model.
+            runtime: Runtime that owns providers, defaults, and model policy.
+
+        Raises:
+            ValueError: If a direct provider has no configuration, or if a
+                direct provider and explicit runtime are supplied together.
+
+        Notes:
+            Direct-provider arguments are retained for compatibility. New code
+            should use a runtime-owned registry, so agents and requests never
+            retain provider clients or credentials.
+        """
+        if runtime is not None and model_provider is not None:
+            raise ValueError("runtime cannot be combined with model_provider")
+        if model_provider is not None and model_config is None:
+            raise ValueError("model_config is required with model_provider")
+        self._legacy_direct_provider = model_provider is not None
         self._registered_agents: dict[str, BaseAgent] = {}
         self._registered_capabilities: dict[str, BaseAgent] = {}
         self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._registry_lock = threading.RLock()
-        super().__init__(model_config=model_config)
-        self.model_provider = model_provider
+        effective_reference = model_reference or (model_config.model if model_config else None)
+        if isinstance(effective_reference, str):
+            effective_reference = ModelReference(effective_reference)
+        super().__init__(
+            model_config=model_config,
+            model_reference=effective_reference,
+            agent_config=(
+                AgentModelConfig(
+                    default_model=effective_reference,
+                    requirement=ModelRequirement.REQUIRED,
+                    required_capabilities=frozenset({"structured_output"}),
+                )
+                if effective_reference is not None
+                else AgentModelConfig(
+                    requirement=ModelRequirement.REQUIRED,
+                    required_capabilities=frozenset({"structured_output"}),
+                )
+            ),
+        )
+        if runtime is None:
+            registry = ProviderRegistry()
+            if model_provider is not None and model_config is not None:
+                assert effective_reference is not None
+                registry.register(effective_reference, model_provider, model_config)
+            runtime = Runtime(provider_registry=registry)
+        self.runtime = runtime
 
     async def route(
         self,
@@ -249,24 +338,97 @@ class OrchestratorAgent(BaseAgent):
         *,
         model_provider: ModelProvider | None = None,
         model_config: ModelConfiguration | None = None,
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
+        agent_run_config: RunConfig | None = None,
         timeout: float | None = None,
         correlation_id: str = "",
     ) -> InvocationResult | RoutingFailure:
-        """Select exactly one local capability with native structured output."""
+        """Select one local capability with a policy-checked orchestration model.
+
+        Model selection follows call override, run override, orchestrator
+        default, then runtime default. The selected agent is invoked in a
+        separate run context using ``agent_run_config``, so its model can differ
+        from the orchestration model.
+
+        Args:
+            user_input: User request used for structured capability selection.
+            model_provider: Legacy call-only provider override. Requires
+                ``model_config`` and does not mutate orchestrator state.
+            model_config: Legacy call-only provider configuration, or a model
+                reference override when used without ``model_provider``.
+            model_reference: Credential-free call-only orchestration override.
+            run_config: Orchestration run override and policy facts.
+            agent_run_config: Independent run override and policy facts passed
+                to the selected agent capability.
+            timeout: Optional finite positive timeout used for model selection
+                and selected capability execution.
+            correlation_id: Identifier shared by routing and capability result.
+
+        Returns:
+            The selected capability result, or a typed routing failure after a
+            provider request has begun.
+
+        Raises:
+            ValueError: If legacy provider arguments are incomplete or timeout
+                data is invalid.
+            ModelResolutionError: If the model is missing, unknown,
+                incompatible, denied by policy, or unavailable. These failures
+                occur before a provider request or capability invocation.
+            asyncio.CancelledError: If the caller cancels the task.
+        """
         correlation_id = correlation_id or str(uuid.uuid4())
-        provider = model_provider or self.model_provider
-        config = model_config or self.model_config
-        if provider is None or config is None:
-            raise ValueError("A model provider and typed model configuration are required")
-        resolution_source = (
-            "invocation_override" if model_config is not None else "orchestrator_default"
-        )
-        with log_context(correlation_id=correlation_id):
+        if model_provider is not None and model_config is None:
+            raise ValueError("model_config is required with model_provider")
+        active_runtime = self.runtime
+        call_override = model_reference
+        if model_provider is not None and model_config is not None:
+            registry = ProviderRegistry()
+            call_override = ModelReference(model_config.model)
+            registry.register(call_override, model_provider, model_config)
+            active_runtime = Runtime(
+                provider_registry=registry,
+                config=self.runtime.config,
+                policy=self.runtime.policy,
+            )
+        elif model_config is not None:
+            call_override = ModelReference(model_config.model)
+
+        effective_run = run_config or RunConfig()
+        if timeout is not None:
+            effective_run = dataclasses.replace(effective_run, timeout=timeout)
+        try:
+            context = active_runtime.create_run_context(
+                agent_id=self.agent_metadata.name,
+                agent_config=self.agent_config,
+                run_config=effective_run,
+                call_override=call_override,
+                correlation_id=correlation_id,
+                required_capabilities=frozenset({"structured_output"}),
+            )
+        except IncompatibleProviderCapabilitiesError as error:
+            if model_provider is None and not self._legacy_direct_provider:
+                raise
+            return RoutingFailure(str(error), error)
+        assert context.model is not None
+        config = context.model.configuration
+        provider = context.model.client
+        with (
+            use_run_context(context),
+            log_context(
+                correlation_id=correlation_id,
+                run_id=context.run_id,
+            ),
+        ):
             emit_event(
                 MODEL_SELECTED,
-                provider=config.provider,
-                model_reference=config.model,
-                resolution_source=resolution_source,
+                provider=context.model.provider,
+                model_reference=str(context.model.reference),
+                resolution_source=(
+                    "invocation_override"
+                    if model_provider is not None
+                    else context.model.source.value
+                ),
                 outcome="success",
             )
             request = StructuredOutputRequest(
@@ -304,23 +466,45 @@ class OrchestratorAgent(BaseAgent):
                 selection = parse_routing_selection(result)
             except MalformedStructuredOutputError as error:
                 usage = provider_result.usage if provider_result is not None else Usage()
-                return RoutingFailure(str(error), error, usage=usage)
-            except ProviderError as error:
                 return RoutingFailure(
                     str(error),
                     error,
-                    usage=provider_result.usage if provider_result is not None else Usage(),
-                    retryable=error.retryable,
+                    usage=usage,
+                    metadata=context.invocation_metadata(usage),
                 )
+            except ProviderError as error:
+                usage = provider_result.usage if provider_result is not None else Usage()
+                return RoutingFailure(
+                    str(error),
+                    error,
+                    usage=usage,
+                    retryable=error.retryable,
+                    metadata=context.invocation_metadata(usage),
+                )
+            emit_event(
+                MODEL_USAGE_RECORDED,
+                provider=context.model.provider,
+                model_reference=str(context.model.reference),
+                resolution_source=context.model.source.value,
+                input_tokens=result.usage.input_tokens,
+                output_tokens=result.usage.output_tokens,
+                total_tokens=result.usage.total_tokens,
+                outcome="success",
+            )
             invocation = await self.invoke(
                 selection.agent_id,
                 selection.capability_id,
                 selection.arguments,
                 timeout=timeout,
                 correlation_id=correlation_id,
+                run_config=agent_run_config,
             )
             if isinstance(invocation, InvocationSuccess):
-                return dataclasses.replace(invocation, usage=result.usage)
+                return dataclasses.replace(
+                    invocation,
+                    usage=result.usage,
+                    metadata=context.invocation_metadata(result.usage),
+                )
             return invocation
 
     @property
@@ -445,6 +629,8 @@ class OrchestratorAgent(BaseAgent):
         *,
         timeout: float | None = None,
         correlation_id: str = "",
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
     ) -> InvocationResult:
         """Invoke a registered capability using a stable local contract.
 
@@ -456,6 +642,9 @@ class OrchestratorAgent(BaseAgent):
             timeout: Optional positive timeout in seconds. ``None`` disables
                 the invocation timeout.
             correlation_id: Caller-supplied identifier copied into every result.
+            model_reference: Highest-precedence, call-only model reference.
+                It does not mutate the agent or enclosing runtime.
+            run_config: Immutable run-level override and policy facts.
 
         Returns:
             An immutable result envelope. Invalid arguments, missing targets,
@@ -466,6 +655,9 @@ class OrchestratorAgent(BaseAgent):
             TypeError: If ``arguments`` is not a mapping.
             ValueError: If ``timeout`` is not a finite positive number or is
                 a boolean.
+            ModelResolutionError: If a required model is missing, unknown,
+                incompatible, denied by policy, or unavailable. Resolution
+                completes before argument validation and capability execution.
             asyncio.CancelledError: If the caller's asyncio task is canceled.
 
         Notes:
@@ -477,6 +669,8 @@ class OrchestratorAgent(BaseAgent):
             overlapping that worker. Registry state is snapshotted before
             execution, so replacement or removal affects only later
             invocations. Registered agent instances remain owned by the caller.
+            The effective context is available inside the capability through:
+            func:`conducto.get_run_context`.
         """
         if not isinstance(arguments, Mapping):
             raise TypeError("Invocation arguments must be a mapping")
@@ -516,17 +710,56 @@ class OrchestratorAgent(BaseAgent):
                     error_category="target_not_found",
                 )
             return InvocationTargetNotFound(correlation_id, agent_id, capability_id)
+        capability_metadata = registered.capability
+        capability_requirement = (
+            capability_metadata.model_required if capability_metadata is not None else None
+        )
+        agent_model_config = (
+            dataclasses.replace(
+                agent.agent_config,
+                requirement=(
+                    ModelRequirement.REQUIRED if capability_requirement else ModelRequirement.NONE
+                ),
+            )
+            if capability_requirement is not None
+            else agent.agent_config
+        )
+        effective_run = run_config or RunConfig()
+        if timeout is not None:
+            effective_run = dataclasses.replace(effective_run, timeout=timeout)
+        context = self.runtime.create_run_context(
+            agent_id=agent_id,
+            agent_config=agent_model_config,
+            run_config=effective_run,
+            call_override=model_reference,
+            correlation_id=correlation_id,
+        )
+        invocation_metadata = context.invocation_metadata()
         target = registered.callable
         parameter_model = registered.parameter_model
         execution_lock = self._execution_locks.setdefault(
             (id(agent), capability_name),
             threading.Lock(),
         )
+        model_log_context = (
+            {
+                "provider": context.model.provider,
+                "model_reference": str(context.model.reference),
+                "resolution_source": context.model.source.value,
+            }
+            if context.model is not None
+            else {}
+        )
 
-        with log_context(
-            correlation_id=correlation_id,
-            agent_id=agent_id,
-            capability_id=capability_name,
+        with (
+            use_run_context(context),
+            log_context(
+                correlation_id=correlation_id,
+                run_id=context.run_id,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                **model_log_context,
+            ),
         ):
             try:
                 validated = parameter_model.model_validate(dict(arguments))
@@ -544,6 +777,7 @@ class OrchestratorAgent(BaseAgent):
                 return InvocationValidationFailure(
                     correlation_id,
                     tuple(_freeze_mapping(item) for item in error.errors()),
+                    invocation_metadata,
                 )
             emit_event(ARGUMENTS_VALIDATED, outcome="success")
 
@@ -575,7 +809,11 @@ class OrchestratorAgent(BaseAgent):
                     outcome="success",
                     duration_ms=(time.perf_counter() - started) * 1000,
                 )
-                return InvocationSuccess(correlation_id, serialized)
+                return InvocationSuccess(
+                    correlation_id,
+                    serialized,
+                    metadata=invocation_metadata,
+                )
             except asyncio.CancelledError:
                 # Preserve caller cancellation but report a capability that
                 # explicitly cooperatively canceled as a typed outcome.
@@ -587,7 +825,7 @@ class OrchestratorAgent(BaseAgent):
                     outcome="cancelled",
                     duration_ms=(time.perf_counter() - started) * 1000,
                 )
-                return InvocationCancelled(correlation_id)
+                return InvocationCancelled(correlation_id, invocation_metadata)
             except TimeoutError:
                 assert timeout_value is not None
                 emit_event(
@@ -597,7 +835,7 @@ class OrchestratorAgent(BaseAgent):
                     duration_ms=(time.perf_counter() - started) * 1000,
                     error_category="timeout",
                 )
-                return InvocationTimeout(correlation_id, timeout_value)
+                return InvocationTimeout(correlation_id, timeout_value, invocation_metadata)
             except _CapabilityExecutionError as error:
                 emit_event(
                     INVOCATION_FAILED,
@@ -610,6 +848,7 @@ class OrchestratorAgent(BaseAgent):
                     correlation_id,
                     "Capability execution failed",
                     error.exception,
+                    invocation_metadata,
                 )
             except UnsupportedReturnValueError as error:
                 emit_event(
@@ -619,7 +858,12 @@ class OrchestratorAgent(BaseAgent):
                     duration_ms=(time.perf_counter() - started) * 1000,
                     error_category="unsupported_return_value",
                 )
-                return InvocationFailure(correlation_id, str(error), error)
+                return InvocationFailure(
+                    correlation_id,
+                    str(error),
+                    error,
+                    invocation_metadata,
+                )
             except Exception as error:
                 emit_event(
                     INVOCATION_FAILED,
@@ -632,6 +876,7 @@ class OrchestratorAgent(BaseAgent):
                     correlation_id,
                     "Capability execution failed",
                     error,
+                    invocation_metadata,
                 )
 
     async def invoke_capability(
@@ -642,11 +887,13 @@ class OrchestratorAgent(BaseAgent):
         *,
         timeout: float | None = None,
         correlation_id: str = "",
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
     ) -> InvocationResult:
         """Invoke a capability through the explicit capability API.
 
-        This method has the same validation, serialization, timeout,
-        cancellation, and concurrency behavior as :meth: 'invoke`.
+        This method has the same validation, model resolution, serialization,
+        timeout, cancellation, and concurrency behavior as :meth: 'invoke`.
 
         Args:
             agent_id: Published agent name used as the stable agent identifier.
@@ -654,6 +901,8 @@ class OrchestratorAgent(BaseAgent):
             arguments: Structured keyword arguments for the capability.
             timeout: Optional positive timeout in seconds.
             correlation_id: Caller-supplied identifier copied into the result.
+            model_reference: Highest-precedence, call-only model reference.
+            run_config: Immutable run-level override and policy facts.
 
         Returns:
             The typed invocation result returned by :meth: 'invoke`.
@@ -662,6 +911,7 @@ class OrchestratorAgent(BaseAgent):
             TypeError: If ``arguments`` is not a mapping.
             ValueError: If ``timeout`` is not a finite positive number or is
                 a boolean.
+            ModelResolutionError: If a model resolution fails before execution.
             asyncio.CancelledError: If the caller's asyncio task is canceled.
         """
         return await self.invoke(
@@ -670,6 +920,8 @@ class OrchestratorAgent(BaseAgent):
             arguments,
             timeout=timeout,
             correlation_id=correlation_id,
+            model_reference=model_reference,
+            run_config=run_config,
         )
 
     def replace_agent(self, agent: BaseAgent) -> BaseAgent | None:
