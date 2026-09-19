@@ -477,9 +477,7 @@ def test_complete_with_retries_retries_provider_timeouts() -> None:
                 TimeoutThenSuccess(),
                 (),
                 options=GenerationOptions(model="test", timeout=0.001, retries=0),
-                structured_output=StructuredOutputRequest(
-                    name="test", schema={"type": "object"}
-                ),
+                structured_output=StructuredOutputRequest(name="test", schema={"type": "object"}),
             )
 
     asyncio.run(exercise())

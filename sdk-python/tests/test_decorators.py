@@ -39,12 +39,14 @@ def test_a2a_agent_uses_defaults_and_strips_metadata_text() -> None:
             pass
 
     with pytest.raises(ValueError, match="version cannot be empty"):
+
         class InvalidVersionAgent:
             pass
 
         a2a_agent(version="   ")(InvalidVersionAgent)
 
     with pytest.raises(ValueError, match="Decorator metadata cannot contain empty text"):
+
         class InvalidNameAgent:
             pass
 

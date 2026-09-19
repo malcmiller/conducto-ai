@@ -128,8 +128,7 @@ class ModelProvider(Protocol):
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
-    ) -> ProviderResult:
-        ...
+    ) -> ProviderResult: ...
 
 
 def build_routing_schema(
@@ -225,9 +224,7 @@ class FakeModel:
         _ = (messages, options, structured_output)
         self.calls += 1
         if isinstance(self.selection, str):
-            return ProviderResult(
-                content=self.selection, usage=self.usage, accepted=self.accepted
-            )
+            return ProviderResult(content=self.selection, usage=self.usage, accepted=self.accepted)
         selection = (
             self.selection.model_dump()
             if isinstance(self.selection, RoutingSelection)
@@ -255,9 +252,7 @@ def validate_provider_contract(
 
 def parse_routing_selection(result: ProviderResult) -> RoutingSelection:
     if result.structured is None:
-        raise MalformedStructuredOutputError(
-            "Provider returned no structured routing output"
-        )
+        raise MalformedStructuredOutputError("Provider returned no structured routing output")
     try:
         return RoutingSelection.model_validate(result.structured)
     except ValidationError as error:

@@ -127,9 +127,7 @@ class RoutingFailure:
     """Typed failure from provider-backed capability selection."""
 
     message: str
-    exception: BaseException = dataclasses.field(
-        repr=False, compare=False, hash=False
-    )
+    exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
     usage: Usage = dataclasses.field(default_factory=Usage)
     retryable: bool = False
 
