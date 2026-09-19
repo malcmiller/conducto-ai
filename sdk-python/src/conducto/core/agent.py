@@ -491,7 +491,7 @@ class BaseAgent:
                 f"{type(self).__name__}.{attribute_name}: {error}"
             ) from error
 
-        fields: dict[str, tuple[Any, Any]] = {}
+        fields: dict[str, Any] = {}
         for parameter in signature.parameters.values():
             if parameter.kind in {
                 inspect.Parameter.VAR_POSITIONAL,
