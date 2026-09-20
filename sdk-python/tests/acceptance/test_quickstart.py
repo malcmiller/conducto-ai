@@ -111,7 +111,7 @@ def test_quickstart_routes_either_agent_with_the_same_orchestrator_shape() -> No
         )
 
         assert invoice_result.value == {
-            "amount": 1250.0,
+            "amount": 6000.0,
             "approved": False,
             "decision": "review",
             "vendor_id": "vendor-42",
@@ -139,7 +139,7 @@ def test_quickstart_success_path_has_typed_immutable_envelope_and_provenance() -
         assert isinstance(result, InvocationSuccess)
         assert result.correlation_id == "quickstart-provenance"
         assert result.value == {
-            "amount": 1250.0,
+            "amount": 6000.0,
             "approved": False,
             "decision": "review",
             "vendor_id": "vendor-42",
@@ -183,14 +183,17 @@ def test_quickstart_script_executes_and_prints_concise_result() -> None:
     )
 
     assert completed.stderr == ""
-    assert completed.stdout.strip() == (
-        "quickstart result: "
-        "agent=InvoiceAgent "
-        "capability=classify_invoice "
-        'value={"amount": 1250.0, "approved": false, "decision": "review", '
-        '"vendor_id": "vendor-42"} '
-        "correlation_id=quickstart-local-001"
-    )
+    assert completed.stdout.splitlines() == [
+        "approval required: role=finance; granting local demo approval",
+        (
+            "quickstart result: "
+            "agent=InvoiceAgent "
+            "capability=classify_invoice "
+            'value={"amount": 6000.0, "approved": false, "decision": "review", '
+            '"vendor_id": "vendor-42"} '
+            "correlation_id=quickstart-local-001"
+        ),
+    ]
 
 
 def test_quickstart_cards_use_documented_local_urls() -> None:

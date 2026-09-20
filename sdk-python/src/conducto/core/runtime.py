@@ -260,6 +260,7 @@ class Runtime:
     ) -> InvocationResult:
         """Resume one persisted approval-bound invocation exactly once."""
         from .invocation import invoke_agent
+        from .invocation_results import InvocationResult
 
         async def execute() -> InvocationResult:
             return await invoke_agent(

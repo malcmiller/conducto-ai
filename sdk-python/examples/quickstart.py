@@ -8,25 +8,41 @@ Run from ``sdk-python`` after installing the built wheel:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import io
 import json
 import sys
+from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from conducto import (
+    ApprovalDecision,
+    AuthorizationContext,
     BaseAgent,
     FakeModel,
+    InvocationApprovalRequired,
     InvocationSuccess,
     ModelConfiguration,
     OrchestratorAgent,
+    Principal,
     Usage,
     a2a_agent,
     a2a_capability,
     configure_logging,
+    require_approval,
+    require_scope,
 )
 
 CARD_BASE_URL = "https://local.conducto.invalid/a2a"
 QUICKSTART_CORRELATION_ID = "quickstart-local-001"
+
+
+def _requires_finance_approval(
+    _context: AuthorizationContext, arguments: Mapping[str, Any]
+) -> bool:
+    """Require finance approval only for high-value invoices."""
+    return arguments["amount"] >= 5000
 
 
 @a2a_agent(
@@ -39,6 +55,8 @@ class InvoiceAgent(BaseAgent):
         name="classify_invoice",
         description="Classifies an invoice amount for approval routing.",
     )
+    @require_scope("invoices:read")
+    @require_approval("finance", condition=_requires_finance_approval)
     def classify_invoice(self, vendor_id: str, amount: float) -> dict[str, object]:
         band = "review" if amount >= 1000 else "auto-approve"
         return {
@@ -74,7 +92,7 @@ def default_selection() -> dict[str, Any]:
     return {
         "agent_id": "InvoiceAgent",
         "capability_id": "classify_invoice",
-        "arguments": {"vendor_id": "vendor-42", "amount": 1250.0},
+        "arguments": {"vendor_id": "vendor-42", "amount": 6000.0},
     }
 
 
@@ -116,10 +134,47 @@ async def route_once(
     log_stream = io.StringIO()
     configure_logging(format="json", stream=log_stream)
 
-    result = await build_orchestrator(selection).route(
-        request,
+    orchestrator = build_orchestrator(selection)
+    authorization = AuthorizationContext(
+        Principal(
+            "quickstart-user",
+            "quickstart-issuer",
+            "quickstart-audience",
+            scopes=frozenset({"invoices:read"}),
+        ),
+        task_id="quickstart-task",
         correlation_id=correlation_id,
     )
+    result = await orchestrator.route(
+        request,
+        correlation_id=correlation_id,
+        authorization=authorization,
+    )
+    if isinstance(result, InvocationApprovalRequired):
+        challenge = result.challenge
+        print(
+            "approval required: "
+            f"role={challenge.required_role}; granting local demo approval"
+        )
+        # Production applications should collect this decision from an authorized approver.
+        resumed = await orchestrator.resume_approval(
+            challenge.agent_id,
+            challenge.capability_id,
+            selection["arguments"],
+            ApprovalDecision(
+                approval_id=challenge.approval_id,
+                approved=True,
+                decided_at=datetime.now(UTC),
+                decided_by="quickstart-finance-reviewer",
+                role="finance",
+            ),
+            authorization=authorization,
+        )
+        if isinstance(resumed, InvocationSuccess) and result.metadata and resumed.metadata:
+            metadata = resumed.metadata.with_prior_model_calls(result.metadata.model_calls)
+            resumed = dataclasses.replace(resumed, usage=metadata.usage, metadata=metadata)
+        result = resumed
+
     if not isinstance(result, InvocationSuccess):
         raise RuntimeError(f"Quickstart route failed: {result!r}")
 
@@ -134,7 +189,7 @@ async def route_once(
 async def run_quickstart() -> InvocationSuccess:
     """Execute the documented local-agent flow end to end."""
     result, events = await route_once(
-        "Please classify invoice vendor-42 for 1250 dollars.",
+        "Please classify invoice vendor-42 for 6000 dollars.",
         default_selection(),
         correlation_id=QUICKSTART_CORRELATION_ID,
     )
