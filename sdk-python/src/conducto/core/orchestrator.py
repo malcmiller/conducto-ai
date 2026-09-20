@@ -8,6 +8,8 @@ import uuid
 from collections.abc import Iterator, Mapping
 from typing import Any
 
+from conducto.security.context import delegate_context
+
 from .agent import BaseAgent
 from .invocation_results import (
     InvocationResult,
@@ -36,6 +38,7 @@ from .runtime import (
     ProviderRegistry,
     RunConfig,
     Runtime,
+    get_run_context,
     use_run_context,
 )
 
@@ -91,6 +94,8 @@ class OrchestratorAgent(BaseAgent):
         model_config: ModelConfiguration | None = None,
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
+        authorization: Any = None,
+        authorization_context: Any = None,
         agent_run_config: RunConfig | None = None,
         timeout: float | None = None,
         correlation_id: str = "",
@@ -103,6 +108,8 @@ class OrchestratorAgent(BaseAgent):
             model_config: Optional model configuration used with a direct provider.
             model_reference: Optional model name or reference override.
             run_config: Configuration used for the routing run itself.
+            authorization: Optional authenticated authorization context.
+            authorization_context: Alias for ``authorization``.
             agent_run_config: Optional run configuration forwarded to the matched
                 agent invocation.
             timeout: Optional per-call timeout override in seconds.
@@ -124,6 +131,7 @@ class OrchestratorAgent(BaseAgent):
                 provider_registry=registry,
                 config=self.runtime.config,
                 policy=self.runtime.policy,
+                security_pipeline=self.runtime.security_pipeline,
             )
         elif model_config is not None:
             call_override = ModelReference(model_config.model)
@@ -132,6 +140,11 @@ class OrchestratorAgent(BaseAgent):
         if timeout is not None:
             effective_run = dataclasses.replace(effective_run, timeout=timeout)
         try:
+            active_context = get_run_context()
+            effective_authorization = delegate_context(
+                active_context.authorization if active_context is not None else None,
+                authorization if authorization is not None else authorization_context,
+            )
             context = active_runtime.create_run_context(
                 agent_id=self.agent_metadata.name,
                 agent_config=self.agent_config,
@@ -139,6 +152,7 @@ class OrchestratorAgent(BaseAgent):
                 call_override=call_override,
                 correlation_id=correlation_id,
                 required_capabilities=frozenset({"structured_output"}),
+                authorization=effective_authorization,
             )
         except IncompatibleProviderCapabilitiesError as error:
             if model_provider is None and not self._legacy_direct_provider:
@@ -202,6 +216,8 @@ class OrchestratorAgent(BaseAgent):
                 timeout=timeout,
                 correlation_id=correlation_id,
                 run_config=agent_run_config,
+                authorization=authorization,
+                authorization_context=authorization_context,
             )
             capability_metadata = invocation.metadata
             if capability_metadata is not None:
@@ -293,6 +309,8 @@ class OrchestratorAgent(BaseAgent):
         correlation_id: str = "",
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
+        authorization: Any = None,
+        authorization_context: Any = None,
     ) -> InvocationResult:
         """Invoke one capability on a registered agent.
 
@@ -304,6 +322,8 @@ class OrchestratorAgent(BaseAgent):
             correlation_id: Optional correlation identifier for logs and telemetry.
             model_reference: Optional model override for the call.
             run_config: Optional run-level execution configuration.
+            authorization: Optional authenticated authorization context.
+            authorization_context: Alias for ``authorization``.
 
         Returns:
             An invocation result envelope describing success or failure.
@@ -331,6 +351,7 @@ class OrchestratorAgent(BaseAgent):
             correlation_id=correlation_id,
             model_reference=model_reference,
             run_config=run_config,
+            authorization=(authorization if authorization is not None else authorization_context),
         )
 
     async def invoke_capability(
@@ -343,6 +364,8 @@ class OrchestratorAgent(BaseAgent):
         correlation_id: str = "",
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
+        authorization: Any = None,
+        authorization_context: Any = None,
     ) -> InvocationResult:
         """Alias for :meth: 'invoke` that preserves the capability-oriented API."""
         return await self.invoke(
@@ -353,6 +376,32 @@ class OrchestratorAgent(BaseAgent):
             correlation_id=correlation_id,
             model_reference=model_reference,
             run_config=run_config,
+            authorization=(authorization if authorization is not None else authorization_context),
+        )
+
+    async def resume_approval(
+        self,
+        agent_id: str,
+        capability_id: str,
+        arguments: Mapping[str, Any],
+        decision: Any,
+        *,
+        authorization: Any,
+    ) -> InvocationResult:
+        """Resume a persisted approval-bound capability invocation."""
+        agent = self._registry.get(agent_id)
+        if agent is None:
+            return InvocationTargetNotFound(
+                authorization.correlation_id,
+                agent_id,
+                capability_id,
+            )
+        return await self.runtime.resume_approval(
+            agent,
+            capability_id,
+            arguments,
+            decision,
+            authorization=authorization,
         )
 
     def replace_agent(self, agent: BaseAgent) -> BaseAgent | None:

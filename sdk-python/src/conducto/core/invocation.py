@@ -12,6 +12,10 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from conducto.security import SecurityPipeline
+from conducto.security.context import AuthorizationContext
+from conducto.security.errors import SecurityError
+
 from .agent import BaseAgent
 from .agent_card import stable_skill_id
 from .invocation_results import (
@@ -117,6 +121,10 @@ async def invoke_agent(
     correlation_id: str = "",
     model_reference: ModelReference | str | None = None,
     run_config: RunConfig | None = None,
+    authorization: AuthorizationContext | None = None,
+    authorization_context: AuthorizationContext | None = None,
+    security_pipeline: SecurityPipeline | None = None,
+    approved_approval_id: str | None = None,
 ) -> InvocationResult:
     """Execute one capability through the shared runtime-owned pipeline."""
     if not isinstance(agent, BaseAgent):
@@ -173,6 +181,7 @@ async def invoke_agent(
         run_config=effective_run,
         call_override=model_reference,
         correlation_id=correlation_id,
+        authorization=(authorization if authorization is not None else authorization_context),
     )
     invocation_timeout = context.timeout
     target = registered.callable
@@ -217,6 +226,28 @@ async def invoke_agent(
                 context.invocation_metadata(),
             )
         emit_event(ARGUMENTS_VALIDATED, outcome="success")
+        pipeline = security_pipeline or SecurityPipeline()
+        security_result = pipeline.check(
+            target,
+            context.authorization,
+            {name: getattr(validated, name) for name in parameter_model.model_fields},
+            agent_id=agent_id,
+            capability_id=capability_name,
+            approved_approval_id=approved_approval_id,
+        )
+        if not security_result.allowed:
+            if security_result.challenge is not None:
+                from .invocation_results import InvocationApprovalRequired
+
+                return InvocationApprovalRequired(
+                    correlation_id, security_result.challenge, context.invocation_metadata()
+                )
+            assert isinstance(security_result.error, SecurityError)
+            from .invocation_results import InvocationAuthorizationFailure
+
+            return InvocationAuthorizationFailure(
+                correlation_id, security_result.error.reason_code, context.invocation_metadata()
+            )
 
         async def execute() -> Any:
             """Invoke the decorated capability with validated arguments.

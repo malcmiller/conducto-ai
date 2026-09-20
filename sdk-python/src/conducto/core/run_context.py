@@ -24,6 +24,8 @@ from .provider import Usage
 from .runtime_errors import NoActiveRunContextError
 
 if TYPE_CHECKING:
+    from conducto.security import AuthorizationContext
+
     from .model_gateway import ModelGatewayCollection
     from .model_resolution import ResolvedModel, _ResolvedModelBinding
     from .runtime import Runtime
@@ -246,6 +248,7 @@ class RunContext:
     cancellation: CancellationState = field(default_factory=CancellationState)
     metadata: Mapping[str, Any] = field(default_factory=dict)
     agent_id: str = ""
+    authorization: AuthorizationContext | None = field(default=None, repr=False, compare=False)
     policy_context: RunConfig = field(default_factory=RunConfig, repr=False, compare=False)
     _runtime: Runtime | None = field(default=None, repr=False, compare=False)
     _binding: _ResolvedModelBinding | None = field(default=None, repr=False, compare=False)
