@@ -27,6 +27,7 @@ class AgentMetadata:
             default when no call-level or run-level override is supplied.
         model_required: Whether capabilities require a resolved model unless
             they explicitly opt out.
+        tags: Opaque discovery tags inherited by the agent's capabilities.
     """
 
     name: str
@@ -34,6 +35,7 @@ class AgentMetadata:
     description: str | None = None
     default_model: str | None = None
     model_required: bool = False
+    tags: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +47,13 @@ class ExportMetadata:
         description: The published export description, if one was provided.
         model_required: Per-export model requirement. ``None`` inherits the
             agent requirement; ``False`` declares deterministic execution.
+        tags: Opaque discovery tags for this export.
     """
 
     name: str | None = None
     description: str | None = None
     model_required: bool | None = None
+    tags: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +78,7 @@ def a2a_agent(
     description: str | None = None,
     default_model: str | None = None,
     model_required: bool = False,
+    tags: tuple[str, ...] = (),
 ) -> T: ...
 
 
@@ -85,6 +90,7 @@ def a2a_agent(
     description: str | None = None,
     default_model: str | None = None,
     model_required: bool = False,
+    tags: tuple[str, ...] = (),
 ) -> Callable[[T], T]: ...
 
 
@@ -96,6 +102,7 @@ def a2a_agent(
     description: str | None = None,
     default_model: str | None = None,
     model_required: bool = False,
+    tags: tuple[str, ...] = (),
 ) -> T | Callable[[T], T]:
     """Declare a class as an A2A agent.
 
@@ -114,6 +121,7 @@ def a2a_agent(
             The runtime resolves it through its provider registry.
         model_required: Whether exports require a model by default. Individual
             capabilities and tools may override this setting.
+        tags: Opaque discovery tags inherited by capabilities.
 
     Returns:
         The decorated class, or a decorator when called with keyword
@@ -150,6 +158,7 @@ def a2a_agent(
             description=agent_description,
             default_model=_normalize_optional_text(default_model),
             model_required=model_required,
+            tags=_normalize_tags(tags),
         )
         setattr(agent_class, _AGENT_METADATA_ATTRIBUTE, metadata)
         return agent_class
@@ -164,6 +173,7 @@ def a2a_capability(
     name: str | None = None,
     description: str | None = None,
     model_required: bool | None = None,
+    tags: tuple[str, ...] = (),
 ) -> Callable[[F], F]:
     """Expose a method as an A2A capability.
 
@@ -178,6 +188,7 @@ def a2a_capability(
         model_required: Whether the capability requires a model. ``None``
             inherits the agent setting; ``False`` explicitly permits
             deterministic execution without a configured model.
+        tags: Opaque tags used by capability discovery.
 
     Returns:
         A decorator that preserves and returns the decorated callable.
@@ -193,6 +204,7 @@ def a2a_capability(
         name=name,
         description=description,
         model_required=model_required,
+        tags=tags,
     )
 
 
@@ -201,6 +213,7 @@ def tool(
     name: str | None = None,
     description: str | None = None,
     model_required: bool | None = None,
+    tags: tuple[str, ...] = (),
 ) -> Callable[[F], F]:
     """Register a method as an internal Conducto tool.
 
@@ -215,6 +228,7 @@ def tool(
         model_required: Whether the tool requires a model. ``None`` inherits
             the agent setting; ``False`` explicitly permits deterministic
             execution without a configured model.
+        tags: Opaque tags attached to the tool metadata.
 
     Returns:
         A decorator that preserves and returns the decorated callable.
@@ -230,6 +244,7 @@ def tool(
         name=name,
         description=description,
         model_required=model_required,
+        tags=tags,
     )
 
 
@@ -289,6 +304,7 @@ def _export_decorator(
     name: str | None,
     description: str | None,
     model_required: bool | None,
+    tags: tuple[str, ...],
 ) -> Callable[[F], F]:
     """Create a decorator for one of the supported method export kinds."""
 
@@ -296,6 +312,7 @@ def _export_decorator(
         name=_normalize_optional_text(name),
         description=_normalize_optional_text(description),
         model_required=model_required,
+        tags=_normalize_tags(tags),
     )
 
     def decorate(value: F) -> F:
@@ -347,3 +364,9 @@ def _normalize_optional_text(value: str | None) -> str | None:
     if not normalized:
         raise ValueError("Decorator metadata cannot contain empty text")
     return normalized
+
+
+def _normalize_tags(values: tuple[str, ...]) -> frozenset[str]:
+    if any(not isinstance(value, str) or not value.strip() for value in values):
+        raise ValueError("Decorator tags must be non-empty strings")
+    return frozenset(value.strip() for value in values)

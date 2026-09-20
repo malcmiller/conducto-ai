@@ -6,11 +6,12 @@ import asyncio
 
 # noinspection PyPackageRequirements
 import contextvars
+import math
 import threading
 import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from .model_config import (
@@ -26,8 +27,10 @@ from .runtime_errors import NoActiveRunContextError
 if TYPE_CHECKING:
     from conducto.security import AuthorizationContext
 
+    from .gateway import AgentGateway
     from .model_gateway import ModelGatewayCollection
     from .model_resolution import ResolvedModel, _ResolvedModelBinding
+    from .registry import AgentRegistry
     from .runtime import Runtime
 
 
@@ -45,6 +48,89 @@ class CancellationState:
     def cancel(self) -> None:
         """Request cooperative cancellation for the current run."""
         self._event.set()
+
+
+@dataclass(frozen=True, slots=True)
+class DelegationFrame:
+    """Stable agent and capability identity in a delegation path."""
+
+    agent_id: str
+    capability_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RemainingDelegationBudget:
+    """Immutable point-in-time view of shared delegation budgets."""
+
+    depth: int
+    calls: int
+    tokens: int | None
+    cost: float | None
+    time: float | None
+
+
+class DelegationBudget:
+    """Thread-safe shared call, token, and cost reservation ledger."""
+
+    def __init__(
+        self,
+        *,
+        max_depth: int = 8,
+        calls: int = 32,
+        tokens: int | None = None,
+        cost: float | None = None,
+    ) -> None:
+        if max_depth < 0 or calls < 0:
+            raise ValueError("Delegation depth and call budgets cannot be negative")
+        if tokens is not None and tokens < 0:
+            raise ValueError("Delegation token budget cannot be negative")
+        if cost is not None and (not math.isfinite(cost) or cost < 0):
+            raise ValueError("Delegation cost budget must be a finite non-negative number")
+        self.max_depth = max_depth
+        self._calls = calls
+        self._tokens = tokens
+        self._cost = cost
+        self._lock = threading.Lock()
+
+    def snapshot(
+        self,
+        *,
+        current_depth: int,
+        remaining_time: float | None,
+    ) -> RemainingDelegationBudget:
+        """Return an immutable snapshot without exposing mutable ledger state."""
+        with self._lock:
+            return RemainingDelegationBudget(
+                depth=max(0, self.max_depth - current_depth),
+                calls=self._calls,
+                tokens=self._tokens,
+                cost=self._cost,
+                time=remaining_time,
+            )
+
+    def reserve(
+        self,
+        *,
+        calls: int = 1,
+        tokens: int = 0,
+        cost: float = 0,
+    ) -> bool:
+        """Atomically reserve configured resources for a child invocation."""
+        if calls < 0 or tokens < 0 or cost < 0 or not math.isfinite(cost):
+            raise ValueError("Delegation reservations must be finite and non-negative")
+        with self._lock:
+            if self._calls < calls:
+                return False
+            if self._tokens is not None and self._tokens < tokens:
+                return False
+            if self._cost is not None and self._cost < cost:
+                return False
+            self._calls -= calls
+            if self._tokens is not None:
+                self._tokens -= tokens
+            if self._cost is not None:
+                self._cost -= cost
+            return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +262,8 @@ class InvocationMetadata:
 
     run_id: str
     correlation_id: str
+    parent_run_id: str | None = None
+    delegation_path: tuple[DelegationFrame, ...] = ()
     model_reference: str | None = None
     provider: str | None = None
     resolution_source: ModelResolutionSource | None = None
@@ -195,6 +283,11 @@ class InvocationMetadata:
         return {
             "run_id": self.run_id,
             "correlation_id": self.correlation_id,
+            "parent_run_id": self.parent_run_id,
+            "delegation_path": [
+                {"agent_id": frame.agent_id, "capability_id": frame.capability_id}
+                for frame in self.delegation_path
+            ],
             "model_reference": self.model_reference,
             "provider": self.provider,
             "resolution_source": (
@@ -248,9 +341,18 @@ class RunContext:
     cancellation: CancellationState = field(default_factory=CancellationState)
     metadata: Mapping[str, Any] = field(default_factory=dict)
     agent_id: str = ""
+    parent_run_id: str | None = None
+    delegation_path: tuple[DelegationFrame, ...] = ()
+    allowed_capabilities: frozenset[str] | None = None
+    delegation_budget: DelegationBudget = field(
+        default_factory=DelegationBudget,
+        repr=False,
+        compare=False,
+    )
     authorization: AuthorizationContext | None = field(default=None, repr=False, compare=False)
     policy_context: RunConfig = field(default_factory=RunConfig, repr=False, compare=False)
     _runtime: Runtime | None = field(default=None, repr=False, compare=False)
+    _agent_registry: AgentRegistry | None = field(default=None, repr=False, compare=False)
     _binding: _ResolvedModelBinding | None = field(default=None, repr=False, compare=False)
     _model_calls: _ModelCallRecorder = field(
         default_factory=_ModelCallRecorder,
@@ -265,6 +367,13 @@ class RunContext:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", freeze_metadata(self.metadata))
+        object.__setattr__(self, "delegation_path", tuple(self.delegation_path))
+        if self.allowed_capabilities is not None:
+            object.__setattr__(
+                self,
+                "allowed_capabilities",
+                frozenset(self.allowed_capabilities),
+            )
 
     @property
     def model_reference(self) -> ModelReference | None:
@@ -287,6 +396,16 @@ class RunContext:
 
         return ModelGatewayCollection(self._runtime, self)
 
+    @property
+    def gateway(self) -> AgentGateway:
+        """Return the local capability gateway scoped to this invocation."""
+        self.require_active()
+        if self._runtime is None or self._agent_registry is None:
+            raise NoActiveRunContextError("Run context has no local agent gateway")
+        from .gateway import LocalAgentGateway
+
+        return LocalAgentGateway(self._runtime, self._agent_registry, self)
+
     def remaining_timeout(self) -> float | None:
         """Return the remaining monotonic timeout budget for this run.
 
@@ -303,6 +422,18 @@ class RunContext:
             raise TimeoutError("Run deadline exceeded")
         return remaining
 
+    @property
+    def remaining_delegation_budget(self) -> RemainingDelegationBudget:
+        """Return immutable remaining depth, call, time, token, and cost budgets."""
+        try:
+            remaining_time = self.remaining_timeout()
+        except TimeoutError:
+            remaining_time = 0.0
+        return self.delegation_budget.snapshot(
+            current_depth=len(self.delegation_path),
+            remaining_time=remaining_time,
+        )
+
     def require_active(self) -> None:
         """Ensure this context is active for invocation-scoped model access."""
         self._invocation_state.require_active()
@@ -318,6 +449,10 @@ class RunContext:
     def record_model_call(self, call: ModelCallProvenance) -> None:
         """Append provider-call provenance to this invocation."""
         self._model_calls.append(call)
+
+    def model_calls(self) -> tuple[ModelCallProvenance, ...]:
+        """Return model provenance recorded before a delegated invocation."""
+        return self._model_calls.snapshot()
 
     def activate_invocation(self) -> None:
         """Activate invocation-scoped model access for this context."""
@@ -353,6 +488,12 @@ class RunContext:
             "cancelled": self.cancellation.cancelled,
             "metadata": thaw_metadata(self.metadata),
             "agent_id": self.agent_id,
+            "parent_run_id": self.parent_run_id,
+            "delegation_path": [
+                {"agent_id": frame.agent_id, "capability_id": frame.capability_id}
+                for frame in self.delegation_path
+            ],
+            "remaining_delegation_budget": asdict(self.remaining_delegation_budget),
         }
 
     def invocation_metadata(self, usage: Usage | None = None) -> InvocationMetadata:
@@ -368,6 +509,8 @@ class RunContext:
         return InvocationMetadata(
             run_id=self.run_id,
             correlation_id=self.correlation_id,
+            parent_run_id=self.parent_run_id,
+            delegation_path=self.delegation_path,
             model_reference=str(self.model.reference) if self.model is not None else None,
             provider=self.model.provider if self.model is not None else None,
             resolution_source=self.model.source if self.model is not None else None,

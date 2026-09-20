@@ -297,7 +297,11 @@ class OrchestratorAgent(BaseAgent):
         Returns:
             The previous agent instance that was replaced, if any.
         """
-        return self._registry.register(agent, replace=replace)
+        return self._registry.register(
+            agent,
+            replace=replace,
+            allow_capability_conflicts=False,
+        )
 
     async def invoke(
         self,

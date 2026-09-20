@@ -4,6 +4,7 @@ from __future__ import annotations
 
 # noinspection PyPackageRequirements
 import contextvars
+import os
 import threading
 import time
 import uuid
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from conducto.security import (
     ApprovalDecision,
+    AuditDeliveryError,
     AuthorizationContext,
     InMemoryApprovalStore,
     SecurityPipeline,
@@ -55,10 +57,13 @@ from .provider import (
 from .provider_registry import ProviderRegistration, ProviderRegistry
 from .run_context import (
     CancellationState,
+    DelegationBudget,
+    DelegationFrame,
     InvocationMetadata,
     ModelCallProvenance,
     ModelPolicy,
     ModelPolicyContext,
+    RemainingDelegationBudget,
     RunContext,
     activate_run_context,
     deactivate_run_context,
@@ -79,11 +84,15 @@ from .runtime_errors import (
 
 if TYPE_CHECKING:
     from .agent import BaseAgent
+    from .gateway import GatewayPolicy
     from .invocation_results import InvocationResult
+    from .registry import AgentRegistry
 
 __all__ = [
     "AgentModelConfig",
     "CancellationState",
+    "DelegationBudget",
+    "DelegationFrame",
     "ConductoError",
     "GenerationOptions",
     "IncompatibleProviderCapabilitiesError",
@@ -112,6 +121,7 @@ __all__ = [
     "ProviderRegistry",
     "ProviderResult",
     "ProviderUnavailableError",
+    "RemainingDelegationBudget",
     "ResolvedModel",
     "RunConfig",
     "RunContext",
@@ -140,12 +150,30 @@ class Runtime:
         config: RuntimeConfig | None = None,
         policy: ModelPolicy | None = None,
         security_pipeline: SecurityPipeline | None = None,
+        agent_registry: AgentRegistry | None = None,
+        gateway_policy: GatewayPolicy | None = None,
+        gateway_preferred_agents: Mapping[str, str] | None = None,
+        gateway_binding_ttl: float = 300.0,
+        gateway_max_results: int = 20,
+        gateway_max_serialized_bytes: int = 64 * 1024,
     ) -> None:
         self._provider_registry = provider_registry or ProviderRegistry()
         self._model_resolver = ModelResolver(self._provider_registry)
         self.config = config or RuntimeConfig()
         self.policy = policy
         self.security_pipeline = security_pipeline or SecurityPipeline(InMemoryApprovalStore())
+        if agent_registry is None:
+            from .registry import AgentRegistry
+
+            agent_registry = AgentRegistry()
+        self.agent_registry = agent_registry
+        self.gateway_policy = gateway_policy
+        self.gateway_preferred_agents = dict(gateway_preferred_agents or {})
+        self.gateway_binding_ttl = gateway_binding_ttl
+        self.gateway_max_results = gateway_max_results
+        self.gateway_max_serialized_bytes = gateway_max_serialized_bytes
+        self._gateway_runtime_id = str(uuid.uuid4())
+        self._gateway_secret = os.urandom(32)
         self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._execution_locks_guard = threading.Lock()
 
@@ -196,6 +224,8 @@ class Runtime:
         run_config: RunConfig | None = None,
         authorization: Any = None,
         authorization_context: Any = None,
+        allowed_capabilities: frozenset[str] | None = None,
+        delegation_budget: DelegationBudget | None = None,
     ) -> InvocationResult:
         """Invoke a capability through the runtime-owned execution pipeline.
 
@@ -240,6 +270,15 @@ class Runtime:
                 run_config=run_config,
                 authorization=effective_authorization,
                 security_pipeline=self.security_pipeline,
+                allowed_capabilities=allowed_capabilities,
+                delegation_budget=delegation_budget,
+            )
+        except AuditDeliveryError as error:
+            from .invocation_results import InvocationAuditFailure
+
+            return InvocationAuditFailure(
+                correlation_id or self.new_correlation_id(),
+                error.reason_code,
             )
         except SecurityError as error:
             from .invocation_results import InvocationAuthorizationFailure
@@ -369,6 +408,9 @@ class Runtime:
         run_id: str = "",
         required_capabilities: frozenset[str] = frozenset(),
         authorization: Any = None,
+        allowed_capabilities: frozenset[str] | None = None,
+        delegation_budget: DelegationBudget | None = None,
+        delegation_frame: DelegationFrame | None = None,
     ) -> RunContext:
         """Create a new run context for an invocation.
 
@@ -394,26 +436,75 @@ class Runtime:
             call_override=call_override,
             required_capabilities=required_capabilities or agent.required_capabilities,
         )
-        timeout = run.timeout
+        active_context = get_run_context()
+        parent = (
+            active_context
+            if active_context is not None and active_context.belongs_to(self)
+            else None
+        )
+        effective_timeout: float | None = run.timeout
+        requested_deadline = (
+            time.monotonic() + effective_timeout if effective_timeout is not None else None
+        )
+        deadline: float | None
+        if parent is not None and parent.deadline is not None:
+            deadline = (
+                min(requested_deadline, parent.deadline)
+                if requested_deadline is not None
+                else parent.deadline
+            )
+            effective_timeout = max(0.0, deadline - time.monotonic())
+        else:
+            deadline = requested_deadline
         effective_run_id = run_id or (
-            authorization.task_id
-            if isinstance(authorization, AuthorizationContext)
-            else str(uuid.uuid4())
+            str(uuid.uuid4())
+            if parent is not None
+            else (
+                authorization.task_id
+                if isinstance(authorization, AuthorizationContext)
+                else str(uuid.uuid4())
+            )
         )
         if isinstance(authorization, AuthorizationContext) and authorization.correlation_id != (
             correlation_id or authorization.correlation_id
         ):
             raise SecurityError("authorization correlation_id does not match run context")
+        parent_allowed = parent.allowed_capabilities if parent is not None else None
+        effective_allowed: frozenset[str] | None
+        if parent_allowed is not None:
+            if allowed_capabilities is None:
+                effective_allowed = parent_allowed
+            elif not allowed_capabilities.issubset(parent_allowed):
+                raise SecurityError("delegated capabilities are broader than their caller")
+            else:
+                effective_allowed = frozenset(allowed_capabilities)
+        else:
+            effective_allowed = (
+                frozenset(allowed_capabilities) if allowed_capabilities is not None else None
+            )
+        path = parent.delegation_path if parent is not None else ()
+        if delegation_frame is not None:
+            path += (delegation_frame,)
         return RunContext(
             run_id=effective_run_id,
             correlation_id=correlation_id or str(uuid.uuid4()),
             model=binding.model if binding is not None else None,
-            timeout=timeout,
-            deadline=time.monotonic() + timeout if timeout is not None else None,
+            timeout=effective_timeout,
+            deadline=deadline,
+            cancellation=parent.cancellation if parent is not None else CancellationState(),
             metadata=run.metadata,
             agent_id=agent_id,
+            parent_run_id=parent.run_id if parent is not None else None,
+            delegation_path=path,
+            allowed_capabilities=effective_allowed,
+            delegation_budget=(
+                parent.delegation_budget
+                if parent is not None
+                else (delegation_budget or DelegationBudget())
+            ),
             policy_context=run,
             _runtime=self,
+            _agent_registry=self.agent_registry,
             _binding=binding,
             authorization=authorization,
         )
