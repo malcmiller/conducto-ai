@@ -40,6 +40,8 @@ class ApprovalChallenge:
     created_at: datetime
     expires_at: datetime
     display: Mapping[str, str] = field(default_factory=dict)
+    required_roles: tuple[str, ...] = ()
+    principal_subject_id: str = ""
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "display", MappingProxyType(dict(self.display)))
@@ -54,6 +56,7 @@ class ApprovalDecision:
     decided_at: datetime
     decided_by: str
     reason_code: str = ""
+    role: str | None = None
 
 
 class Clock(Protocol):
@@ -76,6 +79,7 @@ class ApprovalStore(Protocol):
     def decide(self, decision: ApprovalDecision) -> ApprovalChallenge: ...
     def cancel(self, approval_id: str) -> ApprovalChallenge: ...
     def complete(self, approval_id: str) -> ApprovalChallenge: ...
+    def state(self, approval_id: str) -> ApprovalState: ...
 
 
 class SystemClock:
@@ -93,6 +97,7 @@ class InMemoryApprovalStore:
         self._clock = clock or SystemClock()
         self._items: dict[str, ApprovalChallenge] = {}
         self._states: dict[str, ApprovalState] = {}
+        self._approved_roles: dict[str, set[str]] = {}
         self._lock = threading.Lock()
 
     def create(self, challenge: ApprovalChallenge) -> ApprovalChallenge:
@@ -101,11 +106,12 @@ class InMemoryApprovalStore:
                 raise InvalidApprovalStateError("approval id already exists")
             self._items[challenge.approval_id] = challenge
             self._states[challenge.approval_id] = ApprovalState.REQUIRED
+            self._approved_roles[challenge.approval_id] = set()
             return challenge
 
     def get(self, approval_id: str) -> ApprovalChallenge:
         with self._lock:
-            challenge = self._items[approval_id]
+            challenge = self._lookup(approval_id)
             if (
                 self._states[approval_id] == ApprovalState.REQUIRED
                 and self._clock.now() >= challenge.expires_at
@@ -116,7 +122,7 @@ class InMemoryApprovalStore:
 
     def decide(self, decision: ApprovalDecision) -> ApprovalChallenge:
         with self._lock:
-            challenge = self._items[decision.approval_id]
+            challenge = self._lookup(decision.approval_id)
             if (
                 self._states[decision.approval_id] == ApprovalState.REQUIRED
                 and self._clock.now() >= challenge.expires_at
@@ -125,14 +131,22 @@ class InMemoryApprovalStore:
                 raise ApprovalExpiredError("approval challenge expired")
             if self._states[decision.approval_id] != ApprovalState.REQUIRED:
                 raise InvalidApprovalStateError("approval is no longer pending")
-            self._states[decision.approval_id] = (
-                ApprovalState.APPROVED if decision.approved else ApprovalState.DENIED
-            )
+            if not decision.approved:
+                self._states[decision.approval_id] = ApprovalState.DENIED
+            else:
+                roles = challenge.required_roles or (challenge.required_role,)
+                role = decision.role or (roles[0] if len(roles) == 1 else None)
+                if role not in roles:
+                    raise InvalidApprovalStateError("decision role is not required")
+                assert role is not None
+                self._approved_roles[decision.approval_id].add(role)
+                if set(roles).issubset(self._approved_roles[decision.approval_id]):
+                    self._states[decision.approval_id] = ApprovalState.APPROVED
             return challenge
 
     def cancel(self, approval_id: str) -> ApprovalChallenge:
         with self._lock:
-            challenge = self._items[approval_id]
+            challenge = self._lookup(approval_id)
             if (
                 self._states[approval_id] == ApprovalState.REQUIRED
                 and self._clock.now() >= challenge.expires_at
@@ -146,16 +160,23 @@ class InMemoryApprovalStore:
 
     def state(self, approval_id: str) -> ApprovalState:
         with self._lock:
+            self._lookup(approval_id)
             return self._states[approval_id]
 
     def complete(self, approval_id: str) -> ApprovalChallenge:
         """Atomically consume an approved challenge exactly once."""
         with self._lock:
-            challenge = self._items[approval_id]
+            challenge = self._lookup(approval_id)
             if self._states[approval_id] != ApprovalState.APPROVED:
                 raise InvalidApprovalStateError("approval is not approved or was already consumed")
             self._states[approval_id] = ApprovalState.COMPLETED
             return challenge
+
+    def _lookup(self, approval_id: str) -> ApprovalChallenge:
+        try:
+            return self._items[approval_id]
+        except KeyError as error:
+            raise InvalidApprovalStateError("unknown approval id") from error
 
 
 def default_challenge(
@@ -168,6 +189,8 @@ def default_challenge(
     ttl_seconds: float = 300,
     identifiers: IdentifierGenerator = lambda: str(uuid.uuid4()),
     clock: Clock | None = None,
+    required_roles: tuple[str, ...] = (),
+    principal_subject_id: str | None = None,
 ) -> ApprovalChallenge:
     """Build a safe challenge payload for an invocation."""
     now = (clock or SystemClock()).now()
@@ -181,4 +204,6 @@ def default_challenge(
         role,
         now,
         now + timedelta(seconds=ttl_seconds),
+        required_roles=required_roles,
+        principal_subject_id=principal_subject_id or context.principal.subject_id,
     )

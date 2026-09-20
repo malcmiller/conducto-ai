@@ -123,6 +123,8 @@ async def invoke_agent(
     run_config: RunConfig | None = None,
     authorization: AuthorizationContext | None = None,
     authorization_context: AuthorizationContext | None = None,
+    security_pipeline: SecurityPipeline | None = None,
+    approved_approval_id: str | None = None,
 ) -> InvocationResult:
     """Execute one capability through the shared runtime-owned pipeline."""
     if not isinstance(agent, BaseAgent):
@@ -224,12 +226,14 @@ async def invoke_agent(
                 context.invocation_metadata(),
             )
         emit_event(ARGUMENTS_VALIDATED, outcome="success")
-        security_result = SecurityPipeline().check(
+        pipeline = security_pipeline or SecurityPipeline()
+        security_result = pipeline.check(
             target,
             context.authorization,
             {name: getattr(validated, name) for name in parameter_model.model_fields},
             agent_id=agent_id,
             capability_id=capability_name,
+            approved_approval_id=approved_approval_id,
         )
         if not security_result.allowed:
             if security_result.challenge is not None:

@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from .errors import AuthorizationDeniedError, MissingAuthorizationContextError
+
 
 def _freeze(value: Any) -> Any:
     if isinstance(value, Mapping):
@@ -56,3 +58,31 @@ class AuthorizationContext:
         if not self.task_id or not self.correlation_id:
             raise ValueError("task_id and correlation_id are required")
         object.__setattr__(self, "policy_metadata", _freeze(self.policy_metadata))
+
+
+def delegate_context(
+    parent: AuthorizationContext | None,
+    candidate: AuthorizationContext | None,
+) -> AuthorizationContext | None:
+    """Inherit or restrict authorization for nested local invocation."""
+    if candidate is None:
+        return parent
+    if not isinstance(candidate, AuthorizationContext):
+        raise MissingAuthorizationContextError("invalid authorization context")
+    if parent is None:
+        return candidate
+    if not isinstance(parent, AuthorizationContext):
+        raise MissingAuthorizationContextError("invalid active authorization context")
+    parent_principal = parent.principal
+    child_principal = candidate.principal
+    if (
+        child_principal.subject_id != parent_principal.subject_id
+        or child_principal.issuer != parent_principal.issuer
+        or child_principal.audience != parent_principal.audience
+        or not child_principal.roles.issubset(parent_principal.roles)
+        or not child_principal.scopes.issubset(parent_principal.scopes)
+        or candidate.task_id != parent.task_id
+        or candidate.correlation_id != parent.correlation_id
+    ):
+        raise AuthorizationDeniedError("delegated authorization is broader than its caller")
+    return candidate

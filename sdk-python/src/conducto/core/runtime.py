@@ -8,7 +8,16 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
+
+from conducto.security import (
+    ApprovalDecision,
+    AuthorizationContext,
+    InMemoryApprovalStore,
+    SecurityPipeline,
+)
+from conducto.security.context import delegate_context
+from conducto.security.errors import SecurityError
 
 from .logging import MODEL_SELECTED, MODEL_USAGE_RECORDED, emit_event, log_context
 from .model_config import (
@@ -130,11 +139,13 @@ class Runtime:
         provider_registry: ProviderRegistry | None = None,
         config: RuntimeConfig | None = None,
         policy: ModelPolicy | None = None,
+        security_pipeline: SecurityPipeline | None = None,
     ) -> None:
         self._provider_registry = provider_registry or ProviderRegistry()
         self._model_resolver = ModelResolver(self._provider_registry)
         self.config = config or RuntimeConfig()
         self.policy = policy
+        self.security_pipeline = security_pipeline or SecurityPipeline(InMemoryApprovalStore())
         self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._execution_locks_guard = threading.Lock()
 
@@ -204,17 +215,97 @@ class Runtime:
         """
         from .invocation import invoke_agent
 
-        return await invoke_agent(
-            self,
-            agent,
-            capability,
-            arguments,
-            timeout=timeout,
-            correlation_id=correlation_id,
-            model_reference=model_reference,
-            run_config=run_config,
-            authorization=authorization if authorization is not None else authorization_context,
-        )
+        active_context = get_run_context()
+        try:
+            effective_authorization = delegate_context(
+                active_context.authorization if active_context is not None else None,
+                authorization if authorization is not None else authorization_context,
+            )
+        except SecurityError as error:
+            from .invocation_results import InvocationAuthorizationFailure
+
+            return InvocationAuthorizationFailure(
+                correlation_id or self.new_correlation_id(),
+                error.reason_code,
+            )
+        try:
+            return await invoke_agent(
+                self,
+                agent,
+                capability,
+                arguments,
+                timeout=timeout,
+                correlation_id=correlation_id,
+                model_reference=model_reference,
+                run_config=run_config,
+                authorization=effective_authorization,
+                security_pipeline=self.security_pipeline,
+            )
+        except SecurityError as error:
+            from .invocation_results import InvocationAuthorizationFailure
+
+            return InvocationAuthorizationFailure(
+                correlation_id or self.new_correlation_id(),
+                error.reason_code,
+            )
+
+    async def resume_approval(
+        self,
+        agent: BaseAgent,
+        capability: str | Callable[..., Any],
+        arguments: Mapping[str, Any],
+        decision: ApprovalDecision,
+        *,
+        authorization: AuthorizationContext,
+    ) -> InvocationResult:
+        """Resume one persisted approval-bound invocation exactly once."""
+        from .invocation import invoke_agent
+
+        async def execute() -> InvocationResult:
+            return await invoke_agent(
+                self,
+                agent,
+                capability,
+                arguments,
+                correlation_id=authorization.correlation_id,
+                authorization=authorization,
+                security_pipeline=self.security_pipeline,
+                approved_approval_id=decision.approval_id,
+            )
+
+        capability_name = capability if isinstance(capability, str) else ""
+        if not isinstance(capability, str):
+            requested = getattr(capability, "__func__", capability)
+            for name, registered in agent.capabilities.items():
+                candidate = getattr(registered.callable, "__func__", registered.callable)
+                if candidate is requested:
+                    capability_name = name
+                    break
+        try:
+            return cast(
+                InvocationResult,
+                await self.security_pipeline.resume(
+                    decision,
+                    execute,
+                    agent_id=agent.agent_metadata.name,
+                    capability_id=capability_name,
+                    context=authorization,
+                ),
+            )
+        except SecurityError as error:
+            from .invocation_results import (
+                InvocationApprovalRequired,
+                InvocationAuthorizationFailure,
+            )
+
+            if error.reason_code == "approval_required":
+                assert self.security_pipeline.store is not None
+                challenge = self.security_pipeline.store.get(decision.approval_id)
+                return InvocationApprovalRequired(authorization.correlation_id, challenge)
+            return InvocationAuthorizationFailure(
+                authorization.correlation_id,
+                error.reason_code,
+            )
 
     def create_run_context(
         self,
@@ -253,8 +344,17 @@ class Runtime:
             required_capabilities=required_capabilities or agent.required_capabilities,
         )
         timeout = run.timeout
+        effective_run_id = run_id or (
+            authorization.task_id
+            if isinstance(authorization, AuthorizationContext)
+            else str(uuid.uuid4())
+        )
+        if isinstance(authorization, AuthorizationContext) and authorization.correlation_id != (
+            correlation_id or authorization.correlation_id
+        ):
+            raise SecurityError("authorization correlation_id does not match run context")
         return RunContext(
-            run_id=run_id or str(uuid.uuid4()),
+            run_id=effective_run_id,
             correlation_id=correlation_id or str(uuid.uuid4()),
             model=binding.model if binding is not None else None,
             timeout=timeout,
