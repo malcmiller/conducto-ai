@@ -1,6 +1,8 @@
 """Acceptance coverage for standalone and orchestrated model-backed agents."""
 
 import asyncio
+import threading
+import time
 
 import pytest
 from pydantic import BaseModel
@@ -10,6 +12,7 @@ from conducto import (
     ChatMessage,
     FakeModel,
     InvocationSuccess,
+    InvocationTimeout,
     ModelConfiguration,
     NoActiveRunContextError,
     OrchestratorAgent,
@@ -271,3 +274,37 @@ def test_runtime_rejects_capability_bound_to_another_agent_instance() -> None:
         assert worker.calls == 0
 
     asyncio.run(exercise())
+
+
+def test_runtime_preserves_sync_capability_lock_after_timeout() -> None:
+    active = 0
+    maximum_active = 0
+    guard = threading.Lock()
+
+    class LockAgent(BaseAgent):
+        """Lock test agent."""
+
+        @a2a_capability(name="work", description="Does blocking work.")
+        def work(self, delay: float) -> str:
+            nonlocal active, maximum_active
+            with guard:
+                active += 1
+                maximum_active = max(maximum_active, active)
+            time.sleep(delay)
+            with guard:
+                active -= 1
+            return "done"
+
+    async def exercise() -> None:
+        runtime = Runtime()
+        agent = LockAgent()
+        first = await runtime.invoke(agent, "work", {"delay": 0.04}, timeout=0.001)
+        second = await runtime.invoke(agent, "work", {"delay": 0}, timeout=0.001)
+        assert isinstance(first, InvocationTimeout)
+        assert isinstance(second, InvocationTimeout)
+        await asyncio.sleep(0.06)
+        final = await runtime.invoke(agent, "work", {"delay": 0})
+        assert isinstance(final, InvocationSuccess)
+
+    asyncio.run(exercise())
+    assert maximum_active == 1

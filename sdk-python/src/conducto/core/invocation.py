@@ -1,22 +1,28 @@
-"""Shared capability invocation contracts and execution pipeline."""
+"""Capability argument validation and execution pipeline."""
 
 from __future__ import annotations
 
 import asyncio
 import dataclasses
-import enum
 import inspect
-import json
 import math
 import time
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
-from types import MappingProxyType
-from typing import Any, TypeAlias
+from collections.abc import Callable, Mapping
+from typing import Any
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from .agent import BaseAgent, RegisteredMethod
+from .agent import BaseAgent
+from .invocation_results import (
+    InvocationCancelled,
+    InvocationFailure,
+    InvocationResult,
+    InvocationSuccess,
+    InvocationTargetNotFound,
+    InvocationTimeout,
+    InvocationValidationFailure,
+    UnsupportedReturnValueError,
+)
 from .logging import (
     ARGUMENTS_VALIDATED,
     INVOCATION_CANCELLED,
@@ -27,85 +33,27 @@ from .logging import (
     emit_event,
     log_context,
 )
-from .provider import Usage
-from .runtime import (
-    InvocationMetadata,
-    ModelReference,
-    ModelRequirement,
-    RunConfig,
-    Runtime,
-    use_run_context,
-)
+from .model_config import ModelReference, ModelRequirement, RunConfig
+from .registration import RegisteredMethod
+from .run_context import use_run_context
+from .runtime import Runtime
+from .serialization import freeze_mapping, serialize_result
 
+__all__ = [
+    "InvocationCancelled",
+    "InvocationFailure",
+    "InvocationResult",
+    "InvocationSuccess",
+    "InvocationTargetNotFound",
+    "InvocationTimeout",
+    "InvocationValidationFailure",
+    "UnsupportedReturnValueError",
+    "invoke_agent",
+]
 
-@dataclass(frozen=True, slots=True)
-class InvocationSuccess:
-    """Successful capability invocation result."""
-
-    correlation_id: str
-    value: Any
-    usage: Usage = dataclasses.field(default_factory=Usage)
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationValidationFailure:
-    """Result returned when capability arguments fail Pydantic validation."""
-
-    correlation_id: str
-    errors: tuple[Mapping[str, Any], ...]
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationTargetNotFound:
-    """Result returned when the requested agent capability is unavailable."""
-
-    correlation_id: str
-    agent_id: str
-    capability_id: str
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationTimeout:
-    """Result returned when a capability exceeds its invocation timeout."""
-
-    correlation_id: str
-    timeout: float
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationCancelled:
-    """Result returned when a capability cooperatively reports cancellation."""
-
-    correlation_id: str
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationFailure:
-    """Safe result for a capability exception or unsupported return value."""
-
-    correlation_id: str
-    message: str
-    exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
-    metadata: InvocationMetadata | None = None
-
-
-InvocationResult: TypeAlias = (
-    InvocationSuccess
-    | InvocationValidationFailure
-    | InvocationTargetNotFound
-    | InvocationTimeout
-    | InvocationCancelled
-    | InvocationFailure
-)
-
-
-class UnsupportedReturnValueError(TypeError):
-    """Raised when a capability result cannot be represented safely."""
+# Retain private names used by older internal integrations.
+_serialize_result = serialize_result
+_freeze_mapping = freeze_mapping
 
 
 class _CapabilityExecutionError(Exception):
@@ -114,55 +62,6 @@ class _CapabilityExecutionError(Exception):
     def __init__(self, exception: Exception) -> None:
         super().__init__(str(exception))
         self.exception = exception
-
-
-def _serialize_result(value: Any) -> Any:
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise UnsupportedReturnValueError("Non-finite floats are unsupported")
-        return value
-    if isinstance(value, enum.Enum):
-        return _serialize_result(value.value)
-    if isinstance(value, BaseModel):
-        try:
-            return _serialize_result(value.model_dump(mode="json"))
-        except Exception as error:
-            raise UnsupportedReturnValueError(
-                f"Could not serialize Pydantic model: {type(value).__name__}"
-            ) from error
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return _serialize_result(dataclasses.asdict(value))
-    if isinstance(value, Mapping):
-        if any(not isinstance(key, str) for key in value):
-            raise UnsupportedReturnValueError("Mapping keys must be strings")
-        return {key: _serialize_result(value[key]) for key in sorted(value)}
-    if isinstance(value, (list, tuple)):
-        return [_serialize_result(item) for item in value]
-    if isinstance(value, (set, frozenset)):
-        serialized = [_serialize_result(item) for item in value]
-        return sorted(
-            serialized,
-            key=lambda item: json.dumps(
-                item, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-            ),
-        )
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_serialize_result(item) for item in value]
-    raise UnsupportedReturnValueError(
-        f"Unsupported capability return value: {type(value).__name__}"
-    )
-
-
-def _freeze_mapping(value: Any) -> Any:
-    if isinstance(value, dict):
-        return MappingProxyType({key: _freeze_mapping(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze_mapping(item) for item in value)
-    if isinstance(value, tuple):
-        return tuple(_freeze_mapping(item) for item in value)
-    return value
 
 
 def _resolve_capability(
@@ -237,11 +136,7 @@ async def invoke_agent(
                 outcome="failure",
                 error_category="target_not_found",
             )
-        return InvocationTargetNotFound(
-            correlation_id,
-            agent_id,
-            str(capability_id),
-        )
+        return InvocationTargetNotFound(correlation_id, agent_id, str(capability_id))
 
     capability_name, registered = resolved
     capability_metadata = registered.capability
@@ -310,7 +205,7 @@ async def invoke_agent(
             )
             return InvocationValidationFailure(
                 correlation_id,
-                tuple(_freeze_mapping(item) for item in error.errors()),
+                tuple(freeze_mapping(item) for item in error.errors()),
                 context.invocation_metadata(),
             )
         emit_event(ARGUMENTS_VALIDATED, outcome="success")
@@ -338,7 +233,7 @@ async def invoke_agent(
         try:
             remaining = context.remaining_timeout()
             result = await asyncio.wait_for(execute(), timeout=remaining)
-            serialized = _serialize_result(result)
+            serialized = serialize_result(result)
             emit_event(
                 INVOCATION_COMPLETED,
                 outcome="success",
