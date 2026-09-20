@@ -76,7 +76,7 @@ class SecurityPipeline:
 
     def resume(
         self,
-            decision: ApprovalDecision,
+        decision: ApprovalDecision,
         execute: Callable[[], Any],
     ) -> Any:
         """Consume an approved challenge at once, then execute its protected work.
