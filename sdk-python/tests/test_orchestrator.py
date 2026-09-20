@@ -404,7 +404,11 @@ def test_orchestrator_route_reports_unsupported_provider_unknown_target_and_inva
                         InvocationTargetNotFound,
                 ),
                 (
-                        {"agent_id": "RouteAgent", "capability_id": "add", "arguments": {"value": "bad"}},
+                        {
+                            "agent_id": "RouteAgent",
+                            "capability_id": "add",
+                            "arguments": {"value": "bad"},
+                        },
                         InvocationValidationFailure,
                 ),
         ):

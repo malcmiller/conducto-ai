@@ -13,6 +13,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from .agent import BaseAgent
+from .agent_card import stable_skill_id
 from .invocation_results import (
     InvocationCancelled,
     InvocationFailure,
@@ -73,7 +74,7 @@ def _resolve_capability(
         if registered is not None:
             return capability, registered
         for name, candidate in agent.capabilities.items():
-            if agent._skill_id(name) == capability:
+            if stable_skill_id(agent.agent_metadata.name, name) == capability:
                 return name, candidate
         return None
 
@@ -126,11 +127,14 @@ async def invoke_agent(
     timeout_value = _validated_timeout(timeout)
     correlation_id = correlation_id or runtime.new_correlation_id()
     resolved = _resolve_capability(agent, capability)
-    capability_id = capability if isinstance(capability, str) else getattr(
-        capability,
-        "__name__",
-        capability.__class__.__name__,
-    )
+    if isinstance(capability, str):
+        capability_id = capability
+    else:
+        capability_id = getattr(capability, "__name__", None)
+        if capability_id is None:
+            capability_id = getattr(capability, "__qualname__", None)
+        if capability_id is None:
+            capability_id = str(capability)
     agent_id = agent.agent_metadata.name
     if resolved is None:
         with log_context(correlation_id=correlation_id, agent_id=agent_id):

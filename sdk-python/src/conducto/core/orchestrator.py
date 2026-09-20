@@ -402,11 +402,11 @@ class OrchestratorAgent(BaseAgent):
 
     def _conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
         """Return capability names that would conflict with a candidate agent."""
-        return self._registry._conflicting_capabilities(agent)
+        return self._registry.conflicting_capabilities(agent)
 
     def _remove_agent_mapping(self, agent: BaseAgent) -> None:
         """Remove the internal registry mapping for one agent."""
-        self._registry._remove_mapping(agent)
+        self._registry.remove_mapping(agent)
 
     def get_routing_metadata(self) -> list[dict[str, Any]]:
         """Return routing metadata generated from the live agent registry.

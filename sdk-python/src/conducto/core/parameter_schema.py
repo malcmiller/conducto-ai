@@ -11,12 +11,24 @@ from pydantic import (
     ConfigDict,
     PydanticInvalidForJsonSchema,
     PydanticSchemaGenerationError,
-    create_model,
 )
+from pydantic import create_model as _pydantic_create_model
 
 
 class ParameterSchemaError(ValueError):
     """Raised when a callable cannot be represented by a parameter model."""
+
+
+def create_parameter_model(
+        model_name: str,
+        fields: dict[str, Any],
+) -> type[BaseModel]:
+    """Create a strict Pydantic parameter model from reflected fields."""
+    return _pydantic_create_model(
+        model_name,
+        __config__=ConfigDict(extra="forbid"),
+        **fields,
+    )
 
 
 def build_parameter_model(
@@ -67,10 +79,9 @@ def build_parameter_model(
         fields[parameter.name] = (annotation, default)
 
     try:
-        return create_model(
+        return create_parameter_model(
             f"{agent_type.__name__}_{attribute_name}_Parameters",
-            __config__=ConfigDict(extra="forbid"),
-            **fields,
+            fields,
         )
     except (PydanticSchemaGenerationError, PydanticInvalidForJsonSchema) as error:
         raise ParameterSchemaError(

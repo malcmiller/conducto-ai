@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+# noinspection PyPackageRequirements
 import contextvars
 import threading
 import time
@@ -361,14 +362,25 @@ class Runtime:
         Raises:
             ValueError: If the run context belongs to a different runtime.
         """
-        if context._runtime is not self:
+        if not context.belongs_to(self):
             raise ValueError("Run context belongs to a different runtime")
-        return await complete_model_call(
-            self,
+        required = (
+            frozenset({"structured_output"})
+            if structured_output.json_schema
+            else frozenset()
+        )
+        binding = self._resolve_for_call_binding(
             context,
+            model,
+            required_capabilities=required,
+        )
+        if binding is None:
+            raise MissingModelDefaultError(f"Agent '{context.agent_id}' requires a model")
+        return await complete_model_call(
+            context,
+            binding,
             messages,
             structured_output=structured_output,
-            model=model,
             purpose=purpose,
         )
 

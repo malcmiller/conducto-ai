@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+
+# noinspection PyPackageRequirements
 import contextvars
 import threading
 import time
@@ -298,6 +300,39 @@ class RunContext:
             raise TimeoutError("Run deadline exceeded")
         return remaining
 
+    def require_active(self) -> None:
+        """Ensure this context is active for invocation-scoped model access."""
+        self._invocation_state.require_active()
+
+    def begin_model_call(self) -> asyncio.Task[Any]:
+        """Register and return the current task as an active model call."""
+        return self._invocation_state.begin_model_call()
+
+    def end_model_call(self, task: asyncio.Task[Any]) -> None:
+        """Unregister a completed model call task."""
+        self._invocation_state.end_model_call(task)
+
+    def record_model_call(self, call: ModelCallProvenance) -> None:
+        """Append provider-call provenance to this invocation."""
+        self._model_calls.append(call)
+
+    def activate_invocation(self) -> None:
+        """Activate invocation-scoped model access for this context."""
+        self._invocation_state.activate()
+
+    def deactivate_invocation(self) -> None:
+        """Deactivate model access and cancel unfinished model calls."""
+        self._invocation_state.deactivate()
+
+    def belongs_to(self, runtime: Runtime) -> bool:
+        """Return whether this context was created by the given runtime."""
+        return self._runtime is runtime
+
+    @property
+    def model_binding(self) -> _ResolvedModelBinding | None:
+        """Return the runtime-private provider binding for model resolution."""
+        return self._binding
+
     def to_dict(self) -> dict[str, Any]:
         """Serialize the run context to a JSON-friendly dictionary.
 
@@ -363,13 +398,13 @@ def require_run_context() -> RunContext:
 @contextmanager
 def use_run_context(context: RunContext) -> Iterator[RunContext]:
     """Activate a context and constrain its model gateways to this scope."""
-    context._invocation_state.activate()
+    context.activate_invocation()
     token = _CURRENT_RUN_CONTEXT.set(context)
     try:
         yield context
     finally:
         _CURRENT_RUN_CONTEXT.reset(token)
-        context._invocation_state.deactivate()
+        context.deactivate_invocation()
 
 
 def activate_run_context(context: RunContext) -> contextvars.Token[RunContext | None]:

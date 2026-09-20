@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -16,6 +16,8 @@ from .provider import (
     ChatMessage,
     GenerationOptions,
     MalformedStructuredOutputError,
+    ModelConfiguration,
+    ModelProvider,
     ProviderResult,
     StructuredOutputRequest,
     complete_with_retries,
@@ -24,9 +26,21 @@ from .run_context import InvocationMetadata, ModelCallProvenance, RunContext
 from .runtime_errors import MissingModelDefaultError
 
 if TYPE_CHECKING:
+    from .model_resolution import ResolvedModel
     from .runtime import Runtime
 
 ModelResponseT = TypeVar("ModelResponseT", bound=BaseModel)
+
+
+class _ModelBinding(Protocol):
+    @property
+    def model(self) -> ResolvedModel: ...
+
+    @property
+    def client(self) -> ModelProvider: ...
+
+    @property
+    def configuration(self) -> ModelConfiguration: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +73,8 @@ class ModelGatewayCollection:
         Raises:
             MissingModelDefaultError: If no model can be resolved for the invocation.
         """
-        self._context._invocation_state.require_active()
-        resolved = self._runtime._resolve_for_call_binding(self._context, reference)
+        self._context.require_active()
+        resolved = self._runtime.resolve_for_call(self._context, reference)
         if resolved is None:
             raise MissingModelDefaultError(f"Agent '{self._context.agent_id}' requires a model")
         return ModelGateway(self._runtime, self._context, reference)
@@ -89,7 +103,7 @@ class ModelGateway:
         Returns:
             The provider result and associated invocation metadata.
         """
-        task = self._context._invocation_state.begin_model_call()
+        task = self._context.begin_model_call()
         try:
             return await self._runtime.complete(
                 self._context,
@@ -99,7 +113,7 @@ class ModelGateway:
                 purpose="capability",
             )
         finally:
-            self._context._invocation_state.end_model_call(task)
+            self._context.end_model_call(task)
 
     async def complete_typed(
             self,
@@ -135,23 +149,14 @@ class ModelGateway:
 
 
 async def complete_model_call(
-        runtime: Runtime,
         context: RunContext,
+        binding: _ModelBinding,
         messages: Sequence[ChatMessage],
         *,
         structured_output: StructuredOutputRequest,
-        model: ModelReference | str | None = None,
         purpose: str = "model_call",
 ) -> ModelCallResult:
-    """Resolve and execute one provider call without mutating the run context."""
-    required = frozenset({"structured_output"}) if structured_output.json_schema else frozenset()
-    binding = runtime._resolve_for_call_binding(
-        context,
-        model,
-        required_capabilities=required,
-    )
-    if binding is None:
-        raise MissingModelDefaultError(f"Agent '{context.agent_id}' requires a model")
+    """Execute one resolved provider call without mutating the run context."""
     if context.cancellation.cancelled:
         raise asyncio.CancelledError
     resolved = binding.model
@@ -205,7 +210,7 @@ async def complete_model_call(
         resolution_source=resolved.source,
         usage=result.usage,
     )
-    context._model_calls.append(model_call)
+    context.record_model_call(model_call)
     metadata = InvocationMetadata(
         run_id=context.run_id,
         correlation_id=context.correlation_id,

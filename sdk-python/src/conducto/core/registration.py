@@ -5,12 +5,16 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any
 
 from pydantic import BaseModel
 
 from .decorators import AgentMetadata, ExportMetadata, get_agent_metadata, get_method_metadata
-from .parameter_schema import ParameterSchemaError, build_parameter_schema
+from .parameter_schema import (
+    ParameterSchemaError,
+    build_parameter_model,
+    build_parameter_schema,
+)
 
 
 class AgentRegistrationError(ValueError):
@@ -38,34 +42,8 @@ class RegisteredMethod:
     tool: ExportMetadata | None = None
 
 
-class _RegistrationHost(Protocol):
-    def _resolved_attributes(self) -> list[tuple[str, Any]]: ...
-
-    def _build_parameter_model(
-            self,
-            attribute_name: str,
-            method: Callable[..., Any],
-    ) -> type[BaseModel]: ...
-
-    def _resolve_export_metadata(
-            self,
-            attribute_name: str,
-            method: Callable[..., Any],
-            metadata: ExportMetadata | None,
-    ) -> ExportMetadata | None: ...
-
-    def _add_export(
-            self,
-            registry: dict[str, RegisteredMethod],
-            export_name: str,
-            method: RegisteredMethod,
-            *,
-            export_kind: str,
-    ) -> None: ...
-
-
 def register_decorated_methods(
-        agent: _RegistrationHost,
+        agent: Any,
 ) -> tuple[
     dict[str, RegisteredMethod],
     dict[str, RegisteredMethod],
@@ -86,7 +64,8 @@ def register_decorated_methods(
     capabilities: dict[str, RegisteredMethod] = {}
     tools: dict[str, RegisteredMethod] = {}
 
-    for attribute_name, declared_value in agent._resolved_attributes():
+    agent_type = type(agent)
+    for attribute_name, declared_value in resolved_attributes(agent_type):
         metadata = get_method_metadata(declared_value)
         if metadata is None:
             continue
@@ -98,9 +77,9 @@ def register_decorated_methods(
             )
 
         try:
-            parameter_model = agent._build_parameter_model(attribute_name, bound_method)
+            parameter_model = build_parameter_model(agent_type, attribute_name, bound_method)
             parameter_schema = build_parameter_schema(
-                type(agent),
+                agent_type,
                 attribute_name,
                 parameter_model,
             )
@@ -112,12 +91,12 @@ def register_decorated_methods(
             callable=bound_method,
             parameter_schema=parameter_schema,
             parameter_model=parameter_model,
-            capability=agent._resolve_export_metadata(
+            capability=resolve_export_metadata(
                 attribute_name,
                 bound_method,
                 metadata.capability,
             ),
-            tool=agent._resolve_export_metadata(
+            tool=resolve_export_metadata(
                 attribute_name,
                 bound_method,
                 metadata.tool,
@@ -126,7 +105,8 @@ def register_decorated_methods(
         if registered.capability is not None:
             capability_name = registered.capability.name
             assert capability_name is not None
-            agent._add_export(
+            add_export(
+                agent_type,
                 capabilities,
                 capability_name,
                 registered,
@@ -135,7 +115,13 @@ def register_decorated_methods(
         if registered.tool is not None:
             tool_name = registered.tool.name
             assert tool_name is not None
-            agent._add_export(tools, tool_name, registered, export_kind="tool")
+            add_export(
+                agent_type,
+                tools,
+                tool_name,
+                registered,
+                export_kind="tool",
+            )
         registered_methods[attribute_name] = registered
 
     return registered_methods, capabilities, tools

@@ -82,16 +82,17 @@ class AgentRegistry:
             if existing is not None:
                 if not replace:
                     raise ValueError(f"Agent '{agent_name}' is already registered")
-                self._remove_mapping(existing)
+                self.remove_mapping(existing)
 
-            conflicts = self._conflicting_capabilities(agent)
+            conflicts = self.conflicting_capabilities(agent)
             if conflicts and not replace:
                 raise ValueError("Capability name conflict(s): " + ", ".join(sorted(conflicts)))
             if conflicts:
                 for conflicting_name in sorted(conflicts):
-                    conflicting_agent = self.capabilities.get(conflicting_name)
-                    if conflicting_agent is not None and conflicting_agent is not agent:
-                        self._remove_mapping(conflicting_agent)
+                    if conflicting_name in self.capabilities:
+                        conflicting_agent = self.capabilities[conflicting_name]
+                        if conflicting_agent is not agent:
+                            self.remove_mapping(conflicting_agent)
 
             self.agents[agent_name] = agent
             for capability_name in sorted(agent.capabilities):
@@ -125,14 +126,14 @@ class AgentRegistry:
                 )
                 if removed is None:
                     raise KeyError(f"Agent '{agent.agent_metadata.name}' is not registered")
-                self._remove_mapping(removed)
+                self.remove_mapping(removed)
                 return removed
             if not isinstance(agent, str):
                 raise TypeError("Agent removal requires a BaseAgent instance or agent name")
             if agent not in self.agents:
                 raise KeyError(f"Agent '{agent}' is not registered")
             removed = self.agents[agent]
-            self._remove_mapping(removed)
+            self.remove_mapping(removed)
             return removed
 
     def clear(self) -> None:
@@ -195,14 +196,16 @@ class AgentRegistry:
         emit_event(AGENT_DISCOVERED, level=10, outcome="success", agent_count=len(metadata))
         return metadata
 
-    def _conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
+    def conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
+        """Return capability names owned by a different registered agent."""
         return {
             name
             for name in agent.capabilities
             if (existing := self.capabilities.get(name)) is not None and existing is not agent
         }
 
-    def _remove_mapping(self, agent: BaseAgent) -> None:
+    def remove_mapping(self, agent: BaseAgent) -> None:
+        """Remove an agent and each capability mapping it owns."""
         matching_name: str | None = None
         for name, existing in list(self.agents.items()):
             if existing is agent:

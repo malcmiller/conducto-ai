@@ -36,14 +36,14 @@ def test_registration_constructs_one_parameter_model_per_method(
     import conducto.core.parameter_schema as parameter_schema
 
     calls = 0
-    original_create_model = parameter_schema.create_model
+    original_create_model = parameter_schema.create_parameter_model
 
     def counting_create_model(*args: Any, **kwargs: Any) -> Any:
         nonlocal calls
         calls += 1
         return original_create_model(*args, **kwargs)
 
-    monkeypatch.setattr(parameter_schema, "create_model", counting_create_model)
+    monkeypatch.setattr(parameter_schema, "create_parameter_model", counting_create_model)
 
     class SingleModelAgent(BaseAgent):
         @a2a_capability(name="echo", description="Echoes a value.")

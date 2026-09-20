@@ -82,7 +82,10 @@ class ModelResolver:
             (call_reference, ModelResolutionSource.CALL_OVERRIDE),
             (normalize_reference(run_config.model), ModelResolutionSource.RUN_OVERRIDE),
             (normalize_reference(agent_config.default_model), ModelResolutionSource.AGENT_DEFAULT),
-            (normalize_reference(runtime_config.default_model), ModelResolutionSource.RUNTIME_DEFAULT),
+            (
+                normalize_reference(runtime_config.default_model),
+                ModelResolutionSource.RUNTIME_DEFAULT,
+            ),
         )
         selected = next(((ref, source) for ref, source in candidates if ref is not None), None)
         if selected is None:
@@ -140,7 +143,7 @@ class ModelResolver:
             The active binding, or a newly resolved binding for the override.
         """
         if override is None:
-            binding = context._binding
+            binding = context.model_binding
             if binding is not None:
                 self.validate_capabilities(
                     binding.model.reference,
