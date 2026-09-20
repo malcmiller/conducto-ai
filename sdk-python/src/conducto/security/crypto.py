@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.hashes import SHA256
 
 from .errors import (
     ApprovalTokenBindingError,
+    ApprovalTokenError,
     ApprovalTokenExpiredError,
     InvalidApprovalSignatureError,
     MalformedApprovalTokenError,
@@ -55,6 +56,17 @@ class ApprovalKeyResolver(Protocol):
 
     def resolve(self, issuer: str, key_id: str) -> ec.EllipticCurvePublicKey:
         """Return an active public key or raise ``UnknownApprovalKeyError``."""
+
+
+class ApprovalVerificationAuditHook(Protocol):
+    """Synchronous safe observer for cryptographic verification outcomes.
+
+    Hooks receive no token, claims, signature, key, or exception details.
+    ``ApprovalTokenService`` can bridge these outcomes to ``AuditEmitter``.
+    """
+
+    def record(self, *, verified: bool, reason_code: str) -> None:
+        """Record one verification outcome using a stable reason code."""
 
 
 def _b64(value: bytes) -> str:
@@ -171,6 +183,7 @@ class ES256Verifier:
         clock: ApprovalClock,
         max_lifetime_seconds: int = MAX_LIFETIME_SECONDS,
         clock_skew_seconds: int = MAX_CLOCK_SKEW_SECONDS,
+        audit_hook: ApprovalVerificationAuditHook | None = None,
     ) -> None:
         """Configure a trusted issuer, audience, time bounds, and key resolver."""
         if max_lifetime_seconds <= 0 or max_lifetime_seconds > MAX_LIFETIME_SECONDS:
@@ -183,9 +196,22 @@ class ES256Verifier:
         self._clock = clock
         self._max_lifetime = max_lifetime_seconds
         self._skew = clock_skew_seconds
+        self._audit_hook = audit_hook
 
     def verify(self, token: str) -> dict[str, Any]:
         """Verify and return claims without exposing token material in failures."""
+        try:
+            claims = self._verify(token)
+        except ApprovalTokenError as error:
+            if self._audit_hook is not None:
+                self._audit_hook.record(verified=False, reason_code=error.reason_code)
+            raise
+        if self._audit_hook is not None:
+            self._audit_hook.record(verified=True, reason_code="signature_verified")
+        return claims
+
+    def _verify(self, token: str) -> dict[str, Any]:
+        """Perform strict verification without exposing token material."""
         if not isinstance(token, str) or len(token) > MAX_TOKEN_SIZE:
             raise MalformedApprovalTokenError("malformed approval token")
         parts = token.split(".")

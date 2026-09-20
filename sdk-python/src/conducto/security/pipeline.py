@@ -17,8 +17,18 @@ from .approval import (
     default_challenge,
 )
 from .approval_token import ApprovalTokenService
+from .audit import (
+    AuditCategory,
+    AuditDecision,
+    AuditEmitter,
+    AuditEvent,
+    AuditEventName,
+    AuditOutcome,
+    AuditSeverity,
+)
 from .context import AuthorizationContext
 from .errors import (
+    ApprovalExpiredError,
     ApprovalRequiredError,
     AuthorizationDeniedError,
     InsufficientScopeError,
@@ -54,6 +64,7 @@ class SecurityPipeline:
         clock: Clock | None = None,
         identifiers: IdentifierGenerator | None = None,
         token_service: ApprovalTokenService | None = None,
+        audit_emitter: AuditEmitter | None = None,
     ) -> None:
         """Initialize a pipeline with optional approval persistence.
 
@@ -63,11 +74,13 @@ class SecurityPipeline:
             clock: Clock used to create challenge timestamps.
             identifiers: Identifier generator used for challenge IDs.
             token_service: Optional portable-token verifier and consumer.
+            audit_emitter: Optional application-owned security audit delivery boundary.
         """
         self.store = store
         self.clock = clock
         self.identifiers = identifiers
         self.token_service = token_service
+        self.audit_emitter = audit_emitter
 
     async def resume_token(
         self,
@@ -155,6 +168,82 @@ class SecurityPipeline:
                 return GuardrailResult(False, challenge=self.store.create(challenge))
         return GuardrailResult(True)
 
+    async def check_async(
+        self,
+        target: Callable[..., Any],
+        context: AuthorizationContext | None,
+        arguments: Mapping[str, Any],
+        *,
+        agent_id: str = "",
+        capability_id: str = "",
+        approved_approval_id: str | None = None,
+    ) -> GuardrailResult:
+        """Check guardrails and deliver mandatory pre-execution evidence.
+
+        Existing synchronous callers may retain ``check``; runtime invocation
+        uses this method, so required audit acceptance is enforced before work.
+        """
+        result = self.check(
+            target,
+            context,
+            arguments,
+            agent_id=agent_id,
+            capability_id=capability_id,
+            approved_approval_id=approved_approval_id,
+        )
+        if self.audit_emitter is None:
+            return result
+        guardrails = discover_guardrails(target)
+        if not (guardrails.scopes or guardrails.approvals or approved_approval_id):
+            return result
+        if result.challenge is not None:
+            await self._emit(
+                AuditEventName.APPROVAL_REQUESTED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.REQUIRE_APPROVAL,
+                AuditOutcome.PENDING,
+                result.challenge.reason_code,
+                challenge_id=result.challenge.approval_id,
+                policy_version=result.challenge.policy_version,
+                required=True,
+            )
+        elif result.allowed:
+            await self._emit(
+                AuditEventName.AUTHORIZATION_ALLOWED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.ALLOW,
+                AuditOutcome.SUCCESS,
+                "authorized",
+                required=True,
+            )
+            await self._emit(
+                AuditEventName.EXECUTION_ACCEPTED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.ALLOW,
+                AuditOutcome.SUCCESS,
+                "audit_accepted",
+                required=True,
+            )
+        else:
+            assert result.error is not None
+            await self._emit(
+                AuditEventName.AUTHORIZATION_DENIED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.DENY,
+                AuditOutcome.REJECTED,
+                getattr(result.error, "reason_code", "authorization_denied"),
+                required=True,
+            )
+        return result
+
     async def resume(
         self,
         decision: ApprovalDecision,
@@ -189,6 +278,19 @@ class SecurityPipeline:
             raise InvalidApprovalStateError("an approval store is required to resume")
         try:
             challenge = self.store.get(decision.approval_id)
+        except ApprovalExpiredError:
+            await self._emit(
+                AuditEventName.APPROVAL_EXPIRED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.DENY,
+                AuditOutcome.REJECTED,
+                "expired",
+                challenge_id=decision.approval_id,
+                required=False,
+            )
+            raise
         except KeyError as error:
             raise InvalidApprovalStateError("unknown approval id") from error
         if (
@@ -202,13 +304,176 @@ class SecurityPipeline:
             )
         ):
             raise InvalidApprovalStateError("approval challenge binding does not match")
-        challenge = self.store.decide(decision)
+        try:
+            challenge = self.store.decide(decision)
+        except ApprovalExpiredError:
+            await self._emit(
+                AuditEventName.APPROVAL_EXPIRED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.DENY,
+                AuditOutcome.REJECTED,
+                "expired",
+                challenge_id=decision.approval_id,
+                required=False,
+            )
+            raise
         if not decision.approved:
+            await self._emit(
+                AuditEventName.APPROVAL_DENIED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.DENY,
+                AuditOutcome.REJECTED,
+                decision.reason_code or "denied",
+                challenge_id=challenge.approval_id,
+                policy_version=challenge.policy_version,
+                required=True,
+            )
             raise AuthorizationDeniedError("approval was denied")
         if self.store.state(challenge.approval_id).value != "working":
+            await self._emit(
+                AuditEventName.APPROVAL_APPROVED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.REQUIRE_APPROVAL,
+                AuditOutcome.PENDING,
+                "additional_approval_required",
+                challenge_id=challenge.approval_id,
+                policy_version=challenge.policy_version,
+                required=True,
+            )
             raise ApprovalRequiredError("additional approvals are required")
+        await self._emit(
+            AuditEventName.APPROVAL_APPROVED,
+            context,
+            agent_id,
+            capability_id,
+            AuditDecision.ALLOW,
+            AuditOutcome.SUCCESS,
+            decision.reason_code or "approved",
+            challenge_id=challenge.approval_id,
+            policy_version=challenge.policy_version,
+            required=True,
+        )
         self.store.complete(challenge.approval_id)
         result = execute()
         if inspect.isawaitable(result):
             return await result
         return result
+
+    async def cancel_approval(
+        self,
+        approval_id: str,
+        *,
+        agent_id: str,
+        capability_id: str,
+        context: AuthorizationContext,
+    ) -> ApprovalChallenge:
+        """Cancel a pending approval and emit its auditable lifecycle outcome."""
+        if self.store is None:
+            raise InvalidApprovalStateError("an approval store is required to cancel")
+        try:
+            challenge = self.store.cancel(approval_id)
+        except ApprovalExpiredError:
+            await self._emit(
+                AuditEventName.APPROVAL_EXPIRED,
+                context,
+                agent_id,
+                capability_id,
+                AuditDecision.DENY,
+                AuditOutcome.REJECTED,
+                "expired",
+                challenge_id=approval_id,
+                required=False,
+            )
+            raise
+        await self._emit(
+            AuditEventName.APPROVAL_CANCELED,
+            context,
+            agent_id,
+            capability_id,
+            AuditDecision.DENY,
+            AuditOutcome.REJECTED,
+            "canceled",
+            challenge_id=challenge.approval_id,
+            policy_version=challenge.policy_version,
+            required=False,
+        )
+        return challenge
+
+    async def emit_execution(
+        self,
+        name: AuditEventName,
+        context: AuthorizationContext | None,
+        *,
+        agent_id: str,
+        capability_id: str,
+        outcome: AuditOutcome,
+        reason_code: str,
+    ) -> None:
+        """Emit lifecycle evidence after pre-execution acceptance."""
+        await self._emit(
+            name,
+            context,
+            agent_id,
+            capability_id,
+            AuditDecision.ALLOW,
+            outcome,
+            reason_code,
+            required=False,
+        )
+
+    async def _emit(
+        self,
+        name: AuditEventName,
+        context: AuthorizationContext | None,
+        agent_id: str,
+        capability_id: str,
+        decision: AuditDecision,
+        outcome: AuditOutcome,
+        reason_code: str,
+        *,
+        challenge_id: str = "",
+        policy_version: str = "1",
+        required: bool,
+    ) -> None:
+        if self.audit_emitter is None:
+            return
+        principal = context.principal if context is not None else None
+        category = (
+            AuditCategory.AUTHORIZATION
+            if name.value.startswith("security.authorization")
+            else AuditCategory.APPROVAL
+            if name.value.startswith("security.approval")
+            else AuditCategory.EXECUTION
+        )
+        await self.audit_emitter.emit(
+            AuditEvent(
+                event_name=name,
+                category=category,
+                decision=decision,
+                outcome=outcome,
+                reason_code=reason_code,
+                subject_id=principal.subject_id if principal else "",
+                issuer=principal.issuer if principal else "",
+                audience=principal.audience if principal else "",
+                task_id=context.task_id if context else "",
+                challenge_id=challenge_id,
+                agent_id=agent_id,
+                capability_id=capability_id,
+                policy_id="conducto.guardrails",
+                policy_version=policy_version,
+                correlation_id=context.correlation_id if context else "",
+                resource=f"capability:{agent_id}:{capability_id}",
+                severity=(
+                    AuditSeverity.ERROR
+                    if outcome in (AuditOutcome.FAILURE, AuditOutcome.REJECTED)
+                    else AuditSeverity.INFO
+                ),
+            ),
+            required=required,
+        )

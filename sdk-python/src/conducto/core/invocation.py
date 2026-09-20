@@ -12,7 +12,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from conducto.security import SecurityPipeline
+from conducto.security import AuditEventName, AuditOutcome, SecurityPipeline
 from conducto.security.context import AuthorizationContext
 from conducto.security.errors import SecurityError
 
@@ -227,7 +227,7 @@ async def invoke_agent(
             )
         emit_event(ARGUMENTS_VALIDATED, outcome="success")
         pipeline = security_pipeline or SecurityPipeline()
-        security_result = pipeline.check(
+        security_result = await pipeline.check_async(
             target,
             context.authorization,
             {name: getattr(validated, name) for name in parameter_model.model_fields},
@@ -277,6 +277,14 @@ async def invoke_agent(
                 raise _CapabilityExecutionError(capability_error) from capability_error
 
         started = time.perf_counter()
+        await pipeline.emit_execution(
+            AuditEventName.EXECUTION_STARTED,
+            context.authorization,
+            agent_id=agent_id,
+            capability_id=capability_name,
+            outcome=AuditOutcome.SUCCESS,
+            reason_code="started",
+        )
         emit_event(INVOCATION_STARTED)
         try:
             remaining = context.remaining_timeout()
@@ -286,6 +294,14 @@ async def invoke_agent(
                 INVOCATION_COMPLETED,
                 outcome="success",
                 duration_ms=(time.perf_counter() - started) * 1000,
+            )
+            await pipeline.emit_execution(
+                AuditEventName.EXECUTION_COMPLETED,
+                context.authorization,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                outcome=AuditOutcome.SUCCESS,
+                reason_code="completed",
             )
             return InvocationSuccess(
                 correlation_id,
@@ -304,6 +320,14 @@ async def invoke_agent(
             return InvocationCancelled(correlation_id, context.invocation_metadata())
         except TimeoutError:
             assert invocation_timeout is not None
+            await pipeline.emit_execution(
+                AuditEventName.EXECUTION_FAILED,
+                context.authorization,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                outcome=AuditOutcome.FAILURE,
+                reason_code="timeout",
+            )
             emit_event(
                 INVOCATION_TIMED_OUT,
                 level=30,
@@ -317,6 +341,14 @@ async def invoke_agent(
                 context.invocation_metadata(),
             )
         except _CapabilityExecutionError as error:
+            await pipeline.emit_execution(
+                AuditEventName.EXECUTION_FAILED,
+                context.authorization,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                outcome=AuditOutcome.FAILURE,
+                reason_code="capability_exception",
+            )
             emit_event(
                 INVOCATION_FAILED,
                 level=40,
@@ -331,6 +363,14 @@ async def invoke_agent(
                 context.invocation_metadata(),
             )
         except UnsupportedReturnValueError as error:
+            await pipeline.emit_execution(
+                AuditEventName.EXECUTION_FAILED,
+                context.authorization,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                outcome=AuditOutcome.FAILURE,
+                reason_code="unsupported_return_value",
+            )
             emit_event(
                 INVOCATION_FAILED,
                 level=30,
@@ -345,6 +385,14 @@ async def invoke_agent(
                 context.invocation_metadata(),
             )
         except Exception as error:
+            await pipeline.emit_execution(
+                AuditEventName.EXECUTION_FAILED,
+                context.authorization,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                outcome=AuditOutcome.FAILURE,
+                reason_code="internal_error",
+            )
             emit_event(
                 INVOCATION_FAILED,
                 level=40,
