@@ -59,8 +59,8 @@ class ModelGatewayCollection:
     _context: RunContext = field(repr=False, compare=False)
 
     def require(
-            self,
-            reference: ModelReference | str | None = None,
+        self,
+        reference: ModelReference | str | None = None,
     ) -> ModelGateway:
         """Resolve and return a model gateway for the active invocation.
 
@@ -89,10 +89,10 @@ class ModelGateway:
     _reference: ModelReference | str | None = field(default=None, repr=False)
 
     async def complete(
-            self,
-            messages: Sequence[ChatMessage],
-            *,
-            structured_output: StructuredOutputRequest,
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        structured_output: StructuredOutputRequest,
     ) -> ModelCallResult:
         """Execute a provider call through the active runtime context.
 
@@ -116,10 +116,10 @@ class ModelGateway:
             self._context.end_model_call(task)
 
     async def complete_typed(
-            self,
-            messages: Sequence[ChatMessage],
-            *,
-            response_type: type[ModelResponseT],
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        response_type: type[ModelResponseT],
     ) -> ModelResponseT:
         """Execute a provider call and validate a typed structured response.
 
@@ -149,12 +149,12 @@ class ModelGateway:
 
 
 async def complete_model_call(
-        context: RunContext,
-        binding: _ModelBinding,
-        messages: Sequence[ChatMessage],
-        *,
-        structured_output: StructuredOutputRequest,
-        purpose: str = "model_call",
+    context: RunContext,
+    binding: _ModelBinding,
+    messages: Sequence[ChatMessage],
+    *,
+    structured_output: StructuredOutputRequest,
+    purpose: str = "model_call",
 ) -> ModelCallResult:
     """Execute one resolved provider call without mutating the run context."""
     if context.cancellation.cancelled:
@@ -175,9 +175,9 @@ async def complete_model_call(
         retries=binding.configuration.retries,
     )
     with log_context(
-            correlation_id=context.correlation_id,
-            run_id=context.run_id,
-            agent_id=context.agent_id,
+        correlation_id=context.correlation_id,
+        run_id=context.run_id,
+        agent_id=context.agent_id,
     ):
         emit_event(
             MODEL_SELECTED,

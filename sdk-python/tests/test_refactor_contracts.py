@@ -31,7 +31,7 @@ from conducto.core.registration import RegisteredMethod as RegistrationRegistere
 
 
 def test_registration_constructs_one_parameter_model_per_method(
-        monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import conducto.core.parameter_schema as parameter_schema
 

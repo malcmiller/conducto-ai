@@ -31,17 +31,17 @@ def stable_skill_id(agent_name: str, capability_name: str) -> str:
 
 
 def build_agent_card(
-        *,
-        agent_type_name: str,
-        metadata: AgentMetadata,
-        registered_capabilities: Mapping[str, RegisteredMethod],
-        url: str,
-        preferred_transport: str,
-        security_schemes: Mapping[str, Any] | None,
-        security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
-        default_input_modes: Sequence[str],
-        default_output_modes: Sequence[str],
-        capabilities: Mapping[str, bool] | None,
+    *,
+    agent_type_name: str,
+    metadata: AgentMetadata,
+    registered_capabilities: Mapping[str, RegisteredMethod],
+    url: str,
+    preferred_transport: str,
+    security_schemes: Mapping[str, Any] | None,
+    security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
+    default_input_modes: Sequence[str],
+    default_output_modes: Sequence[str],
+    capabilities: Mapping[str, bool] | None,
 ) -> dict[str, Any]:
     """Build a validated Agent Card without mutating the agent state.
 
@@ -141,10 +141,10 @@ def serialize_agent_card(card: Mapping[str, Any]) -> str:
 
 
 def validate_card_metadata(
-        agent_type_name: str,
-        metadata: AgentMetadata,
-        url: str,
-        preferred_transport: str,
+    agent_type_name: str,
+    metadata: AgentMetadata,
+    url: str,
+    preferred_transport: str,
 ) -> None:
     """Validate the metadata required for a publishable Agent Card.
 
@@ -215,7 +215,7 @@ def validate_modes(modes: Sequence[str], label: str) -> tuple[str, ...]:
 
 
 def validate_security_schemes(
-        security_schemes: Mapping[str, Any] | None,
+    security_schemes: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """Validate and normalize a security scheme definition mapping.
 
@@ -292,15 +292,15 @@ def _validate_oauth2_scheme(name: str, scheme: Mapping[str, Any]) -> None:
             raise AgentRegistrationError(f"oauth2 security scheme '{name}' has an invalid flow")
         scopes = flow.get("scopes")
         if not isinstance(scopes, Mapping) or any(
-                not isinstance(scope, str) or not isinstance(description, str)
-                for scope, description in scopes.items()
+            not isinstance(scope, str) or not isinstance(description, str)
+            for scope, description in scopes.items()
         ):
             raise AgentRegistrationError(
                 f"oauth2 security scheme '{name}' flow '{flow_name}' "
                 "requires a scope-description mapping"
             )
         if flow_name in {"authorizationCode", "implicit"} and not is_absolute_http_url(
-                flow.get("authorizationUrl")
+            flow.get("authorizationUrl")
         ):
             raise AgentRegistrationError(
                 f"oauth2 security scheme '{name}' flow '{flow_name}' "
@@ -313,7 +313,7 @@ def _validate_oauth2_scheme(name: str, scheme: Mapping[str, Any]) -> None:
 
 
 def validate_security_requirements(
-        security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
+    security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
 ) -> list[dict[str, list[str]]]:
     """Validate and normalize security requirement sets for a card.
 
@@ -329,7 +329,7 @@ def validate_security_requirements(
     if security_requirements is None:
         return []
     if isinstance(security_requirements, (str, bytes)) or not isinstance(
-            security_requirements, Sequence
+        security_requirements, Sequence
     ):
         raise AgentRegistrationError("security_requirements must be a sequence")
 

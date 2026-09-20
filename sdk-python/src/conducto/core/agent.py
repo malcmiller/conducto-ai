@@ -62,11 +62,11 @@ class BaseAgent:
     """
 
     def __init__(
-            self,
-            *,
-            model_config: ModelConfiguration | None = None,
-            model_reference: ModelReference | str | None = None,
-            agent_config: AgentModelConfig | None = None,
+        self,
+        *,
+        model_config: ModelConfiguration | None = None,
+        model_reference: ModelReference | str | None = None,
+        agent_config: AgentModelConfig | None = None,
     ) -> None:
         self.agent_metadata = self._resolve_agent_metadata()
         declared_reference = model_reference or self.agent_metadata.default_model
@@ -134,15 +134,15 @@ class BaseAgent:
         return dict(self._tools)
 
     def get_agent_card(
-            self,
-            url: str,
-            *,
-            preferred_transport: str = "JSONRPC",
-            security_schemes: Mapping[str, Any] | None = None,
-            security_requirements: Sequence[Mapping[str, Sequence[str]]] | None = None,
-            default_input_modes: Sequence[str] = _DEFAULT_INPUT_MODES,
-            default_output_modes: Sequence[str] = _DEFAULT_OUTPUT_MODES,
-            capabilities: Mapping[str, bool] | None = None,
+        self,
+        url: str,
+        *,
+        preferred_transport: str = "JSONRPC",
+        security_schemes: Mapping[str, Any] | None = None,
+        security_requirements: Sequence[Mapping[str, Sequence[str]]] | None = None,
+        default_input_modes: Sequence[str] = _DEFAULT_INPUT_MODES,
+        default_output_modes: Sequence[str] = _DEFAULT_OUTPUT_MODES,
+        capabilities: Mapping[str, bool] | None = None,
     ) -> dict[str, Any]:
         """Build an A2A capability card for this reflected agent.
 
@@ -201,13 +201,13 @@ class BaseAgent:
 
     @staticmethod
     def _validate_security_schemes(
-            security_schemes: Mapping[str, Any] | None,
+        security_schemes: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
         return validate_security_schemes(security_schemes)
 
     @staticmethod
     def _validate_security_requirements(
-            security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
+        security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
     ) -> list[dict[str, list[str]]]:
         return validate_security_requirements(security_requirements)
 
@@ -225,9 +225,9 @@ class BaseAgent:
         return resolved_attributes(type(self))
 
     def _build_parameter_model(
-            self,
-            attribute_name: str,
-            method: Callable[..., Any],
+        self,
+        attribute_name: str,
+        method: Callable[..., Any],
     ) -> type[BaseModel]:
         try:
             return build_parameter_model(type(self), attribute_name, method)
@@ -235,9 +235,9 @@ class BaseAgent:
             raise AgentRegistrationError(str(error)) from error.__cause__
 
     def _build_parameter_schema(
-            self,
-            attribute_name: str,
-            method: Callable[..., Any],
+        self,
+        attribute_name: str,
+        method: Callable[..., Any],
     ) -> dict[str, Any]:
         parameter_model = self._build_parameter_model(attribute_name, method)
         try:
@@ -250,19 +250,19 @@ class BaseAgent:
 
     @staticmethod
     def _resolve_export_metadata(
-            attribute_name: str,
-            method: Callable[..., Any],
-            metadata: ExportMetadata | None,
+        attribute_name: str,
+        method: Callable[..., Any],
+        metadata: ExportMetadata | None,
     ) -> ExportMetadata | None:
         return resolve_export_metadata(attribute_name, method, metadata)
 
     def _add_export(
-            self,
-            registry: dict[str, RegisteredMethod],
-            export_name: str,
-            method: RegisteredMethod,
-            *,
-            export_kind: str,
+        self,
+        registry: dict[str, RegisteredMethod],
+        export_name: str,
+        method: RegisteredMethod,
+        *,
+        export_kind: str,
     ) -> None:
         add_export(
             type(self),

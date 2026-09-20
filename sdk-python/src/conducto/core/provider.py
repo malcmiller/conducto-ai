@@ -49,11 +49,11 @@ class StructuredOutputRequest:
     schema: dict[str, Any]
 
     def __init__(
-            self,
-            name: str,
-            schema: dict[str, Any] | None = None,
-            *,
-            json_schema: dict[str, Any] | None = None,
+        self,
+        name: str,
+        schema: dict[str, Any] | None = None,
+        *,
+        json_schema: dict[str, Any] | None = None,
     ) -> None:
         resolved_schema = schema if schema is not None else json_schema
         if resolved_schema is None:
@@ -125,11 +125,11 @@ class ProviderError(RuntimeError):
     """Base provider error with explicit retry and acceptance state."""
 
     def __init__(
-            self,
-            message: str,
-            *,
-            retryable: bool = False,
-            accepted: bool = False,
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        accepted: bool = False,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable and not accepted
@@ -144,10 +144,10 @@ class ProviderRateLimitError(ProviderError):
     """Provider rejected a request because the rate limit was exceeded."""
 
     def __init__(
-            self,
-            message: str = "Provider rate limit exceeded",
-            *,
-            accepted: bool = False,
+        self,
+        message: str = "Provider rate limit exceeded",
+        *,
+        accepted: bool = False,
     ) -> None:
         super().__init__(message, retryable=True, accepted=accepted)
 
@@ -160,10 +160,10 @@ class ProviderTimeoutError(ProviderError):
     """Provider request exceeded the allowed timeout window."""
 
     def __init__(
-            self,
-            message: str = "Provider request timed out",
-            *,
-            accepted: bool = False,
+        self,
+        message: str = "Provider request timed out",
+        *,
+        accepted: bool = False,
     ) -> None:
         super().__init__(message, retryable=True, accepted=accepted)
 
@@ -187,11 +187,11 @@ class ModelProvider(Protocol):
     capabilities: ProviderCapabilities
 
     async def complete(
-            self,
-            messages: Sequence[ChatMessage],
-            *,
-            options: GenerationOptions,
-            structured_output: StructuredOutputRequest,
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        options: GenerationOptions,
+        structured_output: StructuredOutputRequest,
     ) -> ProviderResult:
         """Generate a completion for a provider-neutral chat request.
 
@@ -207,7 +207,7 @@ class ModelProvider(Protocol):
 
 
 def build_routing_schema(
-        routing_metadata: Sequence[dict[str, Any]] | None = None,
+    routing_metadata: Sequence[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Return the constrained selection schema used for model routing."""
     schema = RoutingSelection.model_json_schema()
@@ -222,9 +222,9 @@ def build_routing_schema(
                     str(capability_id)
                     for capability in entry.get("capabilities", [])
                     for capability_id in (
-                    capability.get("id"),
-                    capability.get("name"),
-                )
+                        capability.get("id"),
+                        capability.get("name"),
+                    )
                     if capability_id
                 }
             )
@@ -289,11 +289,11 @@ class FakeModel:
     )
 
     def __init__(
-            self,
-            selection: RoutingSelection | dict[str, Any] | str,
-            *,
-            usage: Usage | None = None,
-            accepted: bool = True,
+        self,
+        selection: RoutingSelection | dict[str, Any] | str,
+        *,
+        usage: Usage | None = None,
+        accepted: bool = True,
     ) -> None:
         self.selection = selection
         self.usage = usage or Usage()
@@ -301,11 +301,11 @@ class FakeModel:
         self.calls = 0
 
     async def complete(
-            self,
-            messages: Sequence[ChatMessage],
-            *,
-            options: GenerationOptions,
-            structured_output: StructuredOutputRequest,
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        options: GenerationOptions,
+        structured_output: StructuredOutputRequest,
     ) -> ProviderResult:
         """Return the configured fake completion payload.
 
@@ -334,9 +334,9 @@ class FakeModel:
 
 
 def validate_provider_contract(
-        provider: ModelProvider,
-        *,
-        structured_output: StructuredOutputRequest,
+    provider: ModelProvider,
+    *,
+    structured_output: StructuredOutputRequest,
 ) -> None:
     """Validate provider support before issuing a structured request.
 
@@ -371,12 +371,12 @@ def parse_routing_selection(result: ProviderResult) -> RoutingSelection:
 
 
 async def complete_with_retries(
-        provider: ModelProvider,
-        messages: Sequence[ChatMessage],
-        *,
-        options: GenerationOptions,
-        structured_output: StructuredOutputRequest,
-        deadline: float | None = None,
+    provider: ModelProvider,
+    messages: Sequence[ChatMessage],
+    *,
+    options: GenerationOptions,
+    structured_output: StructuredOutputRequest,
+    deadline: float | None = None,
 ) -> ProviderResult:
     """Complete a provider request under timeout and safe-retry rules.
 

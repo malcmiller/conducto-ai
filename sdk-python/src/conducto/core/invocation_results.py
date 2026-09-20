@@ -106,12 +106,12 @@ class InvocationFailure:
 
 
 InvocationResult: TypeAlias = (
-        InvocationSuccess
-        | InvocationValidationFailure
-        | InvocationTargetNotFound
-        | InvocationTimeout
-        | InvocationCancelled
-        | InvocationFailure
+    InvocationSuccess
+    | InvocationValidationFailure
+    | InvocationTargetNotFound
+    | InvocationTimeout
+    | InvocationCancelled
+    | InvocationFailure
 )
 
 

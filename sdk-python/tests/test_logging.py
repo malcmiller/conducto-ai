@@ -41,8 +41,8 @@ def _saved_logging_state() -> Iterator[tuple[logging.Logger, logging.Logger]]:
         yield logger, sensitive_logger
     finally:
         for active_logger, handlers in (
-                (logger, original_handlers),
-                (sensitive_logger, original_sensitive_handlers),
+            (logger, original_handlers),
+            (sensitive_logger, original_sensitive_handlers),
         ):
             for handler in tuple(active_logger.handlers):
                 if getattr(handler, "_conducto_owned", False) or handler not in handlers:
@@ -165,7 +165,7 @@ def test_opted_in_payload_isolated_to_sensitive_handler() -> None:
 
 
 def test_concurrent_async_and_sync_invocations_keep_context_isolated(
-        catalog: pytest.LogCaptureFixture,
+    catalog: pytest.LogCaptureFixture,
 ) -> None:
     @a2a_agent(name="ContextAgent", version="1.0", description="Tests context.")
     class ContextAgent(BaseAgent):
@@ -195,16 +195,16 @@ def test_concurrent_async_and_sync_invocations_keep_context_isolated(
         if getattr(record, "event", None) == "conducto.capability.invocation_completed.v1"
     ]
     assert {
-               (getattr(record, "correlation_id", None), getattr(record, "capability_id", None))
-               for record in completed
-           } == {
-               ("one", "sync"),
-               ("two", "async"),
-           }
+        (getattr(record, "correlation_id", None), getattr(record, "capability_id", None))
+        for record in completed
+    } == {
+        ("one", "sync"),
+        ("two", "async"),
+    }
 
 
 def test_concurrent_model_overrides_keep_provenance_isolated(
-        catalog: pytest.LogCaptureFixture,
+    catalog: pytest.LogCaptureFixture,
 ) -> None:
     @a2a_agent(name="ModelAgent", version="1.0", description="Tests model provenance.")
     class ModelAgent(BaseAgent):
@@ -239,17 +239,17 @@ def test_concurrent_model_overrides_keep_provenance_isolated(
         if getattr(record, "event", None) == "conducto.model.selected.v1"
     ]
     assert {
-               (
-                   getattr(record, "correlation_id", None),
-                   getattr(record, "provider", None),
-                   getattr(record, "model_reference", None),
-                   getattr(record, "resolution_source", None),
-               )
-               for record in models
-           } == {
-               ("first-correlation", "first", "model-one", "call_override"),
-               ("second-correlation", "second", "model-two", "call_override"),
-           }
+        (
+            getattr(record, "correlation_id", None),
+            getattr(record, "provider", None),
+            getattr(record, "model_reference", None),
+            getattr(record, "resolution_source", None),
+        )
+        for record in models
+    } == {
+        ("first-correlation", "first", "model-one", "call_override"),
+        ("second-correlation", "second", "model-two", "call_override"),
+    }
 
     discovered = [
         record

@@ -46,12 +46,12 @@ class OrchestratorAgent(BaseAgent):
     """A local registry of reflected agents for deterministic routing."""
 
     def __init__(
-            self,
-            *,
-            model_provider: ModelProvider | None = None,
-            model_config: ModelConfiguration | None = None,
-            model_reference: ModelReference | str | None = None,
-            runtime: Runtime | None = None,
+        self,
+        *,
+        model_provider: ModelProvider | None = None,
+        model_config: ModelConfiguration | None = None,
+        model_reference: ModelReference | str | None = None,
+        runtime: Runtime | None = None,
     ) -> None:
         if runtime is not None and model_provider is not None:
             raise ValueError("runtime cannot be combined with model_provider")
@@ -84,16 +84,16 @@ class OrchestratorAgent(BaseAgent):
         self.runtime = runtime
 
     async def route(
-            self,
-            user_input: str,
-            *,
-            model_provider: ModelProvider | None = None,
-            model_config: ModelConfiguration | None = None,
-            model_reference: ModelReference | str | None = None,
-            run_config: RunConfig | None = None,
-            agent_run_config: RunConfig | None = None,
-            timeout: float | None = None,
-            correlation_id: str = "",
+        self,
+        user_input: str,
+        *,
+        model_provider: ModelProvider | None = None,
+        model_config: ModelConfiguration | None = None,
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
+        agent_run_config: RunConfig | None = None,
+        timeout: float | None = None,
+        correlation_id: str = "",
     ) -> InvocationResult | RoutingFailure:
         """Route a user message to the best registered agent capability.
 
@@ -284,15 +284,15 @@ class OrchestratorAgent(BaseAgent):
         return self._registry.register(agent, replace=replace)
 
     async def invoke(
-            self,
-            agent_id: str,
-            capability_id: str,
-            arguments: Mapping[str, Any],
-            *,
-            timeout: float | None = None,
-            correlation_id: str = "",
-            model_reference: ModelReference | str | None = None,
-            run_config: RunConfig | None = None,
+        self,
+        agent_id: str,
+        capability_id: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        correlation_id: str = "",
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
     ) -> InvocationResult:
         """Invoke one capability on a registered agent.
 
@@ -312,9 +312,9 @@ class OrchestratorAgent(BaseAgent):
         if agent is None:
             correlation_id = correlation_id or str(uuid.uuid4())
             with log_context(
-                    correlation_id=correlation_id,
-                    agent_id=agent_id,
-                    capability_id=capability_id,
+                correlation_id=correlation_id,
+                agent_id=agent_id,
+                capability_id=capability_id,
             ):
                 emit_event(
                     INVOCATION_FAILED,
@@ -334,15 +334,15 @@ class OrchestratorAgent(BaseAgent):
         )
 
     async def invoke_capability(
-            self,
-            agent_id: str,
-            capability_id: str,
-            arguments: Mapping[str, Any],
-            *,
-            timeout: float | None = None,
-            correlation_id: str = "",
-            model_reference: ModelReference | str | None = None,
-            run_config: RunConfig | None = None,
+        self,
+        agent_id: str,
+        capability_id: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        correlation_id: str = "",
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
     ) -> InvocationResult:
         """Alias for :meth: 'invoke` that preserves the capability-oriented API."""
         return await self.invoke(

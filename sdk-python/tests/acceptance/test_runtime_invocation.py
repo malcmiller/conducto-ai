@@ -55,9 +55,9 @@ class AuditAgent(BaseAgent):
 
 
 def _runtime(
-        *,
-        worker_reference: str = "worker",
-        worker_report: str = "approved",
+    *,
+    worker_reference: str = "worker",
+    worker_report: str = "approved",
 ) -> tuple[Runtime, FakeModel, FakeModel]:
     registry = ProviderRegistry()
     router = FakeModel(

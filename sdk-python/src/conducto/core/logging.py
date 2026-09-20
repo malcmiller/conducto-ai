@@ -108,15 +108,15 @@ def get_log_context() -> Mapping[str, str]:
 
 
 def emit_event(
-        event: str,
-        *,
-        level: int = logging.INFO,
-        outcome: EventOutcome | None = None,
-        duration_ms: float | None = None,
-        error_category: str | None = None,
-        payload: Mapping[str, Any] | None = None,
-        include_sensitive_data: bool = False,
-        **fields: Any,
+    event: str,
+    *,
+    level: int = logging.INFO,
+    outcome: EventOutcome | None = None,
+    duration_ms: float | None = None,
+    error_category: str | None = None,
+    payload: Mapping[str, Any] | None = None,
+    include_sensitive_data: bool = False,
+    **fields: Any,
 ) -> None:
     """Emit one versioned Conducto event without exception text or tracebacks.
 
@@ -200,11 +200,11 @@ class DevelopmentFormatter(logging.Formatter):
 
 # noinspection PyShadowingBuiltins
 def configure_logging(
-        *,
-        format: Literal["json", "development"] = "development",
-        level: int = logging.INFO,
-        stream: Any = None,
-        include_sensitive_data: bool = False,
+    *,
+    format: Literal["json", "development"] = "development",
+    level: int = logging.INFO,
+    stream: Any = None,
+    include_sensitive_data: bool = False,
 ) -> logging.Handler:
     """Opt in to a single handler owned by Conducto, without touching root logging.
 
@@ -243,10 +243,10 @@ def configure_logging(
 
 # noinspection PyShadowingBuiltins
 def _create_handler(
-        *,
-        format: Literal["json", "development"],
-        stream: Any,
-        include_sensitive_data: bool,
+    *,
+    format: Literal["json", "development"],
+    stream: Any,
+    include_sensitive_data: bool,
 ) -> _ConductoStreamHandler:
     handler = _ConductoStreamHandler(stream if stream is not None else sys.stderr)
     handler._conducto_owned = True
@@ -272,11 +272,11 @@ def _validate_event_fields(fields: Mapping[str, Any]) -> None:
 
 
 def _emit_sensitive_payload(
-        event: str,
-        *,
-        level: int,
-        values: Mapping[str, Any],
-        payload: Mapping[str, Any],
+    event: str,
+    *,
+    level: int,
+    values: Mapping[str, Any],
+    payload: Mapping[str, Any],
 ) -> None:
     logger = logging.getLogger(_SENSITIVE_LOGGER_NAME)
     if not logger.isEnabledFor(level) or not _allows_sensitive_data(logger):

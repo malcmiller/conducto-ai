@@ -174,8 +174,8 @@ def test_orchestrator_returns_independent_routing_metadata() -> None:
 
     refreshed = orchestrator.get_routing_metadata()
     assert (
-            refreshed[0]["capabilities"][0]["parameter_schema"]["properties"]["value"]["type"]
-            == "string"
+        refreshed[0]["capabilities"][0]["parameter_schema"]["properties"]["value"]["type"]
+        == "string"
     )
 
 
@@ -399,18 +399,18 @@ def test_orchestrator_route_reports_unsupported_provider_unknown_target_and_inva
         assert isinstance(unsupported_result, RoutingFailure)
 
         for selection, expected_type in (
-                (
-                        {"agent_id": "MissingAgent", "capability_id": "add", "arguments": {}},
-                        InvocationTargetNotFound,
-                ),
-                (
-                        {
-                            "agent_id": "RouteAgent",
-                            "capability_id": "add",
-                            "arguments": {"value": "bad"},
-                        },
-                        InvocationValidationFailure,
-                ),
+            (
+                {"agent_id": "MissingAgent", "capability_id": "add", "arguments": {}},
+                InvocationTargetNotFound,
+            ),
+            (
+                {
+                    "agent_id": "RouteAgent",
+                    "capability_id": "add",
+                    "arguments": {"value": "bad"},
+                },
+                InvocationValidationFailure,
+            ),
         ):
             orchestrator = OrchestratorAgent(
                 model_provider=FakeModel(selection),
@@ -455,11 +455,11 @@ def test_complete_with_retries_retries_provider_timeouts() -> None:
             self.calls = 0
 
         async def complete(
-                self,
-                messages: Sequence[ChatMessage],
-                *,
-                options: GenerationOptions,
-                structured_output: StructuredOutputRequest,
+            self,
+            messages: Sequence[ChatMessage],
+            *,
+            options: GenerationOptions,
+            structured_output: StructuredOutputRequest,
         ) -> ProviderResult:
             _ = (messages, options, structured_output)
             self.calls += 1

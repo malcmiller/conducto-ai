@@ -67,35 +67,35 @@ class MethodMetadata:
 
 @overload
 def a2a_agent(
-        cls: T,
-        *,
-        name: str | None = None,
-        version: str = "0.1.0",
-        description: str | None = None,
-        default_model: str | None = None,
-        model_required: bool = False,
+    cls: T,
+    *,
+    name: str | None = None,
+    version: str = "0.1.0",
+    description: str | None = None,
+    default_model: str | None = None,
+    model_required: bool = False,
 ) -> T: ...
 
 
 @overload
 def a2a_agent(
-        *,
-        name: str | None = None,
-        version: str = "0.1.0",
-        description: str | None = None,
-        default_model: str | None = None,
-        model_required: bool = False,
+    *,
+    name: str | None = None,
+    version: str = "0.1.0",
+    description: str | None = None,
+    default_model: str | None = None,
+    model_required: bool = False,
 ) -> Callable[[T], T]: ...
 
 
 def a2a_agent(
-        cls: T | None = None,
-        *,
-        name: str | None = None,
-        version: str = "0.1.0",
-        description: str | None = None,
-        default_model: str | None = None,
-        model_required: bool = False,
+    cls: T | None = None,
+    *,
+    name: str | None = None,
+    version: str = "0.1.0",
+    description: str | None = None,
+    default_model: str | None = None,
+    model_required: bool = False,
 ) -> T | Callable[[T], T]:
     """Declare a class as an A2A agent.
 
@@ -160,10 +160,10 @@ def a2a_agent(
 
 
 def a2a_capability(
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        model_required: bool | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    model_required: bool | None = None,
 ) -> Callable[[F], F]:
     """Expose a method as an A2A capability.
 
@@ -197,10 +197,10 @@ def a2a_capability(
 
 
 def tool(
-        *,
-        name: str | None = None,
-        description: str | None = None,
-        model_required: bool | None = None,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    model_required: bool | None = None,
 ) -> Callable[[F], F]:
     """Register a method as an internal Conducto tool.
 
@@ -284,11 +284,11 @@ def get_method_metadata(value: Any) -> MethodMetadata | None:
 
 
 def _export_decorator(
-        *,
-        kind: ExportKind,
-        name: str | None,
-        description: str | None,
-        model_required: bool | None,
+    *,
+    kind: ExportKind,
+    name: str | None,
+    description: str | None,
+    model_required: bool | None,
 ) -> Callable[[F], F]:
     """Create a decorator for one of the supported method export kinds."""
 

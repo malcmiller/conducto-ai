@@ -204,8 +204,8 @@ class InvocationMetadata:
         }
 
     def with_model_calls(
-            self,
-            *groups: Sequence[ModelCallProvenance],
+        self,
+        *groups: Sequence[ModelCallProvenance],
     ) -> InvocationMetadata:
         """Return a copy of the metadata with an additional model call provenance.
 
@@ -219,8 +219,8 @@ class InvocationMetadata:
         return replace(self, usage=aggregate_usage(calls), model_calls=calls)
 
     def with_prior_model_calls(
-            self,
-            calls: Sequence[ModelCallProvenance],
+        self,
+        calls: Sequence[ModelCallProvenance],
     ) -> InvocationMetadata:
         """Return a copy with earlier model calls prepended to this metadata.
 
