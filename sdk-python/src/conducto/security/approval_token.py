@@ -263,9 +263,7 @@ class ApprovalTokenService:
                 event_name=name,
                 category=AuditCategory.CRYPTOGRAPHY,
                 decision=(
-                    AuditDecision.ALLOW
-                    if outcome == AuditOutcome.SUCCESS
-                    else AuditDecision.DENY
+                    AuditDecision.ALLOW if outcome == AuditOutcome.SUCCESS else AuditDecision.DENY
                 ),
                 outcome=outcome,
                 reason_code=reason_code,
