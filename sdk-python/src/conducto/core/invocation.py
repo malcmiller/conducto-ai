@@ -320,6 +320,14 @@ async def invoke_agent(
             return InvocationCancelled(correlation_id, context.invocation_metadata())
         except TimeoutError:
             assert invocation_timeout is not None
+            await pipeline.emit_execution(
+                AuditEventName.EXECUTION_FAILED,
+                context.authorization,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                outcome=AuditOutcome.FAILURE,
+                reason_code="timeout",
+            )
             emit_event(
                 INVOCATION_TIMED_OUT,
                 level=30,

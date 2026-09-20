@@ -8,8 +8,10 @@ from conducto.security import (
     AuditCategory,
     AuditDecision,
     AuditDeliveryError,
+    AuditDeliveryFailure,
     AuditDeliveryMode,
     AuditDeliveryPolicy,
+    AuditDeliveryReceipt,
     AuditEmitter,
     AuditEvent,
     AuditEventName,
@@ -32,7 +34,6 @@ def context() -> AuthorizationContext:
     )
 
 
-# noinspection unresolved-references,unresolved-references
 def test_in_memory_sink_receipts_duplicates_and_backpressure() -> None:
     """Reference sink makes duplicate and bounded-delivery behavior deterministic."""
     sink = InMemoryAuditSink(max_events=1)
@@ -44,8 +45,11 @@ def test_in_memory_sink_receipts_duplicates_and_backpressure() -> None:
         "authorized",
     )
     receipt = asyncio.run(sink.emit(event))
+    assert isinstance(receipt, AuditDeliveryReceipt)
     assert receipt.event_id == event.event_id
-    assert asyncio.run(sink.emit(event)).duplicate
+    duplicate = asyncio.run(sink.emit(event))
+    assert isinstance(duplicate, AuditDeliveryReceipt)
+    assert duplicate.duplicate
     second = AuditEvent(
         AuditEventName.EXECUTION_ACCEPTED,
         AuditCategory.EXECUTION,
@@ -53,7 +57,9 @@ def test_in_memory_sink_receipts_duplicates_and_backpressure() -> None:
         AuditOutcome.SUCCESS,
         "audit_accepted",
     )
-    assert asyncio.run(sink.emit(second)).reason_code == "audit_backpressure"
+    failure = asyncio.run(sink.emit(second))
+    assert isinstance(failure, AuditDeliveryFailure)
+    assert failure.reason_code == "audit_backpressure"
     assert sink.dropped_events == 1
 
 
@@ -68,6 +74,30 @@ def test_unsafe_extensions_are_rejected() -> None:
             "missing_context",
             extensions={"raw_token": "never-record-this"},
         )
+    with pytest.raises(ValueError, match="unsafe"):
+        AuditEvent(
+            AuditEventName.AUTHORIZATION_DENIED,
+            AuditCategory.AUTHORIZATION,
+            AuditDecision.DENY,
+            AuditOutcome.REJECTED,
+            "missing_context",
+            extensions={"diagnostic": "traceback content must not be delivered"},
+        )
+
+
+def test_terminal_events_release_per_task_delivery_state() -> None:
+    """Completed task state is evicted rather than retained indefinitely."""
+    emitter = AuditEmitter(InMemoryAuditSink())
+    terminal = AuditEvent(
+        AuditEventName.EXECUTION_COMPLETED,
+        AuditCategory.EXECUTION,
+        AuditDecision.ALLOW,
+        AuditOutcome.SUCCESS,
+        "completed",
+        task_id="task-1",
+    )
+    asyncio.run(emitter.emit(terminal))
+    assert emitter._tasks == {}
 
 
 def test_fail_closed_blocks_authorized_protected_execution_before_callback() -> None:

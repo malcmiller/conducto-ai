@@ -168,6 +168,8 @@ def _safe_extensions(values: Mapping[str, Any]) -> dict[str, str | int | float |
             isinstance(value, str) and len(value) > 256
         ):
             raise ValueError(f"unsafe audit extension value: {key}")
+        if isinstance(value, str) and any(word in value.lower() for word in _FORBIDDEN):
+            raise ValueError(f"unsafe audit extension value: {key}")
         safe[str(key)] = value
     return safe
 
@@ -269,14 +271,23 @@ class FailingAuditSink:
         del timeout
 
 
+@dataclass(slots=True)
+class _TaskDeliveryState:
+    """Transient per-task serialization state, evicted after terminal events."""
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    sequence: int = 0
+    active: int = 0
+    terminal: bool = False
+
+
 class AuditEmitter:
     """Serializes per-task delivery and enforces explicit delivery policy."""
 
     def __init__(self, sink: AuditSink, *, policy: AuditDeliveryPolicy | None = None) -> None:
         self.sink = sink
         self.policy = policy or AuditDeliveryPolicy()
-        self._sequences: dict[str, int] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._tasks: dict[str, _TaskDeliveryState] = {}
         self._buffer: list[AuditEvent] = []
         self.dropped_events = 0
 
@@ -285,32 +296,58 @@ class AuditEmitter:
     ) -> AuditDeliveryReceipt | None:
         """Deliver evidence with bounded timeout and explicit failure behavior."""
         task_key = event.task_id or event.correlation_id or event.event_id
-        lock = self._locks.setdefault(task_key, asyncio.Lock())
-        async with lock:
-            sequence = self._sequences.get(task_key, 0) + 1
-            self._sequences[task_key] = sequence
-            event = dataclass_replace(event, sequence=sequence)
-            try:
-                result = await asyncio.wait_for(
-                    self.sink.emit(event), timeout=self.policy.timeout_seconds
-                )
-            except TimeoutError:
-                result = AuditDeliveryFailure(event.event_id, "audit_sink_timeout", retryable=True)
-            if isinstance(result, AuditDeliveryReceipt):
-                return result
-            self._emergency_signal(result)
-            if result.retryable and len(self._buffer) < self.policy.max_buffered_events:
-                self._buffer.append(event)
-                return AuditDeliveryReceipt(
-                    event.event_id, event.idempotency_key, datetime.now(UTC), buffered=True
-                )
-            if result.retryable:
-                self.dropped_events += 1
-            # Fail-open is intentionally unavailable for required security
-            # evidence; it only permits explicit non-required lifecycle data.
-            if required:
-                raise AuditDeliveryError(result)
-            return None
+        state = self._tasks.setdefault(task_key, _TaskDeliveryState())
+        state.active += 1
+        try:
+            async with state.lock:
+                state.sequence += 1
+                event = dataclass_replace(event, sequence=state.sequence)
+                receipt = await self._deliver(event, required=required)
+                if self._is_terminal(event):
+                    state.terminal = True
+                return receipt
+        finally:
+            state.active -= 1
+            if state.terminal and state.active == 0 and self._tasks.get(task_key) is state:
+                del self._tasks[task_key]
+
+    async def _deliver(self, event: AuditEvent, *, required: bool) -> AuditDeliveryReceipt | None:
+        """Deliver one sequenced event according to bounded policy."""
+        try:
+            result = await asyncio.wait_for(
+                self.sink.emit(event), timeout=self.policy.timeout_seconds
+            )
+        except TimeoutError:
+            result = AuditDeliveryFailure(event.event_id, "audit_sink_timeout", retryable=True)
+        if isinstance(result, AuditDeliveryReceipt):
+            return result
+        self._emergency_signal(result)
+        if result.retryable and len(self._buffer) < self.policy.max_buffered_events:
+            self._buffer.append(event)
+            return AuditDeliveryReceipt(
+                event.event_id, event.idempotency_key, datetime.now(UTC), buffered=True
+            )
+        if result.retryable:
+            self.dropped_events += 1
+        # Fail-open is intentionally unavailable for required security
+        # evidence; it only permits explicit non-required lifecycle data.
+        if required:
+            raise AuditDeliveryError(result)
+        return None
+
+    @staticmethod
+    def _is_terminal(event: AuditEvent) -> bool:
+        """Return whether no further event is expected in this task lifecycle."""
+        return event.event_name in {
+            AuditEventName.AUTHORIZATION_DENIED,
+            AuditEventName.APPROVAL_DENIED,
+            AuditEventName.APPROVAL_EXPIRED,
+            AuditEventName.APPROVAL_CANCELED,
+            AuditEventName.SIGNATURE_REJECTED,
+            AuditEventName.REPLAY_REJECTED,
+            AuditEventName.EXECUTION_COMPLETED,
+            AuditEventName.EXECUTION_FAILED,
+        }
 
     async def flush(self, timeout: float | None = None) -> None:
         """Attempt each buffered event once; retry remains bounded."""

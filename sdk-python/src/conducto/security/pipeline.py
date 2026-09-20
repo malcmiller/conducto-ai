@@ -240,7 +240,7 @@ class SecurityPipeline:
                 AuditDecision.DENY,
                 AuditOutcome.REJECTED,
                 getattr(result.error, "reason_code", "authorization_denied"),
-                required=False,
+                required=True,
             )
         return result
 
