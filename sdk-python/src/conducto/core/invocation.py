@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import inspect
 import math
@@ -12,7 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from conducto.security import AuditEventName, AuditOutcome, SecurityPipeline
+from conducto.security import AuditDeliveryError, AuditEventName, AuditOutcome, SecurityPipeline
 from conducto.security.context import AuthorizationContext
 from conducto.security.errors import SecurityError
 
@@ -40,7 +41,7 @@ from .logging import (
 )
 from .model_config import ModelReference, ModelRequirement, RunConfig
 from .registration import RegisteredMethod
-from .run_context import use_run_context
+from .run_context import DelegationBudget, DelegationFrame, use_run_context
 from .runtime import Runtime
 from .serialization import freeze_mapping, serialize_result
 
@@ -67,6 +68,10 @@ class _CapabilityExecutionError(Exception):
     def __init__(self, exception: Exception) -> None:
         super().__init__(str(exception))
         self.exception = exception
+
+
+class _CooperativeCancellation(Exception):
+    """Signal cancellation requested through the shared run state."""
 
 
 def _resolve_capability(
@@ -125,6 +130,8 @@ async def invoke_agent(
     authorization_context: AuthorizationContext | None = None,
     security_pipeline: SecurityPipeline | None = None,
     approved_approval_id: str | None = None,
+    allowed_capabilities: frozenset[str] | None = None,
+    delegation_budget: DelegationBudget | None = None,
 ) -> InvocationResult:
     """Execute one capability through the shared runtime-owned pipeline."""
     if not isinstance(agent, BaseAgent):
@@ -182,6 +189,9 @@ async def invoke_agent(
         call_override=model_reference,
         correlation_id=correlation_id,
         authorization=(authorization if authorization is not None else authorization_context),
+        allowed_capabilities=allowed_capabilities,
+        delegation_budget=delegation_budget,
+        delegation_frame=DelegationFrame(agent_id, capability_name),
     )
     invocation_timeout = context.timeout
     target = registered.callable
@@ -207,6 +217,8 @@ async def invoke_agent(
             **model_log_context,
         ),
     ):
+        if context.cancellation.cancelled:
+            return InvocationCancelled(correlation_id, context.invocation_metadata())
         try:
             validated = parameter_model.model_validate(dict(arguments))
         except ValidationError as error:
@@ -276,6 +288,30 @@ async def invoke_agent(
             except Exception as capability_error:
                 raise _CapabilityExecutionError(capability_error) from capability_error
 
+        async def execute_until_cancelled() -> Any:
+            current = asyncio.current_task()
+            assert current is not None
+            cancelled_by_state = False
+
+            async def observe_cancellation() -> None:
+                nonlocal cancelled_by_state
+                while not context.cancellation.cancelled:
+                    await asyncio.sleep(0.01)
+                cancelled_by_state = True
+                current.cancel()
+
+            cancellation = asyncio.create_task(observe_cancellation())
+            try:
+                return await execute()
+            except asyncio.CancelledError:
+                if cancelled_by_state:
+                    raise _CooperativeCancellation from None
+                raise
+            finally:
+                cancellation.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await cancellation
+
         started = time.perf_counter()
         await pipeline.emit_execution(
             AuditEventName.EXECUTION_STARTED,
@@ -288,7 +324,7 @@ async def invoke_agent(
         emit_event(INVOCATION_STARTED)
         try:
             remaining = context.remaining_timeout()
-            result = await asyncio.wait_for(execute(), timeout=remaining)
+            result = await asyncio.wait_for(execute_until_cancelled(), timeout=remaining)
             serialized = serialize_result(result)
             emit_event(
                 INVOCATION_COMPLETED,
@@ -308,6 +344,13 @@ async def invoke_agent(
                 serialized,
                 metadata=context.invocation_metadata(),
             )
+        except _CooperativeCancellation:
+            emit_event(
+                INVOCATION_CANCELLED,
+                outcome="cancelled",
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
+            return InvocationCancelled(correlation_id, context.invocation_metadata())
         except asyncio.CancelledError:
             current_task = asyncio.current_task()
             if current_task is not None and current_task.cancelling():
@@ -382,6 +425,14 @@ async def invoke_agent(
                 correlation_id,
                 str(error),
                 error,
+                context.invocation_metadata(),
+            )
+        except AuditDeliveryError as error:
+            from .invocation_results import InvocationAuditFailure
+
+            return InvocationAuditFailure(
+                correlation_id,
+                error.reason_code,
                 context.invocation_metadata(),
             )
         except Exception as error:

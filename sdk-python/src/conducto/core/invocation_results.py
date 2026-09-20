@@ -125,6 +125,74 @@ class InvocationAuthorizationFailure:
     metadata: InvocationMetadata | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class InvocationAuditFailure:
+    """Envelope for mandatory audit evidence that could not be delivered."""
+
+    correlation_id: str
+    reason_code: str
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationBindingFailure:
+    """Envelope for a forged, foreign-runtime, or expired gateway binding."""
+
+    correlation_id: str
+    reason_code: str
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationStaleBinding:
+    """Envelope for a binding invalidated by target removal or replacement."""
+
+    correlation_id: str
+    agent_id: str
+    capability_id: str
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationTargetUnavailable:
+    """Envelope for a disabled, draining, or unhealthy target."""
+
+    correlation_id: str
+    agent_id: str
+    capability_id: str
+    reason_code: str
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationSchemaMismatch:
+    """Envelope for a target whose current schema differs from its binding."""
+
+    correlation_id: str
+    agent_id: str
+    capability_id: str
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationBudgetExhausted:
+    """Envelope for an invocation rejected by an atomic delegation budget."""
+
+    correlation_id: str
+    budget: str
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationDelegationFailure:
+    """Envelope for a cycle or maximum-depth violation."""
+
+    correlation_id: str
+    reason_code: str
+    path: tuple[tuple[str, str], ...]
+    metadata: InvocationMetadata | None = None
+
+
 InvocationResult: TypeAlias = (
     InvocationSuccess
     | InvocationValidationFailure
@@ -134,6 +202,13 @@ InvocationResult: TypeAlias = (
     | InvocationFailure
     | InvocationApprovalRequired
     | InvocationAuthorizationFailure
+    | InvocationAuditFailure
+    | InvocationBindingFailure
+    | InvocationStaleBinding
+    | InvocationTargetUnavailable
+    | InvocationSchemaMismatch
+    | InvocationBudgetExhausted
+    | InvocationDelegationFailure
 )
 
 

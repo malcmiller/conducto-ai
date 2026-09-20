@@ -61,6 +61,34 @@ class InvoiceAgent(BaseAgent):
 `examples/quickstart.py` shows the complete two-agent flow using only public
 imports from `conducto` and a deterministic `FakeModel`.
 
+## Local capability gateway
+
+Agents obtain the model-neutral gateway only from their active
+`require_run_context().gateway`. Applications own an `AgentRegistry`, inject it
+into `Runtime`, and declare the caller's allowed capability IDs when starting a
+run. Discovery returns immutable descriptors and opaque bindings; invocation
+revalidates the binding and dispatches through the normal runtime pipeline.
+
+```python
+registry = AgentRegistry()
+registry.register(WeatherAgent())
+runtime = Runtime(agent_registry=registry)
+
+result = await runtime.invoke(
+    TravelAgent(),
+    "plan",
+    {"city": "Toronto"},
+    allowed_capabilities=frozenset({"WeatherAgent:temperature"}),
+)
+```
+
+Inside `TravelAgent.plan`, use `await context.gateway.lookup(...)` or
+`discover(DiscoveryQuery(...))`, then pass the returned binding to
+`context.gateway.invoke(...)`. See
+[`examples/local_gateway.py`](examples/local_gateway.py) for a complete,
+model-free example. A later registry registration is visible to subsequent
+discovery calls without recreating the caller or runtime.
+
 ## Repository layout
 
 ```text

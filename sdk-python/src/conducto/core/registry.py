@@ -1,176 +1,330 @@
-"""Thread-safe local agent registry and routing metadata."""
+"""Thread-safe local agent registrations and immutable discovery snapshots."""
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
 import threading
 from copy import deepcopy
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, get_type_hints
+
+from pydantic import PydanticInvalidForJsonSchema, TypeAdapter
+
+from conducto.security.guardrails import discover_guardrails
 
 from .agent import BaseAgent
+from .gateway_models import (
+    AgentDescriptor,
+    CapabilityDescriptor,
+    RegistrationLifecycle,
+    RegistrySnapshot,
+    canonical_json,
+)
 from .logging import AGENT_DISCOVERED, AGENT_REGISTERED, emit_event
 
 
+@dataclass(frozen=True, slots=True)
+class _Registration:
+    agent: BaseAgent
+    generation: int
+    lifecycle: RegistrationLifecycle
+    healthy: bool
+    descriptor: AgentDescriptor
+
+
 class AgentRegistry:
-    """Own mutable agent and capability mappings behind one reentrant lock."""
+    """Own mutable local registrations and publish atomic immutable snapshots."""
 
     def __init__(self) -> None:
         self.agents: dict[str, BaseAgent] = {}
         self.capabilities: dict[str, BaseAgent] = {}
         self.lock = threading.RLock()
+        self._registrations: dict[str, _Registration] = {}
+        self._capability_index: dict[str, dict[str, _Registration]] = {}
+        self._removed: set[str] = set()
+        self._revision = 0
+        self._generation = 0
+
+    @property
+    def revision(self) -> int:
+        """Return the monotonic registry revision."""
+        with self.lock:
+            return self._revision
+
+    def snapshot(self) -> RegistrySnapshot:
+        """Return one coherent immutable metadata snapshot."""
+        with self.lock:
+            return RegistrySnapshot(
+                revision=self._revision,
+                agents=tuple(
+                    registration.descriptor
+                    for _, registration in sorted(self._registrations.items())
+                ),
+            )
 
     def registered_agents(self) -> tuple[BaseAgent, ...]:
-        """Return all registered agents in sorted order.
-
-        Returns:
-            The current agent registry contents.
-        """
+        """Return all registered agents in sorted order."""
         with self.lock:
             return tuple(self.agents[name] for name in sorted(self.agents))
 
     def registered_capabilities(self) -> dict[str, BaseAgent]:
-        """Return the live capability index.
-
-        Returns:
-            A mapping from capability name to the owning agent.
-        """
+        """Return a deterministic compatibility view of capability owners."""
         with self.lock:
             return dict(sorted(self.capabilities.items()))
 
+    def capability_providers(self, capability_id: str) -> tuple[BaseAgent, ...]:
+        """Return every provider of a capability in stable agent order."""
+        with self.lock:
+            providers = self._capability_index.get(capability_id, {})
+            return tuple(providers[name].agent for name in sorted(providers))
+
     def __len__(self) -> int:
-        """Return the number of registered agents."""
         with self.lock:
             return len(self.agents)
 
     def contains(self, agent: object) -> bool:
-        """Check whether an agent instance or name is currently registered.
-
-        Args:
-            agent: An agent instance or agent name.
-
-        Returns:
-            ``True`` if the agent is present; otherwise ``False``.
-        """
+        """Check whether an agent instance or identifier is registered."""
         with self.lock:
             if isinstance(agent, BaseAgent):
                 return any(existing is agent for existing in self.agents.values())
             return isinstance(agent, str) and agent in self.agents
 
-    def register(self, agent: BaseAgent, *, replace: bool = False) -> BaseAgent | None:
-        """Register an agent and update the capability index.
-
-        Args:
-            agent: Agent to register.
-            replace: Whether to replace an agent with the same name.
-
-        Returns:
-            The previous agent instance when replacing an existing registration.
-
-        Raises:
-            TypeError: If the value is not a ``BaseAgent``.
-            ValueError: If the name is already registered and replacement is not allowed.
-        """
+    def register(
+        self,
+        agent: BaseAgent,
+        *,
+        replace: bool = False,
+        allow_capability_conflicts: bool = True,
+    ) -> BaseAgent | None:
+        """Register an agent and atomically update its capability indexes."""
         if not isinstance(agent, BaseAgent):
-            raise TypeError("OrchestratorAgent.register_agent() requires a BaseAgent instance")
+            raise TypeError("AgentRegistry.register() requires a BaseAgent instance")
         agent_name = agent.agent_metadata.name
         if not agent_name or not agent_name.strip():
             raise ValueError("Agent name cannot be empty")
 
         agent.get_agent_card(card_url_for(agent))
         with self.lock:
-            existing = self.agents.get(agent_name)
-            if existing is not None:
-                if not replace:
-                    raise ValueError(f"Agent '{agent_name}' is already registered")
-                self.remove_mapping(existing)
+            existing = self._registrations.get(agent_name)
+            if existing is not None and not replace:
+                raise ValueError(f"Agent '{agent_name}' is already registered")
 
             conflicts = self.conflicting_capabilities(agent)
-            if conflicts and not replace:
+            if conflicts and not allow_capability_conflicts and not replace:
                 raise ValueError("Capability name conflict(s): " + ", ".join(sorted(conflicts)))
-            if conflicts:
-                for conflicting_name in sorted(conflicts):
-                    if conflicting_name in self.capabilities:
-                        conflicting_agent = self.capabilities[conflicting_name]
-                        if conflicting_agent is not agent:
-                            self.remove_mapping(conflicting_agent)
 
+            next_generation = self._generation + 1
+            descriptor = _build_agent_descriptor(
+                agent,
+                generation=next_generation,
+                lifecycle=RegistrationLifecycle.ACTIVE,
+                healthy=True,
+            )
+            registration = _Registration(
+                agent,
+                next_generation,
+                RegistrationLifecycle.ACTIVE,
+                True,
+                descriptor,
+            )
+
+            if conflicts and not allow_capability_conflicts:
+                for conflicting_name in sorted(conflicts):
+                    for owner in tuple(self._capability_index.get(conflicting_name, {}).values()):
+                        if owner.agent is not agent:
+                            self._remove_mapping_locked(owner.agent)
+
+            if existing is not None:
+                self._remove_mapping_locked(existing.agent)
+            self._generation = next_generation
+            self._registrations[agent_name] = registration
             self.agents[agent_name] = agent
+            self._removed.discard(agent_name)
             for capability_name in sorted(agent.capabilities):
-                self.capabilities[capability_name] = agent
+                self._capability_index.setdefault(capability_name, {})[agent_name] = registration
+            self._refresh_legacy_capabilities()
+            self._revision += 1
             emit_event(
                 AGENT_REGISTERED,
                 agent_id=agent_name,
                 outcome="success",
                 agent_count=len(self.agents),
             )
-            return existing
+            return existing.agent if existing is not None else None
+
+    def set_lifecycle(
+        self,
+        agent_id: str,
+        lifecycle: RegistrationLifecycle,
+    ) -> None:
+        """Set active, draining, or disabled state for a registration."""
+        if lifecycle is RegistrationLifecycle.REMOVED:
+            self.remove(agent_id)
+            return
+        with self.lock:
+            current = self._require_registration(agent_id)
+            descriptor = _build_agent_descriptor(
+                current.agent,
+                generation=current.generation,
+                lifecycle=lifecycle,
+                healthy=current.healthy,
+            )
+            updated = _Registration(
+                current.agent,
+                current.generation,
+                lifecycle,
+                current.healthy,
+                descriptor,
+            )
+            self._replace_registration_locked(agent_id, updated)
+            self._revision += 1
+
+    def set_health(self, agent_id: str, *, healthy: bool) -> None:
+        """Atomically update registration health."""
+        with self.lock:
+            current = self._require_registration(agent_id)
+            descriptor = _build_agent_descriptor(
+                current.agent,
+                generation=current.generation,
+                lifecycle=current.lifecycle,
+                healthy=healthy,
+            )
+            updated = _Registration(
+                current.agent,
+                current.generation,
+                current.lifecycle,
+                healthy,
+                descriptor,
+            )
+            self._replace_registration_locked(agent_id, updated)
+            self._revision += 1
+
+    def lifecycle(self, agent_id: str) -> RegistrationLifecycle:
+        """Return current lifecycle state, including removed tombstones."""
+        with self.lock:
+            registration = self._registrations.get(agent_id)
+            if registration is not None:
+                return registration.lifecycle
+            if agent_id in self._removed:
+                return RegistrationLifecycle.REMOVED
+            raise KeyError(f"Agent '{agent_id}' is not registered")
 
     def remove(self, agent: BaseAgent | str) -> BaseAgent:
-        """Remove an agent from the registry.
-
-        Args:
-            agent: Agent instance or agent name to remove.
-
-        Returns:
-            The removed agent instance.
-
-        Raises:
-            KeyError: If the agent is not currently registered.
-            TypeError: If the argument is not an agent or string name.
-        """
+        """Remove an agent without affecting already accepted references."""
         with self.lock:
             if isinstance(agent, BaseAgent):
-                removed = next(
-                    (existing for existing in self.agents.values() if existing is agent),
+                registration = next(
+                    (
+                        candidate
+                        for candidate in self._registrations.values()
+                        if candidate.agent is agent
+                    ),
                     None,
                 )
-                if removed is None:
+                if registration is None:
                     raise KeyError(f"Agent '{agent.agent_metadata.name}' is not registered")
-                self.remove_mapping(removed)
-                return removed
-            if not isinstance(agent, str):
+            elif isinstance(agent, str):
+                registration = self._registrations.get(agent)
+                if registration is None:
+                    raise KeyError(f"Agent '{agent}' is not registered")
+            else:
                 raise TypeError("Agent removal requires a BaseAgent instance or agent name")
-            if agent not in self.agents:
-                raise KeyError(f"Agent '{agent}' is not registered")
-            removed = self.agents[agent]
-            self.remove_mapping(removed)
-            return removed
+            self._remove_mapping_locked(registration.agent)
+            self._removed.add(registration.agent.agent_metadata.name)
+            self._revision += 1
+            return registration.agent
 
     def clear(self) -> None:
-        """Remove all registered agents and capability mappings."""
+        """Remove all registrations and advance the registry revision."""
         with self.lock:
+            self._removed.update(self.agents)
             self.agents.clear()
             self.capabilities.clear()
+            self._registrations.clear()
+            self._capability_index.clear()
+            self._revision += 1
 
     def get(self, name: str) -> BaseAgent | None:
-        """Look up a registered agent by name.
-
-        Args:
-            name: Agent name to resolve.
-
-        Returns:
-            The matching agent, if present.
-        """
+        """Look up a registered agent by name."""
         with self.lock:
             return self.agents.get(name)
 
     def names(self) -> tuple[str, ...]:
-        """Return all current agent names.
-
-        Returns:
-            A sorted tuple of agent names.
-        """
+        """Return all current agent identifiers."""
         with self.lock:
             return tuple(sorted(self.agents))
 
-    def routing_metadata(self) -> list[dict[str, Any]]:
-        """Build routing metadata for the current registry.
+    def conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
+        """Return capability IDs currently provided by another agent."""
+        with self.lock:
+            return {
+                name
+                for name in agent.capabilities
+                if any(
+                    owner.agent is not agent
+                    for owner in self._capability_index.get(name, {}).values()
+                )
+            }
 
-        Returns:
-            A list of routing records serialized from each registered agent.
-        """
+    def accept_binding(
+        self,
+        *,
+        agent_id: str,
+        capability_id: str,
+        generation: int,
+        schema_digest: str,
+    ) -> tuple[
+        BaseAgent | None,
+        AgentDescriptor | None,
+        RegistrationLifecycle | None,
+        bool,
+        bool,
+        bool,
+    ]:
+        """Atomically validate a binding and capture its target instance."""
+        with self.lock:
+            registration = self._registrations.get(agent_id)
+            if registration is None:
+                return None, None, RegistrationLifecycle.REMOVED, False, False, False
+            descriptor = next(
+                (
+                    item
+                    for item in registration.descriptor.capabilities
+                    if item.capability_id == capability_id
+                ),
+                None,
+            )
+            generation_valid = registration.generation == generation
+            schema_valid = descriptor is not None and descriptor.schema_digest == schema_digest
+            return (
+                registration.agent,
+                registration.descriptor,
+                registration.lifecycle,
+                registration.healthy,
+                generation_valid,
+                schema_valid,
+            )
+
+    def registration(self, agent_id: str) -> tuple[BaseAgent, AgentDescriptor] | None:
+        """Return the current internal target and immutable public descriptor."""
+        with self.lock:
+            registration = self._registrations.get(agent_id)
+            if registration is None:
+                return None
+            return registration.agent, registration.descriptor
+
+    def routing_metadata(self) -> list[dict[str, Any]]:
+        """Build legacy routing metadata from one coherent agent snapshot."""
+        with self.lock:
+            agents = tuple(
+                registration.agent
+                for _, registration in sorted(self._registrations.items())
+                if registration.lifecycle is RegistrationLifecycle.ACTIVE and registration.healthy
+            )
         metadata: list[dict[str, Any]] = []
-        for agent in self.registered_agents():
+        for agent in agents:
             card = agent.get_agent_card(card_url_for(agent))
             parameter_map = card.get("x-conducto", {}).get("parameters", {})
             skills = [
@@ -196,30 +350,107 @@ class AgentRegistry:
         emit_event(AGENT_DISCOVERED, level=10, outcome="success", agent_count=len(metadata))
         return metadata
 
-    def conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
-        """Return capability names owned by a different registered agent."""
-        return {
-            name
-            for name in agent.capabilities
-            if (existing := self.capabilities.get(name)) is not None and existing is not agent
-        }
-
     def remove_mapping(self, agent: BaseAgent) -> None:
-        """Remove an agent and each capability mapping it owns."""
-        matching_name: str | None = None
-        for name, existing in list(self.agents.items()):
-            if existing is agent:
-                matching_name = name
-                del self.agents[name]
-                break
-        if matching_name is None:
-            for name in list(self.agents):
-                if name == agent.agent_metadata.name:
-                    del self.agents[name]
-                    break
-        for capability_name, owner in list(self.capabilities.items()):
-            if owner is agent:
-                del self.capabilities[capability_name]
+        """Compatibility helper that removes a mapping under the registry lock."""
+        with self.lock:
+            self._remove_mapping_locked(agent)
+            self._revision += 1
+
+    def _remove_mapping_locked(self, agent: BaseAgent) -> None:
+        agent_id = next(
+            (name for name, existing in self.agents.items() if existing is agent),
+            agent.agent_metadata.name,
+        )
+        self.agents.pop(agent_id, None)
+        self._registrations.pop(agent_id, None)
+        for capability_id in tuple(self._capability_index):
+            providers = self._capability_index[capability_id]
+            providers.pop(agent_id, None)
+            if not providers:
+                del self._capability_index[capability_id]
+        self._refresh_legacy_capabilities()
+
+    def _replace_registration_locked(
+        self,
+        agent_id: str,
+        registration: _Registration,
+    ) -> None:
+        self._registrations[agent_id] = registration
+        for capability_id in registration.agent.capabilities:
+            self._capability_index[capability_id][agent_id] = registration
+
+    def _refresh_legacy_capabilities(self) -> None:
+        self.capabilities.clear()
+        for capability_id, providers in sorted(self._capability_index.items()):
+            if providers:
+                first = min(providers)
+                self.capabilities[capability_id] = providers[first].agent
+
+    def _require_registration(self, agent_id: str) -> _Registration:
+        registration = self._registrations.get(agent_id)
+        if registration is None:
+            raise KeyError(f"Agent '{agent_id}' is not registered")
+        return registration
+
+
+def _build_agent_descriptor(
+    agent: BaseAgent,
+    *,
+    generation: int,
+    lifecycle: RegistrationLifecycle,
+    healthy: bool,
+) -> AgentDescriptor:
+    capabilities: list[CapabilityDescriptor] = []
+    for capability_id, registered in sorted(agent.capabilities.items()):
+        metadata = registered.capability
+        assert metadata is not None
+        output_schema = _return_schema(registered.callable)
+        input_schema = registered.parameter_schema
+        digest = hashlib.sha256(
+            canonical_json({"input": input_schema, "output": output_schema}).encode()
+        ).hexdigest()
+        guardrails = discover_guardrails(registered.callable)
+        capabilities.append(
+            CapabilityDescriptor(
+                agent_id=agent.agent_metadata.name,
+                agent_version=agent.agent_metadata.version,
+                capability_id=capability_id,
+                description=metadata.description,
+                tags=agent.agent_metadata.tags | metadata.tags,
+                input_schema=input_schema,
+                output_schema=output_schema,
+                schema_digest=digest,
+                required_scopes=guardrails.scopes,
+                approval_required=bool(guardrails.approvals),
+            )
+        )
+    return AgentDescriptor(
+        agent_id=agent.agent_metadata.name,
+        version=agent.agent_metadata.version,
+        description=agent.agent_metadata.description,
+        tags=agent.agent_metadata.tags,
+        lifecycle=lifecycle,
+        healthy=healthy,
+        generation=generation,
+        capabilities=tuple(capabilities),
+    )
+
+
+def _return_schema(target: Any) -> dict[str, Any] | None:
+    try:
+        annotation = get_type_hints(target).get("return", inspect.Signature.empty)
+    except (NameError, TypeError) as error:
+        raise ValueError(
+            f"Could not resolve return annotation for gateway capability: {error}"
+        ) from error
+    if annotation is inspect.Signature.empty or annotation is None:
+        return None
+    try:
+        schema = TypeAdapter(annotation).json_schema()
+        canonical_json(schema)
+        return schema
+    except (PydanticInvalidForJsonSchema, TypeError, ValueError) as error:
+        raise ValueError(f"Unsupported gateway output schema: {error}") from error
 
 
 def routing_prompt_context(routing: list[dict[str, Any]]) -> str:
