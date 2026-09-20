@@ -128,13 +128,13 @@ async def invoke_agent(
     correlation_id = correlation_id or runtime.new_correlation_id()
     resolved = _resolve_capability(agent, capability)
     if isinstance(capability, str):
-        capability_id = capability
+        capability_id: str = capability
     else:
-        capability_id = getattr(capability, "__name__", None)
-        if capability_id is None:
-            capability_id = getattr(capability, "__qualname__", None)
-        if capability_id is None:
-            capability_id = str(capability)
+        capability_id = (
+            getattr(capability, "__name__", None)
+            or getattr(capability, "__qualname__", None)
+            or str(capability)
+        )
     agent_id = agent.agent_metadata.name
     if resolved is None:
         with log_context(correlation_id=correlation_id, agent_id=agent_id):

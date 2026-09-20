@@ -76,7 +76,7 @@ _PACKAGE_LOGGER = logging.getLogger(LOGGER_NAME)
 _PACKAGE_LOGGER.addHandler(logging.NullHandler())
 
 
-class _ConductoStreamHandler(logging.StreamHandler):
+class _ConductoStreamHandler(logging.StreamHandler[Any]):
     """Stream handler tags used by the local Conducto logging facade."""
 
     _conducto_owned: bool

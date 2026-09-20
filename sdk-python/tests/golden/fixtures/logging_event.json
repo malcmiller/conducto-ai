@@ -1,11 +1,1 @@
-{
-  "agent_id": "FixtureAgent",
-  "capability_id": "ping",
-  "correlation_id": "fixture-correlation",
-  "event": "conducto.capability.invocation_completed.v1",
-  "level": "INFO",
-  "logger": "conducto.events",
-  "outcome": "success",
-  "schema_version": "1",
-  "timestamp": "2026-01-02T03:04:05.678Z"
-}
+{"agent_id":"FixtureAgent","capability_id":"ping","correlation_id":"fixture-correlation","event":"conducto.capability.invocation_completed.v1","level":"INFO","logger":"conducto.events","outcome":"success","schema_version":"1","timestamp":"2026-01-02T03:04:05.678Z"}

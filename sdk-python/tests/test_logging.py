@@ -23,8 +23,8 @@ from conducto import (
 )
 
 
-def _event_records(catalog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [record for record in catalog.records if record.name == "conducto.events"]
+def _event_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if record.name == "conducto.events"]
 
 
 @contextmanager
@@ -112,14 +112,14 @@ def test_configure_logging_replaces_only_owned_handler() -> None:
         assert sum(getattr(item, "_conducto_owned", False) for item in logger.handlers) == 1
 
 
-def test_default_events_redact_payloads_and_exceptions(catalog: pytest.LogCaptureFixture) -> None:
-    with catalog.at_level(logging.INFO, logger="conducto"):
+def test_default_events_redact_payloads_and_exceptions(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO, logger="conducto"):
         emit_event(
             "conducto.test.v1",
             payload={"token": "secret-token", "prompt": "sensitive prompt"},
         )
 
-    record = _event_records(catalog)[0]
+    record = _event_records(caplog)[0]
     assert not hasattr(record, "payload")
     assert record.exc_info is None
     assert record.exc_text is None
@@ -165,7 +165,7 @@ def test_opted_in_payload_isolated_to_sensitive_handler() -> None:
 
 
 def test_concurrent_async_and_sync_invocations_keep_context_isolated(
-    catalog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     @a2a_agent(name="ContextAgent", version="1.0", description="Tests context.")
     class ContextAgent(BaseAgent):
@@ -186,12 +186,12 @@ def test_concurrent_async_and_sync_invocations_keep_context_isolated(
             orchestrator.invoke("ContextAgent", "async", {"value": "two"}, correlation_id="two"),
         )
 
-    with catalog.at_level(logging.DEBUG, logger="conducto"):
+    with caplog.at_level(logging.DEBUG, logger="conducto"):
         asyncio.run(exercise())
 
     completed = [
         record
-        for record in _event_records(catalog)
+        for record in _event_records(caplog)
         if getattr(record, "event", None) == "conducto.capability.invocation_completed.v1"
     ]
     assert {
@@ -204,7 +204,7 @@ def test_concurrent_async_and_sync_invocations_keep_context_isolated(
 
 
 def test_concurrent_model_overrides_keep_provenance_isolated(
-    catalog: pytest.LogCaptureFixture,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     @a2a_agent(name="ModelAgent", version="1.0", description="Tests model provenance.")
     class ModelAgent(BaseAgent):
@@ -230,12 +230,12 @@ def test_concurrent_model_overrides_keep_provenance_isolated(
             ),
         )
 
-    with catalog.at_level(logging.DEBUG, logger="conducto"):
+    with caplog.at_level(logging.DEBUG, logger="conducto"):
         asyncio.run(exercise())
 
     models = [
         record
-        for record in _event_records(catalog)
+        for record in _event_records(caplog)
         if getattr(record, "event", None) == "conducto.model.selected.v1"
     ]
     assert {
@@ -253,7 +253,7 @@ def test_concurrent_model_overrides_keep_provenance_isolated(
 
     discovered = [
         record
-        for record in _event_records(catalog)
+        for record in _event_records(caplog)
         if getattr(record, "event", None) == "conducto.agent.discovered.v1"
     ]
     assert {getattr(record, "correlation_id", None) for record in discovered} == {
