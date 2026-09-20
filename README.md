@@ -31,6 +31,21 @@ Conducto separates those responsibilities:
 - **Cross-language conformance:** Python establishes the reference behavior; .NET follows shared
   schemas, protocol fixtures, and observable semantics.
 
+## What Conducto is for
+
+Conducto is intended for systems where an application must coordinate specialized agents without
+giving every model unrestricted access to every tool or deployment:
+
+- an operations agent that delegates evidence gathering to documentation and diagnostic agents
+- a business workflow that requires scoped authority and human approval before protected actions
+- a local agent composition that later moves behind authenticated network boundaries
+- a hybrid deployment that combines in-process, containerized, and Foundry-hosted agents
+- independently implemented Python and .NET agents that must follow the same observable contract
+
+Conducto is not intended to be another general-purpose chat UI or a vendor-specific model wrapper.
+Its primary concern is the controlled discovery, delegation, and execution of typed agent
+capabilities.
+
 ## Current status
 
 The repository currently ships the **Python reference SDK** in [`sdk-python/`](./sdk-python/).
@@ -43,7 +58,6 @@ Implemented foundations include:
 - provider-neutral model configuration and per-run model isolation
 - authorization scopes and approval challenges
 - structured, correlation-safe runtime logging
-- unit, golden-contract, acceptance, package, and installed-wheel tests
 
 The local agent gateway, model-selected nested chaining, A2A 1.0 transport, provider adapters,
 containers, Foundry integration, .NET parity, and federation are roadmap work. The README avoids
@@ -116,8 +130,8 @@ package build, installed-wheel smoke test, and development commands.
    deadlines, never expand them.
 6. **Typed failures over hidden fallbacks.** Transport, policy, validation, approval, timeout, and
    execution failures remain distinguishable.
-7. **Cloud-free required tests.** Stable CI requires no credentials, network services, or model
-   downloads.
+7. **Local reproducibility.** Core behavior must remain usable without cloud credentials, network
+   services, or model downloads.
 
 Read the [architecture guide](./docs/architecture.md), [security model](./docs/security-and-governance.md),
 and [deployment topology guide](./docs/deployment-and-federation.md) for details.
@@ -144,44 +158,31 @@ optional federation**.
 
 ```text
 .
-├── AGENTS.md                    Repository-wide implementation rules
 ├── docs/                        Architecture, security, deployment, and development guides
-├── sdk-python/                  Python reference SDK, tests, examples, and package metadata
-└── .github/
-    ├── instructions/            Path-specific Copilot instructions
-    └── workflows/               Continuous-integration workflows
+└── sdk-python/                  Python reference SDK, tests, examples, and package metadata
 ```
 
 The .NET SDK will be added during the .NET parity milestone rather than maintained as an
 unimplemented placeholder.
 
-## Development
+## Documentation
 
-For Python development:
-
-```bash
-cd sdk-python
-uv sync --locked --group dev
-uv run ruff format .
-uv run ruff format --check .
-uv run ruff check .
-uv run mypy src examples scripts tests/acceptance
-uv run pytest
-```
-
-Changes to package behavior or public imports must also pass `uv build` and the installed-wheel
-checks documented in [`sdk-python/README.md`](./sdk-python/README.md).
-
-Repository-wide agent requirements are in [`AGENTS.md`](./AGENTS.md), with additional Python rules
-in [`.github/instructions/sdk-python.instructions.md`](./.github/instructions/sdk-python.instructions.md).
-The detailed contributor workflow is in [`docs/development-guide.md`](./docs/development-guide.md).
+- [Documentation index](./docs/README.md)
+- [Architecture](./docs/architecture.md)
+- [SDK reference](./docs/sdk-reference.md)
+- [Security and governance](./docs/security-and-governance.md)
+- [Communication and standards](./docs/communication-and-standards.md)
+- [Deployment and federation](./docs/deployment-and-federation.md)
+- [Repository automation and agent guidance](./docs/repository-automation.md)
+- [Python SDK](./sdk-python/README.md)
 
 ## Contributing
 
 Choose an issue from the [roadmap](https://github.com/malcmiller/conducto-ai/issues), confirm its
-dependencies are complete, and keep implementation aligned with its acceptance criteria. Pull
-requests should include focused tests, updated public documentation, and a concise description of
-the validation performed.
+dependencies are complete, and keep implementation aligned with its acceptance criteria. See the
+[development guide](./docs/development-guide.md) for setup and validation and
+[repository automation documentation](./docs/repository-automation.md) for agent instructions and
+workflows.
 
 ## License
 

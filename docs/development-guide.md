@@ -18,6 +18,7 @@ The project requires Python 3.12+ and uses `uv` as the preferred package manager
 ### Format
 
 ```bash
+uv run ruff format .
 uv run ruff format --check .
 ```
 
@@ -30,7 +31,7 @@ uv run ruff check .
 ### Type-check
 
 ```bash
-uv run mypy src
+uv run mypy src examples scripts tests/acceptance
 ```
 
 ### Unit and schema tests
@@ -68,7 +69,8 @@ This gives the project a layered validation strategy: low-level behavior, contra
 1. Start from a feature branch.
 2. Keep changes focused and aligned with the public contract.
 3. Update or add tests when behavior changes.
-4. Run the smallest relevant validation command.
+4. Run the smallest relevant validation command while developing, then the complete applicable
+   validation gate in `AGENTS.md`.
 5. Submit a pull request and ensure CI passes.
 
 ## CI expectations
