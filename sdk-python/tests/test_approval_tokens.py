@@ -69,6 +69,29 @@ def test_es256_token_verifies_and_tampering_fails() -> None:
         verifier.verify(".".join(parts))
 
 
+def test_verifier_audit_hook_receives_only_stable_outcomes() -> None:
+    """Cryptographic hooks expose outcome codes, never token material."""
+
+    class Hook:
+        outcomes: list[tuple[bool, str]] = []
+
+        def record(self, *, verified: bool, reason_code: str) -> None:
+            self.outcomes.append((verified, reason_code))
+
+    signed, _ = token()
+    key = ec.derive_private_key(1, ec.SECP256R1())
+    hook = Hook()
+    verifier = ES256Verifier(
+        StaticApprovalKeyResolver({("approval-authority", "key-1"): key.public_key()}),
+        issuer="approval-authority",
+        audience="conducto-runtime",
+        clock=FixedClock(),
+        audit_hook=hook,
+    )
+    verifier.verify(signed)
+    assert hook.outcomes == [(True, "signature_verified")]
+
+
 def test_expired_token_is_distinct() -> None:
     signed, verifier = token()
     parts = signed.split(".")

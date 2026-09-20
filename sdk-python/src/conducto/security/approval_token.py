@@ -9,11 +9,21 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from .approval import ApprovalDecision, ApprovalStore
+from .audit import (
+    AuditCategory,
+    AuditDecision,
+    AuditEmitter,
+    AuditEvent,
+    AuditEventName,
+    AuditOutcome,
+    AuditSeverity,
+)
 from .context import AuthorizationContext
 from .crypto import ES256Verifier
 from .errors import (
     ApprovalRequiredError,
     ApprovalTokenBindingError,
+    ApprovalTokenError,
     ApprovalTokenReplayError,
     ApprovalTokenRoleError,
     AuthorizationDeniedError,
@@ -101,11 +111,13 @@ class ApprovalTokenService:
         verifier: ES256Verifier,
         replay_store: ApprovalReplayStore,
         approval_store: ApprovalStore,
+        audit_emitter: AuditEmitter | None = None,
     ) -> None:
         """Initialize token verification with application-owned stores."""
         self.verifier = verifier
         self.replay_store = replay_store
         self.approval_store = approval_store
+        self.audit_emitter = audit_emitter
 
     def verify(self, token: str, *, challenge: Any) -> ApprovalVerificationResult:
         """Verify token cryptography and all challenge bindings."""
@@ -162,12 +174,29 @@ class ApprovalTokenService:
     ) -> Any:
         """Verify and atomically consume a token before invoking protected work."""
         result = self.verify(token, challenge=challenge)
+        await self._audit(
+            AuditEventName.SIGNATURE_VERIFIED,
+            context,
+            challenge,
+            AuditOutcome.SUCCESS,
+            "signature_verified",
+        )
         if (
             challenge.principal_subject_id
             and challenge.principal_subject_id != context.principal.subject_id
         ):
             raise ApprovalTokenBindingError("approval token subject is not intended")
-        self.replay_store.consume(result.claims.token_id, result.claims.expires_at)
+        try:
+            self.replay_store.consume(result.claims.token_id, result.claims.expires_at)
+        except ApprovalTokenReplayError:
+            await self._audit(
+                AuditEventName.REPLAY_REJECTED,
+                context,
+                challenge,
+                AuditOutcome.REJECTED,
+                "replay",
+            )
+            raise
         self.approval_store.decide(result.decision)
         if not result.decision.approved:
             raise AuthorizationDeniedError("approval was denied")
@@ -187,11 +216,73 @@ class ApprovalTokenService:
         context: AuthorizationContext,
     ) -> Any:
         """Resolve the token's challenge, then perform atomic consumption."""
-        raw = self.verifier.verify(token)
+        try:
+            raw = self.verifier.verify(token)
+        except ApprovalTokenError:
+            # Token bodies and verification exception details are deliberately
+            # excluded from the event.
+            if self.audit_emitter is not None:
+                await self.audit_emitter.emit(
+                    AuditEvent(
+                        event_name=AuditEventName.SIGNATURE_REJECTED,
+                        category=AuditCategory.CRYPTOGRAPHY,
+                        decision=AuditDecision.DENY,
+                        outcome=AuditOutcome.REJECTED,
+                        reason_code="signature_verification_failed",
+                        subject_id=context.principal.subject_id,
+                        issuer=context.principal.issuer,
+                        audience=context.principal.audience,
+                        task_id=context.task_id,
+                        correlation_id=context.correlation_id,
+                        resource="approval-token",
+                        severity=AuditSeverity.ERROR,
+                    ),
+                    required=False,
+                )
+            raise
         challenge = self.approval_store.get(raw["challenge_id"])
         return await self.consume_and_resume(
             token,
             execute,
             challenge=challenge,
             context=context,
+        )
+
+    async def _audit(
+        self,
+        name: AuditEventName,
+        context: AuthorizationContext,
+        challenge: Any,
+        outcome: AuditOutcome,
+        reason_code: str,
+    ) -> None:
+        if self.audit_emitter is None:
+            return
+        await self.audit_emitter.emit(
+            AuditEvent(
+                event_name=name,
+                category=AuditCategory.CRYPTOGRAPHY,
+                decision=(
+                    AuditDecision.ALLOW
+                    if outcome == AuditOutcome.SUCCESS
+                    else AuditDecision.DENY
+                ),
+                outcome=outcome,
+                reason_code=reason_code,
+                subject_id=context.principal.subject_id,
+                issuer=context.principal.issuer,
+                audience=context.principal.audience,
+                task_id=context.task_id,
+                challenge_id=challenge.approval_id,
+                agent_id=challenge.agent_id,
+                capability_id=challenge.capability_id,
+                policy_id="conducto.approval-token",
+                policy_version=challenge.policy_version,
+                correlation_id=context.correlation_id,
+                resource="approval-token",
+                severity=(
+                    AuditSeverity.ERROR if outcome != AuditOutcome.SUCCESS else AuditSeverity.INFO
+                ),
+            ),
+            required=False,
         )
