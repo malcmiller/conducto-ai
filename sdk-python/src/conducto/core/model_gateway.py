@@ -48,6 +48,17 @@ class ModelGatewayCollection:
         self,
         reference: ModelReference | str | None = None,
     ) -> ModelGateway:
+        """Resolve and return a model gateway for the active invocation.
+
+        Args:
+            reference: Optional model override to bind to the gateway.
+
+        Returns:
+            A model gateway bound to the active run context.
+
+        Raises:
+            MissingModelDefaultError: If no model can be resolved for the invocation.
+        """
         self._context._invocation_state.require_active()
         resolved = self._runtime._resolve_for_call_binding(self._context, reference)
         if resolved is None:
@@ -69,6 +80,15 @@ class ModelGateway:
         *,
         structured_output: StructuredOutputRequest,
     ) -> ModelCallResult:
+        """Execute a provider call through the active runtime context.
+
+        Args:
+            messages: Conversation history to send to the model.
+            structured_output: Native structured-output contract required by the call.
+
+        Returns:
+            The provider result and associated invocation metadata.
+        """
         task = self._context._invocation_state.begin_model_call()
         try:
             return await self._runtime.complete(
@@ -87,6 +107,18 @@ class ModelGateway:
         *,
         response_type: type[ModelResponseT],
     ) -> ModelResponseT:
+        """Execute a provider call and validate a typed structured response.
+
+        Args:
+            messages: Conversation history to send to the model.
+            response_type: Pydantic model type expected from the provider.
+
+        Returns:
+            The validated typed response object.
+
+        Raises:
+            MalformedStructuredOutputError: If the provider response is missing or invalid.
+        """
         request = StructuredOutputRequest(
             name=response_type.__name__,
             schema=response_type.model_json_schema(),

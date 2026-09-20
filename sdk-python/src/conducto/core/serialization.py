@@ -16,6 +16,17 @@ from .invocation_results import UnsupportedReturnValueError
 
 
 def serialize_result(value: Any) -> Any:
+    """Convert a capability return value into a JSON-safe structure.
+
+    Args:
+        value: Arbitrary result value returned by a capability.
+
+    Returns:
+        A JSON-safe value representation accepted by the runtime.
+
+    Raises:
+        UnsupportedReturnValueError: If the value cannot be represented safely.
+    """
     if value is None or isinstance(value, (str, bool, int)):
         return value
     if isinstance(value, float):
@@ -55,6 +66,14 @@ def serialize_result(value: Any) -> Any:
 
 
 def freeze_mapping(value: Any) -> Any:
+    """Recursively convert mutable mapping/list structures to immutable equivalents.
+
+    Args:
+        value: Value to freeze for stable comparisons or log metadata.
+
+    Returns:
+        An immutable equivalent of the supplied value.
+    """
     if isinstance(value, dict):
         return MappingProxyType({key: freeze_mapping(item) for key, item in value.items()})
     if isinstance(value, list):

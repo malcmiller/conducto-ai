@@ -103,6 +103,17 @@ def a2a_agent(
     """
 
     def decorate(agent_class: T) -> T:
+        """Attach agent metadata to a class and return it.
+
+        Args:
+            agent_class: The class to decorate.
+
+        Returns:
+            The decorated class.
+
+        Raises:
+            TypeError: If the decorator target is not a class.
+        """
         if not inspect.isclass(agent_class):
             raise TypeError("@a2a_agent can only decorate classes")
 
@@ -265,6 +276,14 @@ def _export_decorator(
     )
 
     def decorate(value: F) -> F:
+        """Attach export metadata to a callable and return it unchanged.
+
+        Args:
+            value: The callable being decorated.
+
+        Returns:
+            The original callable with metadata attached.
+        """
         target = _decorator_target(value)
         current = get_method_metadata(target) or MethodMetadata()
 

@@ -95,6 +95,22 @@ class OrchestratorAgent(BaseAgent):
         timeout: float | None = None,
         correlation_id: str = "",
     ) -> InvocationResult | RoutingFailure:
+        """Route a user message to the best registered agent capability.
+
+        Args:
+            user_input: Natural-language task description to route.
+            model_provider: Optional provider override for this routing call.
+            model_config: Optional model configuration used with a direct provider.
+            model_reference: Optional model name or reference override.
+            run_config: Configuration used for the routing run itself.
+            agent_run_config: Optional run configuration forwarded to the matched
+                agent invocation.
+            timeout: Optional per-call timeout override in seconds.
+            correlation_id: Correlation identifier propagated to logs and metadata.
+
+        Returns:
+            Either the routed invocation result or a structured routing failure.
+        """
         correlation_id = correlation_id or str(uuid.uuid4())
         if model_provider is not None and model_config is None:
             raise ValueError("model_config is required with model_provider")
@@ -205,34 +221,66 @@ class OrchestratorAgent(BaseAgent):
 
     @property
     def registered_agents(self) -> tuple[BaseAgent, ...]:
+        """Return all registered agents in sorted name order.
+
+        Returns:
+            A tuple of registered agent instances.
+        """
         return self._registry.registered_agents()
 
     @property
     def registered_capabilities(self) -> dict[str, BaseAgent]:
+        """Return the live capability-to-agent mapping.
+
+        Returns:
+            A dictionary keyed by capability name.
+        """
         return self._registry.registered_capabilities()
 
     @property
     def agents(self) -> tuple[BaseAgent, ...]:
+        """Alias for the registered agent collection."""
         return self.registered_agents
 
     @property
     def routing_metadata(self) -> list[dict[str, Any]]:
+        """Return structured routing metadata for all registered agents."""
         return self.get_routing_metadata()
 
     @property
     def routing_prompt_context(self) -> str:
+        """Return the textual routing prompt context for the current registry."""
         return self.get_routing_prompt_context()
 
     def __len__(self) -> int:
+        """Return the number of registered agents."""
         return len(self._registry)
 
     def __iter__(self) -> Iterator[BaseAgent]:
+        """Iterate over registered agents in sorted order."""
         return iter(self.registered_agents)
 
     def __contains__(self, agent: object) -> bool:
+        """Test whether the registry contains an agent object or name.
+
+        Args:
+            agent: An agent instance or agent name to look up.
+
+        Returns:
+            ``True`` when the agent is present; otherwise ``False``.
+        """
         return self._registry.contains(agent)
 
     def register_agent(self, agent: BaseAgent, *, replace: bool = False) -> BaseAgent | None:
+        """Register an agent in the local routing registry.
+
+        Args:
+            agent: Agent instance to register.
+            replace: Whether to replace an existing agent with the same name.
+
+        Returns:
+            The previous agent instance that was replaced, if any.
+        """
         return self._registry.register(agent, replace=replace)
 
     async def invoke(
@@ -246,6 +294,20 @@ class OrchestratorAgent(BaseAgent):
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
     ) -> InvocationResult:
+        """Invoke one capability on a registered agent.
+
+        Args:
+            agent_id: Name of the target agent.
+            capability_id: The capability name or skill identifier to invoke.
+            arguments: Structured arguments for the target capability.
+            timeout: Optional per-invocation timeout override.
+            correlation_id: Optional correlation identifier for logs and telemetry.
+            model_reference: Optional model override for the call.
+            run_config: Optional run-level execution configuration.
+
+        Returns:
+            An invocation result envelope describing success or failure.
+        """
         agent = self._registry.get(agent_id)
         if agent is None:
             correlation_id = correlation_id or str(uuid.uuid4())
@@ -282,6 +344,7 @@ class OrchestratorAgent(BaseAgent):
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
     ) -> InvocationResult:
+        """Alias for :meth:`invoke` that preserves the capability-oriented API."""
         return await self.invoke(
             agent_id,
             capability_id,
@@ -293,38 +356,83 @@ class OrchestratorAgent(BaseAgent):
         )
 
     def replace_agent(self, agent: BaseAgent) -> BaseAgent | None:
+        """Replace an existing agent using the same registration name.
+
+        Args:
+            agent: Agent instance to register, replacing any previous registration.
+
+        Returns:
+            The previously registered agent, if one existed.
+        """
         return self.register_agent(agent, replace=True)
 
     def remove_agent(self, agent: BaseAgent | str) -> BaseAgent:
+        """Remove a registered agent from the registry.
+
+        Args:
+            agent: The agent instance or agent name to remove.
+
+        Returns:
+            The removed agent instance.
+        """
         return self._registry.remove(agent)
 
     def clear_agents(self) -> None:
+        """Remove all locally registered agents."""
         self._registry.clear()
 
     def get_agent_by_name(self, name: str) -> BaseAgent | None:
+        """Return a registered agent by name.
+
+        Args:
+            name: Agent identifier to look up.
+
+        Returns:
+            The matching agent instance, if present.
+        """
         return self._registry.get(name)
 
     def get_registered_agent_names(self) -> tuple[str, ...]:
+        """Return all registered agent names in sorted order.
+
+        Returns:
+            A tuple of agent names.
+        """
         return self._registry.names()
 
     def _conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
+        """Return capability names that would conflict with a candidate agent."""
         return self._registry._conflicting_capabilities(agent)
 
     def _remove_agent_mapping(self, agent: BaseAgent) -> None:
+        """Remove the internal registry mapping for one agent."""
         self._registry._remove_mapping(agent)
 
     def get_routing_metadata(self) -> list[dict[str, Any]]:
+        """Return routing metadata generated from the live agent registry.
+
+        Returns:
+            A list of metadata records suitable for prompt-based routing.
+        """
         return self._registry.routing_metadata()
 
     def discover_agents(self) -> tuple[BaseAgent, ...]:
+        """Return currently registered agents without re-discovery.
+
+        Returns:
+            Registered agent instances in sorted order.
+        """
         return self.registered_agents
 
     def get_routing_prompt_context(self) -> str:
+        """Return prompt-safe routing context built from the current registry."""
         return routing_prompt_context(self.get_routing_metadata())
 
     def get_routing_context(self) -> str:
+        """Alias for the prompt-safe routing context."""
         return self.get_routing_prompt_context()
 
     @staticmethod
     def _card_url_for(agent: BaseAgent) -> str:
+        """Return the synthetic local card URL for an agent."""
         return card_url_for(agent)

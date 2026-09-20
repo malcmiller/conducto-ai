@@ -20,24 +20,56 @@ class AgentRegistry:
         self.lock = threading.RLock()
 
     def registered_agents(self) -> tuple[BaseAgent, ...]:
+        """Return all registered agents in sorted order.
+
+        Returns:
+            The current agent registry contents.
+        """
         with self.lock:
             return tuple(self.agents[name] for name in sorted(self.agents))
 
     def registered_capabilities(self) -> dict[str, BaseAgent]:
+        """Return the live capability index.
+
+        Returns:
+            A mapping from capability name to the owning agent.
+        """
         with self.lock:
             return dict(sorted(self.capabilities.items()))
 
     def __len__(self) -> int:
+        """Return the number of registered agents."""
         with self.lock:
             return len(self.agents)
 
     def contains(self, agent: object) -> bool:
+        """Check whether an agent instance or name is currently registered.
+
+        Args:
+            agent: An agent instance or agent name.
+
+        Returns:
+            ``True`` if the agent is present; otherwise ``False``.
+        """
         with self.lock:
             if isinstance(agent, BaseAgent):
                 return any(existing is agent for existing in self.agents.values())
             return isinstance(agent, str) and agent in self.agents
 
     def register(self, agent: BaseAgent, *, replace: bool = False) -> BaseAgent | None:
+        """Register an agent and update the capability index.
+
+        Args:
+            agent: Agent to register.
+            replace: Whether to replace an agent with the same name.
+
+        Returns:
+            The previous agent instance when replacing an existing registration.
+
+        Raises:
+            TypeError: If the value is not a ``BaseAgent``.
+            ValueError: If the name is already registered and replacement is not allowed.
+        """
         if not isinstance(agent, BaseAgent):
             raise TypeError("OrchestratorAgent.register_agent() requires a BaseAgent instance")
         agent_name = agent.agent_metadata.name
@@ -73,6 +105,18 @@ class AgentRegistry:
             return existing
 
     def remove(self, agent: BaseAgent | str) -> BaseAgent:
+        """Remove an agent from the registry.
+
+        Args:
+            agent: Agent instance or agent name to remove.
+
+        Returns:
+            The removed agent instance.
+
+        Raises:
+            KeyError: If the agent is not currently registered.
+            TypeError: If the argument is not an agent or string name.
+        """
         with self.lock:
             if isinstance(agent, BaseAgent):
                 removed = next(
@@ -92,19 +136,38 @@ class AgentRegistry:
             return removed
 
     def clear(self) -> None:
+        """Remove all registered agents and capability mappings."""
         with self.lock:
             self.agents.clear()
             self.capabilities.clear()
 
     def get(self, name: str) -> BaseAgent | None:
+        """Look up a registered agent by name.
+
+        Args:
+            name: Agent name to resolve.
+
+        Returns:
+            The matching agent, if present.
+        """
         with self.lock:
             return self.agents.get(name)
 
     def names(self) -> tuple[str, ...]:
+        """Return all current agent names.
+
+        Returns:
+            A sorted tuple of agent names.
+        """
         with self.lock:
             return tuple(sorted(self.agents))
 
     def routing_metadata(self) -> list[dict[str, Any]]:
+        """Build routing metadata for the current registry.
+
+        Returns:
+            A list of routing records serialized from each registered agent.
+        """
         metadata: list[dict[str, Any]] = []
         for agent in self.registered_agents():
             card = agent.get_agent_card(card_url_for(agent))

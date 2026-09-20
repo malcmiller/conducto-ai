@@ -38,6 +38,18 @@ class ProviderRegistry:
         available: bool | Callable[[], bool] = True,
         replace: bool = False,
     ) -> None:
+        """Register a provider client for a model reference.
+
+        Args:
+            reference: The model reference to bind to the client.
+            client: Provider client that implements the model protocol.
+            configuration: Provider-neutral configuration for the model.
+            available: Optional availability predicate or fixed state.
+            replace: Whether to replace an existing registration.
+
+        Raises:
+            ValueError: If the reference already exists and replacement is disabled.
+        """
         model_reference = normalize_reference(reference)
         assert model_reference is not None
         registration = ProviderRegistration(
@@ -53,6 +65,18 @@ class ProviderRegistry:
             self._registrations[model_reference] = registration
 
     def resolve(self, reference: ModelReference | str) -> ProviderRegistration:
+        """Resolve a registered model reference and validate provider availability.
+
+        Args:
+            reference: Model reference to resolve.
+
+        Returns:
+            The registered provider binding.
+
+        Raises:
+            UnknownModelReferenceError: If the model is not registered.
+            ProviderUnavailableError: If the provider is marked unavailable.
+        """
         model_reference = normalize_reference(reference)
         assert model_reference is not None
         with self._lock:

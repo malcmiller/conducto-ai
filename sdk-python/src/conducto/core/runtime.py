@@ -144,14 +144,30 @@ class Runtime:
 
     @provider_registry.setter
     def provider_registry(self, value: ProviderRegistry) -> None:
+        """Replace the active provider registry and refresh the model resolver.
+
+        Args:
+            value: New registry instance used for model resolution and provider
+                lookup.
+        """
         self._provider_registry = value
         self._model_resolver = ModelResolver(value)
 
     @staticmethod
     def new_correlation_id() -> str:
+        """Generate a fresh correlation ID for an invocation or model call."""
         return str(uuid.uuid4())
 
     def capability_lock(self, agent: BaseAgent, capability_name: str) -> threading.Lock:
+        """Return a runtime-scoped lock for one agent capability.
+
+        Args:
+            agent: Agent owning the capability.
+            capability_name: Name of the capability to serialize.
+
+        Returns:
+            A reentrant lock used for capability-level serialization.
+        """
         key = (id(agent), capability_name)
         with self._execution_locks_guard:
             return self._execution_locks.setdefault(key, threading.Lock())
@@ -167,6 +183,20 @@ class Runtime:
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
     ) -> InvocationResult:
+        """Invoke a capability through the runtime-owned execution pipeline.
+
+        Args:
+            agent: Agent instance that owns the capability.
+            capability: Capability name or callable reference.
+            arguments: Argument mapping passed to the capability.
+            timeout: Optional execution timeout override.
+            correlation_id: Optional correlation ID for logs and metadata.
+            model_reference: Optional model override for the invocation.
+            run_config: Optional run configuration.
+
+        Returns:
+            A normalized invocation result envelope.
+        """
         from .invocation import invoke_agent
 
         return await invoke_agent(
@@ -191,6 +221,20 @@ class Runtime:
         run_id: str = "",
         required_capabilities: frozenset[str] = frozenset(),
     ) -> RunContext:
+        """Create a new run context for an invocation.
+
+        Args:
+            agent_id: Agent identifier associated with the run.
+            agent_config: Agent-level model configuration and requirements.
+            run_config: Run-level configuration and timeout metadata.
+            call_override: Optional per-call model override.
+            correlation_id: Optional correlation ID for the run.
+            run_id: Optional explicit run identifier.
+            required_capabilities: Capabilities required by the current operation.
+
+        Returns:
+            A task-local run context associated with this runtime.
+        """
         agent = agent_config or AgentModelConfig()
         run = run_config or RunConfig()
         binding = self._resolve_model_binding(
@@ -223,6 +267,18 @@ class Runtime:
         call_override: ModelReference | str | None = None,
         required_capabilities: frozenset[str] = frozenset(),
     ) -> ResolvedModel | None:
+        """Resolve the model for a run without creating a full run context.
+
+        Args:
+            agent_id: Agent identifier associated with the model resolution.
+            agent_config: Agent-level model policy.
+            run_config: Run-level defaults and metadata.
+            call_override: Optional call-level model override.
+            required_capabilities: Required provider capabilities.
+
+        Returns:
+            The selected model descriptor, if any.
+        """
         binding = self._resolve_model_binding(
             agent_id=agent_id,
             agent_config=agent_config,
@@ -258,6 +314,7 @@ class Runtime:
         *,
         required_capabilities: frozenset[str] = frozenset(),
     ) -> ResolvedModel | None:
+        """Resolve a model for the current call using the active run context."""
         binding = self._resolve_for_call_binding(
             context,
             override,
@@ -289,6 +346,21 @@ class Runtime:
         model: ModelReference | str | None = None,
         purpose: str = "model_call",
     ) -> ModelCallResult:
+        """Execute a provider completion from the current run context.
+
+        Args:
+            context: Active run context attached to this runtime.
+            messages: Conversation history for the provider request.
+            structured_output: Native structured-output contract.
+            model: Optional model override for this request.
+            purpose: Logical purpose name recorded on the call provenance.
+
+        Returns:
+            The provider result and invocation metadata.
+
+        Raises:
+            ValueError: If the run context belongs to a different runtime.
+        """
         if context._runtime is not self:
             raise ValueError("Run context belongs to a different runtime")
         return await complete_model_call(
@@ -310,8 +382,10 @@ class Runtime:
 
     @staticmethod
     def activate(context: RunContext) -> contextvars.Token[RunContext | None]:
+        """Activate a run context in the current task-local context."""
         return activate_run_context(context)
 
     @staticmethod
     def deactivate(token: contextvars.Token[RunContext | None]) -> None:
+        """Restore the previous task-local run context from a token."""
         deactivate_run_context(token)

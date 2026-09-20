@@ -58,6 +58,25 @@ class ModelResolver:
         call_override: ModelReference | str | None = None,
         required_capabilities: frozenset[str] = frozenset(),
     ) -> _ResolvedModelBinding | None:
+        """Resolve the best available model binding for an invocation.
+
+        Args:
+            agent_id: Name of the invoking agent.
+            agent_config: Agent-level model requirements and defaults.
+            run_config: Run-level model override and metadata.
+            runtime_config: Runtime-wide defaults and policy settings.
+            policy: Optional model selection policy hook.
+            call_override: Optional per-call model override.
+            required_capabilities: Capabilities required by the invocation.
+
+        Returns:
+            The resolved binding for the selected model, if one is available.
+
+        Raises:
+            MissingModelDefaultError: If a model is required but unavailable.
+            ModelOverrideDeniedError: If the selected model fails the policy hook.
+            IncompatibleProviderCapabilitiesError: If the provider lacks required features.
+        """
         call_reference = normalize_reference(call_override)
         candidates = (
             (call_reference, ModelResolutionSource.CALL_OVERRIDE),
@@ -108,6 +127,18 @@ class ModelResolver:
         policy: ModelPolicy | None,
         required_capabilities: frozenset[str] = frozenset(),
     ) -> _ResolvedModelBinding | None:
+        """Resolve a model binding using the active invocation context.
+
+        Args:
+            context: Active run context for the current invocation.
+            override: Optional call-level model override.
+            runtime_config: Runtime defaults and policy settings.
+            policy: Optional model selection policy hook.
+            required_capabilities: Capabilities required by the invocation.
+
+        Returns:
+            The active binding, or a newly resolved binding for the override.
+        """
         if override is None:
             binding = context._binding
             if binding is not None:
@@ -133,6 +164,16 @@ class ModelResolver:
         capabilities: ProviderCapabilities,
         required: frozenset[str],
     ) -> None:
+        """Ensure the provider supports every required capability.
+
+        Args:
+            reference: Resolved model reference being checked.
+            capabilities: Advertised provider capabilities.
+            required: Capability names that must be present and enabled.
+
+        Raises:
+            IncompatibleProviderCapabilitiesError: If any required capability is missing.
+        """
         unsupported = sorted(
             name
             for name in required

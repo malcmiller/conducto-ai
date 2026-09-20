@@ -35,9 +35,11 @@ class CancellationState:
 
     @property
     def cancelled(self) -> bool:
+        """Return whether cancellation has been requested."""
         return self._event.is_set()
 
     def cancel(self) -> None:
+        """Request cooperative cancellation for the current run."""
         self._event.set()
 
 
@@ -73,6 +75,11 @@ class ModelCallProvenance:
     usage: Usage = field(default_factory=Usage)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize provenance metadata to a JSON-serializable dictionary.
+
+        Returns:
+            A dictionary representation of the provenance record.
+        """
         return {
             "purpose": self.purpose,
             "model_reference": self.model_reference,
@@ -97,10 +104,12 @@ class _ModelCallRecorder:
         self._lock = threading.Lock()
 
     def append(self, call: ModelCallProvenance) -> None:
+        """Record one model call in call-order sequence."""
         with self._lock:
             self._calls.append(call)
 
     def snapshot(self) -> tuple[ModelCallProvenance, ...]:
+        """Return a snapshot of all recorded model calls."""
         with self._lock:
             return tuple(self._calls)
 
@@ -112,10 +121,12 @@ class _InvocationState:
         self._lock = threading.Lock()
 
     def activate(self) -> None:
+        """Activate the current invocation scope."""
         with self._lock:
             self._active = True
 
     def deactivate(self) -> None:
+        """Deactivate the current invocation scope and cancel tracked model tasks."""
         with self._lock:
             self._active = False
             tasks = tuple(self._model_tasks)
@@ -124,6 +135,7 @@ class _InvocationState:
             task.cancel()
 
     def require_active(self) -> None:
+        """Ensure the invocation state is active before model gateway access."""
         with self._lock:
             if not self._active:
                 raise NoActiveRunContextError(
@@ -131,6 +143,7 @@ class _InvocationState:
                 )
 
     def begin_model_call(self) -> asyncio.Task[Any]:
+        """Register the current async task as an active model call."""
         try:
             current = asyncio.current_task()
         except RuntimeError:
@@ -148,6 +161,7 @@ class _InvocationState:
         return current
 
     def end_model_call(self, task: asyncio.Task[Any]) -> None:
+        """Unregister a previously tracked model task."""
         with self._lock:
             self._model_tasks.discard(task)
 
@@ -169,6 +183,11 @@ class InvocationMetadata:
         object.__setattr__(self, "attributes", freeze_metadata(self.attributes))
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the invocation metadata to JSON-safe values.
+
+        Returns:
+            A dictionary describing the run, model usage, and provenance.
+        """
         return {
             "run_id": self.run_id,
             "correlation_id": self.correlation_id,
@@ -186,6 +205,14 @@ class InvocationMetadata:
         self,
         *groups: Sequence[ModelCallProvenance],
     ) -> InvocationMetadata:
+        """Return a copy of the metadata with additional model call provenance.
+
+        Args:
+            *groups: Sequences of model-call provenance records to append.
+
+        Returns:
+            A new metadata object with merged usage and provenance.
+        """
         calls = self.model_calls + tuple(call for group in groups for call in group)
         return replace(self, usage=aggregate_usage(calls), model_calls=calls)
 
@@ -193,6 +220,14 @@ class InvocationMetadata:
         self,
         calls: Sequence[ModelCallProvenance],
     ) -> InvocationMetadata:
+        """Return a copy with earlier model calls prepended to this metadata.
+
+        Args:
+            calls: Prior model-call provenance to prepend.
+
+        Returns:
+            A new metadata object with combined call history.
+        """
         combined = tuple(calls) + self.model_calls
         return replace(self, usage=aggregate_usage(combined), model_calls=combined)
 
@@ -228,10 +263,19 @@ class RunContext:
 
     @property
     def model_reference(self) -> ModelReference | None:
+        """Return the currently resolved model reference, if any."""
         return self.model.reference if self.model is not None else None
 
     @property
     def models(self) -> ModelGatewayCollection:
+        """Return the model gateway collection bound to this run context.
+
+        Returns:
+            A runtime-aware gateway collection for this invocation.
+
+        Raises:
+            NoActiveRunContextError: If the current context is detached from a runtime.
+        """
         if self._runtime is None:
             raise NoActiveRunContextError("Run context is not attached to a runtime")
         from .model_gateway import ModelGatewayCollection
@@ -239,6 +283,14 @@ class RunContext:
         return ModelGatewayCollection(self._runtime, self)
 
     def remaining_timeout(self) -> float | None:
+        """Return the remaining monotonic timeout budget for this run.
+
+        Returns:
+            Seconds remaining before the deadline, or ``None`` when no timeout is set.
+
+        Raises:
+            TimeoutError: If the deadline has already expired.
+        """
         if self.deadline is None:
             return None
         remaining = self.deadline - time.monotonic()
@@ -247,6 +299,11 @@ class RunContext:
         return remaining
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the run context to a JSON-friendly dictionary.
+
+        Returns:
+            A summary of the active run, model, and cancellation state.
+        """
         return {
             "run_id": self.run_id,
             "correlation_id": self.correlation_id,
@@ -261,6 +318,14 @@ class RunContext:
         }
 
     def invocation_metadata(self, usage: Usage | None = None) -> InvocationMetadata:
+        """Build invocation metadata for a capability or route result.
+
+        Args:
+            usage: Optional usage snapshot to attach when no model calls have been logged.
+
+        Returns:
+            A normalized metadata object describing the run and model provenance.
+        """
         calls = self._model_calls.snapshot()
         return InvocationMetadata(
             run_id=self.run_id,

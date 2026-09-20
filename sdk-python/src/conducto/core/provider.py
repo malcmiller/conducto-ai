@@ -63,6 +63,11 @@ class StructuredOutputRequest:
 
     @property
     def json_schema(self) -> dict[str, Any]:
+        """Return the native JSON schema for this structured-output request.
+
+        Returns:
+            The unconstrained serialized schema definition for the request.
+        """
         return self.schema
 
 
@@ -136,6 +141,8 @@ class ProviderAuthenticationError(ProviderError):
 
 
 class ProviderRateLimitError(ProviderError):
+    """Provider rejected a request because the rate limit was exceeded."""
+
     def __init__(
         self,
         message: str = "Provider rate limit exceeded",
@@ -150,6 +157,8 @@ class ProviderContentPolicyError(ProviderError):
 
 
 class ProviderTimeoutError(ProviderError):
+    """Provider request exceeded the allowed timeout window."""
+
     def __init__(
         self,
         message: str = "Provider request timed out",
@@ -183,7 +192,18 @@ class ModelProvider(Protocol):
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
-    ) -> ProviderResult: ...
+    ) -> ProviderResult:
+        """Generate a completion for a provider-neutral chat request.
+
+        Args:
+            messages: Conversation history to send to the provider.
+            options: Generation controls for model temperature, token caps, and
+                retries.
+            structured_output: Native JSON schema required for structured output.
+
+        Returns:
+            Normalized provider response content, metadata, and usage counters.
+        """
 
 
 def build_routing_schema(
@@ -287,6 +307,16 @@ class FakeModel:
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
     ) -> ProviderResult:
+        """Return the configured fake completion payload.
+
+        Args:
+            messages: Conversation history supplied to the fake provider.
+            options: Unused generation settings for the request.
+            structured_output: Requested structured output contract.
+
+        Returns:
+            The synthetic provider result configured when the fake provider was created.
+        """
         _ = (messages, options, structured_output)
         self.calls += 1
         if isinstance(self.selection, str):

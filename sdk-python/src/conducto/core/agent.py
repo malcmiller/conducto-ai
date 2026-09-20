@@ -90,22 +90,47 @@ class BaseAgent:
 
     @property
     def agent_config(self) -> AgentModelConfig:
+        """Return the resolved model policy for this reflected agent.
+
+        Returns:
+            The effective model policy applied during invocation and routing.
+        """
         return self._agent_config
 
     @property
     def model_config(self) -> ModelConfiguration | None:
+        """Return the optional provider override configured on this agent.
+
+        Returns:
+            The model configuration supplied at construction, if any.
+        """
         return self._model_config
 
     @property
     def registered_methods(self) -> tuple[RegisteredMethod, ...]:
+        """Return all decorated methods discovered on the agent.
+
+        Returns:
+            A tuple of registered methods in insertion order.
+        """
         return tuple(self._registered_methods.values())
 
     @property
     def capabilities(self) -> dict[str, RegisteredMethod]:
+        """Return a copy of the registered capability exports.
+
+        Returns:
+            A mapping of capability names to their registered metadata.
+        """
         return dict(self._capabilities)
 
     @property
     def tools(self) -> dict[str, RegisteredMethod]:
+        """Return a copy of the registered internal tool exports.
+
+        Returns:
+            A mapping of tool names to their registered metadata.
+        """
         return dict(self._tools)
 
     def get_agent_card(
@@ -119,6 +144,20 @@ class BaseAgent:
         default_output_modes: Sequence[str] = _DEFAULT_OUTPUT_MODES,
         capabilities: Mapping[str, bool] | None = None,
     ) -> dict[str, Any]:
+        """Build an A2A capability card for this reflected agent.
+
+        Args:
+            url: The URL advertised for the agent's endpoint.
+            preferred_transport: Preferred transport name for the card.
+            security_schemes: Optional OAuth or scheme metadata for the endpoint.
+            security_requirements: Optional security requirement objects.
+            default_input_modes: Default input MIME modes for the agent card.
+            default_output_modes: Default output MIME modes for the agent card.
+            capabilities: Optional capability advertisement flags.
+
+        Returns:
+            A JSON-serializable A2A agent card for the reflected agent.
+        """
         return build_agent_card(
             agent_type_name=type(self).__name__,
             metadata=self.agent_metadata,
@@ -133,6 +172,15 @@ class BaseAgent:
         )
 
     def get_agent_card_json(self, url: str, **kwargs: Any) -> str:
+        """Serialize the reflected agent card to canonical JSON.
+
+        Args:
+            url: The advertised endpoint URL for the card.
+            **kwargs: Additional keyword arguments forwarded to :meth:`get_agent_card`.
+
+        Returns:
+            The JSON-encoded A2A agent card.
+        """
         return serialize_agent_card(self.get_agent_card(url, **kwargs))
 
     def _validate_card_metadata(self, url: str, preferred_transport: str) -> None:

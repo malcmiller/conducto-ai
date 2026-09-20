@@ -143,6 +143,14 @@ class JsonFormatter(logging.Formatter):
     """Render the stable Conducto event contract as canonical JSON."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Serialize an event record as canonical JSON.
+
+        Args:
+            record: The log record to render.
+
+        Returns:
+            A deterministic JSON payload for the event.
+        """
         event: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(record.created, UTC)
             .isoformat(timespec="milliseconds")
@@ -164,6 +172,14 @@ class DevelopmentFormatter(logging.Formatter):
     """Render concise, human-readable development events."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Render an event record as a compact development log line.
+
+        Args:
+            record: The log record to render.
+
+        Returns:
+            A readable single-line representation of the event.
+        """
         parts = [record.levelname, getattr(record, "event", record.getMessage())]
         for field in ("correlation_id", "agent_id", "capability_id", "outcome", "error_category"):
             value = getattr(record, field, None)

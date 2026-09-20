@@ -211,6 +211,14 @@ async def invoke_agent(
         emit_event(ARGUMENTS_VALIDATED, outcome="success")
 
         async def execute() -> Any:
+            """Invoke the decorated capability with validated arguments.
+
+            Returns:
+                The capability result value.
+
+            Raises:
+                _CapabilityExecutionError: When the wrapped capability raises an exception.
+            """
             call_arguments = {
                 name: getattr(validated, name) for name in parameter_model.model_fields
             }
@@ -219,6 +227,7 @@ async def invoke_agent(
                     return await target(**call_arguments)
 
                 def run_sync() -> Any:
+                    """Execute a synchronous capability under the shared runtime lock."""
                     with execution_lock:
                         return target(**call_arguments)
 
