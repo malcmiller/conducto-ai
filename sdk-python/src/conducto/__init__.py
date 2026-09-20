@@ -15,6 +15,8 @@ from .core import (
     FakeModel,
     GenerationOptions,
     IncompatibleProviderCapabilitiesError,
+    InvocationApprovalRequired,
+    InvocationAuthorizationFailure,
     InvocationCancelled,
     InvocationFailure,
     InvocationMetadata,
@@ -75,12 +77,25 @@ from .core import (
     require_run_context,
     tool,
 )
+from .security import (
+    ApprovalChallenge,
+    ApprovalDecision,
+    ApprovalState,
+    AuthorizationContext,
+    InMemoryApprovalStore,
+    Principal,
+    SecurityPipeline,
+    require_approval,
+    require_scope,
+)
 
 __all__ = [
     "A2A_AGENT_CARD_SPEC_VERSION",
     "BaseAgent",
     "ConductoError",
     "InvocationCancelled",
+    "InvocationApprovalRequired",
+    "InvocationAuthorizationFailure",
     "InvocationFailure",
     "InvocationMetadata",
     "InvocationResult",
@@ -146,4 +161,13 @@ __all__ = [
     "UnknownModelReferenceError",
     "get_run_context",
     "require_run_context",
+    "Principal",
+    "AuthorizationContext",
+    "require_scope",
+    "require_approval",
+    "ApprovalChallenge",
+    "ApprovalDecision",
+    "ApprovalState",
+    "InMemoryApprovalStore",
+    "SecurityPipeline",
 ]

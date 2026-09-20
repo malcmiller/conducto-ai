@@ -91,6 +91,8 @@ class OrchestratorAgent(BaseAgent):
         model_config: ModelConfiguration | None = None,
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
+        authorization: Any = None,
+        authorization_context: Any = None,
         agent_run_config: RunConfig | None = None,
         timeout: float | None = None,
         correlation_id: str = "",
@@ -103,6 +105,8 @@ class OrchestratorAgent(BaseAgent):
             model_config: Optional model configuration used with a direct provider.
             model_reference: Optional model name or reference override.
             run_config: Configuration used for the routing run itself.
+            authorization: Optional authenticated authorization context.
+            authorization_context: Alias for ``authorization``.
             agent_run_config: Optional run configuration forwarded to the matched
                 agent invocation.
             timeout: Optional per-call timeout override in seconds.
@@ -202,6 +206,8 @@ class OrchestratorAgent(BaseAgent):
                 timeout=timeout,
                 correlation_id=correlation_id,
                 run_config=agent_run_config,
+                authorization=authorization,
+                authorization_context=authorization_context,
             )
             capability_metadata = invocation.metadata
             if capability_metadata is not None:
@@ -293,6 +299,8 @@ class OrchestratorAgent(BaseAgent):
         correlation_id: str = "",
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
+        authorization: Any = None,
+        authorization_context: Any = None,
     ) -> InvocationResult:
         """Invoke one capability on a registered agent.
 
@@ -304,6 +312,8 @@ class OrchestratorAgent(BaseAgent):
             correlation_id: Optional correlation identifier for logs and telemetry.
             model_reference: Optional model override for the call.
             run_config: Optional run-level execution configuration.
+            authorization: Optional authenticated authorization context.
+            authorization_context: Alias for ``authorization``.
 
         Returns:
             An invocation result envelope describing success or failure.
@@ -331,6 +341,7 @@ class OrchestratorAgent(BaseAgent):
             correlation_id=correlation_id,
             model_reference=model_reference,
             run_config=run_config,
+            authorization=(authorization if authorization is not None else authorization_context),
         )
 
     async def invoke_capability(
@@ -343,6 +354,8 @@ class OrchestratorAgent(BaseAgent):
         correlation_id: str = "",
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
+        authorization: Any = None,
+        authorization_context: Any = None,
     ) -> InvocationResult:
         """Alias for :meth: 'invoke` that preserves the capability-oriented API."""
         return await self.invoke(
@@ -353,6 +366,7 @@ class OrchestratorAgent(BaseAgent):
             correlation_id=correlation_id,
             model_reference=model_reference,
             run_config=run_config,
+            authorization=(authorization if authorization is not None else authorization_context),
         )
 
     def replace_agent(self, agent: BaseAgent) -> BaseAgent | None:

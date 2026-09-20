@@ -183,6 +183,8 @@ class Runtime:
         correlation_id: str = "",
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
+        authorization: Any = None,
+        authorization_context: Any = None,
     ) -> InvocationResult:
         """Invoke a capability through the runtime-owned execution pipeline.
 
@@ -194,6 +196,8 @@ class Runtime:
             correlation_id: Optional correlation ID for logs and metadata.
             model_reference: Optional model override for the invocation.
             run_config: Optional run configuration.
+            authorization: Optional authenticated authorization context.
+            authorization_context: Alias for ``authorization``.
 
         Returns:
             A normalized invocation result envelope.
@@ -209,6 +213,7 @@ class Runtime:
             correlation_id=correlation_id,
             model_reference=model_reference,
             run_config=run_config,
+            authorization=authorization if authorization is not None else authorization_context,
         )
 
     def create_run_context(
@@ -221,17 +226,19 @@ class Runtime:
         correlation_id: str = "",
         run_id: str = "",
         required_capabilities: frozenset[str] = frozenset(),
+        authorization: Any = None,
     ) -> RunContext:
         """Create a new run context for an invocation.
 
         Args:
             agent_id: Agent identifier associated with the run.
-            agent_config: Agent-level model configuration and requirements.
-            run_config: Run-level configuration and timeout metadata.
+            agent_config: Optional agent-level model configuration.
+            run_config: Optional run-level timeout and metadata configuration.
             call_override: Optional per-call model override.
-            correlation_id: Optional correlation ID for the run.
+            correlation_id: Optional correlation identifier.
             run_id: Optional explicit run identifier.
-            required_capabilities: Capabilities required by the current operation.
+            required_capabilities: Provider capabilities required by the run.
+            authorization: Optional authenticated authorization context.
 
         Returns:
             A task-local run context associated with this runtime.
@@ -257,6 +264,7 @@ class Runtime:
             policy_context=run,
             _runtime=self,
             _binding=binding,
+            authorization=authorization,
         )
 
     def resolve_model(

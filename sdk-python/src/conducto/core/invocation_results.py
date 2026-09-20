@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
+from conducto.security.approval import ApprovalChallenge
+
 from .provider import Usage
 from .run_context import InvocationMetadata
 
@@ -105,6 +107,24 @@ class InvocationFailure:
     metadata: InvocationMetadata | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class InvocationApprovalRequired:
+    """Envelope returned before protected business logic can execute."""
+
+    correlation_id: str
+    challenge: ApprovalChallenge
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class InvocationAuthorizationFailure:
+    """Envelope for a fail-closed authorization decision."""
+
+    correlation_id: str
+    reason_code: str
+    metadata: InvocationMetadata | None = None
+
+
 InvocationResult: TypeAlias = (
     InvocationSuccess
     | InvocationValidationFailure
@@ -112,6 +132,8 @@ InvocationResult: TypeAlias = (
     | InvocationTimeout
     | InvocationCancelled
     | InvocationFailure
+    | InvocationApprovalRequired
+    | InvocationAuthorizationFailure
 )
 
 

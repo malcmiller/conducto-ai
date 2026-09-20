@@ -4,6 +4,8 @@
 from .agent import A2A_AGENT_CARD_SPEC_VERSION, BaseAgent
 from .decorators import a2a_agent, a2a_capability, tool
 from .invocation_results import (
+    InvocationApprovalRequired,
+    InvocationAuthorizationFailure,
     InvocationCancelled,
     InvocationFailure,
     InvocationResult,
@@ -80,6 +82,8 @@ __all__ = [
     "A2A_AGENT_CARD_SPEC_VERSION",
     "BaseAgent",
     "InvocationCancelled",
+    "InvocationApprovalRequired",
+    "InvocationAuthorizationFailure",
     "InvocationFailure",
     "InvocationResult",
     "InvocationSuccess",
