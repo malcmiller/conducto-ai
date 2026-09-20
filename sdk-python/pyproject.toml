@@ -35,6 +35,9 @@ extend-exclude = ["*.md"]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["UP040", "UP047"]
 
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.mypy]
 python_version = "3.12"
 packages = ["conducto"]

@@ -30,7 +30,13 @@ from .guardrails import discover_guardrails
 
 @dataclass(frozen=True, slots=True)
 class GuardrailResult:
-    """Typed result of pre-invocation authorization."""
+    """Typed result of pre-invocation authorization.
+
+    Attributes:
+        allowed: Whether execution may proceed.
+        challenge: Approval challenge when approval is required.
+        error: Typed failure when execution is denied.
+    """
 
     allowed: bool
     challenge: ApprovalChallenge | None = None
@@ -47,6 +53,14 @@ class SecurityPipeline:
         clock: Clock | None = None,
         identifiers: IdentifierGenerator | None = None,
     ) -> None:
+        """Initialize a pipeline with optional approval persistence.
+
+        Args:
+            store: Application-owned approval store. If omitted, approval
+                challenges are returned without persistence.
+            clock: Clock used to create challenge timestamps.
+            identifiers: Identifier generator used for challenge IDs.
+        """
         self.store = store
         self.clock = clock
         self.identifiers = identifiers
@@ -61,7 +75,19 @@ class SecurityPipeline:
         capability_id: str = "",
         approved_approval_id: str | None = None,
     ) -> GuardrailResult:
-        """Check identity, scopes, and validated argument-dependent approval policy."""
+        """Check identity, scopes, and approval policy.
+
+        Args:
+            target: Resolved capability callable.
+            context: Authenticated execution context.
+            arguments: Validated capability arguments.
+            agent_id: Agent bound to the invocation.
+            capability_id: Capability bound to the invocation.
+            approved_approval_id: Approval ID used by an approved resume.
+
+        Returns:
+            A typed allow, approval-required, or authorization-failure result.
+        """
         guardrails = discover_guardrails(target)
         if approved_approval_id is not None:
             if self.store is None:
@@ -118,7 +144,23 @@ class SecurityPipeline:
         capability_id: str,
         context: AuthorizationContext,
     ) -> Any:
-        """Consume an approved challenge at once, then execute its protected work.
+        """Consume an approved challenge, then execute its protected work.
+
+        Args:
+            decision: Approval decision to apply.
+            execute: Protected callback to run after consumption.
+            agent_id: Agent bound to the invocation.
+            capability_id: Capability bound to the invocation.
+            context: Immutable authorization context for the invocation.
+
+        Returns:
+            The callback result, awaited when necessary.
+
+        Raises:
+            InvalidApprovalStateError: If the challenge is unknown, stale, or
+                bound to a different invocation.
+            AuthorizationDeniedError: If the decision denies approval.
+            ApprovalRequiredError: If additional roles must still approve.
 
         The store performs the compare-and-transition operation, so stale or
         duplicate decisions cannot run business logic twice.

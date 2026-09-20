@@ -28,7 +28,22 @@ class ApprovalState(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ApprovalChallenge:
-    """Safe approval request payload without protected arguments or credentials."""
+    """Safe approval request payload without protected arguments or credentials.
+
+    Attributes:
+        approval_id: Stable identifier for the approval lifecycle.
+        agent_id: Agent bound to the protected invocation.
+        capability_id: Capability bound to the protected invocation.
+        task_id: Task bound to the protected invocation.
+        correlation_id: Correlation identifier bound to the invocation.
+        reason_code: Stable application-facing reason for the challenge.
+        required_role: Display role or aggregate role description.
+        created_at: Challenge creation time.
+        expires_at: Challenge expiration time.
+        display: Safe metadata suitable for human-facing presentation.
+        required_roles: Roles that must independently approve the challenge.
+        principal_subject_id: Principal bound to the challenge.
+    """
 
     approval_id: str
     agent_id: str
@@ -44,12 +59,22 @@ class ApprovalChallenge:
     principal_subject_id: str = ""
 
     def __post_init__(self) -> None:
+        """Freeze display metadata so the challenge remains immutable."""
         object.__setattr__(self, "display", MappingProxyType(dict(self.display)))
 
 
 @dataclass(frozen=True, slots=True)
 class ApprovalDecision:
-    """Immutable decision associated with one challenge."""
+    """Immutable decision associated with one challenge.
+
+    Attributes:
+        approval_id: Identifier of the challenge being decided.
+        approved: Whether the decision grants approval.
+        decided_at: Time at which the decision was made.
+        decided_by: Stable identifier of the approving subject.
+        reason_code: Optional stable reason for the decision.
+        role: Required role represented by this decision, if applicable.
+    """
 
     approval_id: str
     approved: bool
@@ -62,24 +87,37 @@ class ApprovalDecision:
 class Clock(Protocol):
     """Clock abstraction used for deterministic lifecycle tests."""
 
-    def now(self) -> datetime: ...
+    def now(self) -> datetime:
+        """Return the current UTC-aware time."""
 
 
 class IdentifierGenerator(Protocol):
     """Identifier source abstraction used for deterministic tests."""
 
-    def __call__(self) -> str: ...
+    def __call__(self) -> str:
+        """Return a new stable identifier."""
 
 
 class ApprovalStore(Protocol):
     """Application-owned persistence boundary for approval challenges."""
 
-    def create(self, challenge: ApprovalChallenge) -> ApprovalChallenge: ...
-    def get(self, approval_id: str) -> ApprovalChallenge: ...
-    def decide(self, decision: ApprovalDecision) -> ApprovalChallenge: ...
-    def cancel(self, approval_id: str) -> ApprovalChallenge: ...
-    def complete(self, approval_id: str) -> ApprovalChallenge: ...
-    def state(self, approval_id: str) -> ApprovalState: ...
+    def create(self, challenge: ApprovalChallenge) -> ApprovalChallenge:
+        """Persist a new pending challenge."""
+
+    def get(self, approval_id: str) -> ApprovalChallenge:
+        """Return a challenge by identifier."""
+
+    def decide(self, decision: ApprovalDecision) -> ApprovalChallenge:
+        """Apply a decision and return its challenge."""
+
+    def cancel(self, approval_id: str) -> ApprovalChallenge:
+        """Cancel a pending challenge."""
+
+    def complete(self, approval_id: str) -> ApprovalChallenge:
+        """Atomically consume an approved challenge."""
+
+    def state(self, approval_id: str) -> ApprovalState:
+        """Return the current lifecycle state."""
 
 
 class SystemClock:
@@ -87,6 +125,7 @@ class SystemClock:
 
     @staticmethod
     def now() -> datetime:
+        """Return the current UTC-aware wall-clock time."""
         return datetime.now(UTC)
 
 
@@ -94,6 +133,11 @@ class InMemoryApprovalStore:
     """Thread-safe deterministic reference store for one process."""
 
     def __init__(self, *, clock: Clock | None = None) -> None:
+        """Initialize an empty store.
+
+        Args:
+            clock: Clock used for expiration checks. Defaults to UTC wall time.
+        """
         self._clock = clock or SystemClock()
         self._items: dict[str, ApprovalChallenge] = {}
         self._states: dict[str, ApprovalState] = {}
@@ -101,6 +145,17 @@ class InMemoryApprovalStore:
         self._lock = threading.Lock()
 
     def create(self, challenge: ApprovalChallenge) -> ApprovalChallenge:
+        """Persist a new pending challenge.
+
+        Args:
+            challenge: Challenge to persist.
+
+        Returns:
+            The persisted challenge.
+
+        Raises:
+            InvalidApprovalStateError: If the approval identifier already exists.
+        """
         with self._lock:
             if challenge.approval_id in self._items:
                 raise InvalidApprovalStateError("approval id already exists")
@@ -110,6 +165,18 @@ class InMemoryApprovalStore:
             return challenge
 
     def get(self, approval_id: str) -> ApprovalChallenge:
+        """Return a challenge and update expired pending state.
+
+        Args:
+            approval_id: Identifier of the challenge to retrieve.
+
+        Returns:
+            The matching challenge.
+
+        Raises:
+            ApprovalExpiredError: If the pending challenge has expired.
+            InvalidApprovalStateError: If the identifier is unknown.
+        """
         with self._lock:
             challenge = self._lookup(approval_id)
             if (
@@ -121,6 +188,18 @@ class InMemoryApprovalStore:
             return challenge
 
     def decide(self, decision: ApprovalDecision) -> ApprovalChallenge:
+        """Apply one approval or denial decision.
+
+        Args:
+            decision: Decision to apply.
+
+        Returns:
+            The challenge associated with the decision.
+
+        Raises:
+            ApprovalExpiredError: If the challenge has expired.
+            InvalidApprovalStateError: If the transition or role is invalid.
+        """
         with self._lock:
             challenge = self._lookup(decision.approval_id)
             if (
@@ -145,6 +224,18 @@ class InMemoryApprovalStore:
             return challenge
 
     def cancel(self, approval_id: str) -> ApprovalChallenge:
+        """Cancel a pending challenge.
+
+        Args:
+            approval_id: Identifier of the challenge to cancel.
+
+        Returns:
+            The canceled challenge.
+
+        Raises:
+            ApprovalExpiredError: If the challenge has expired.
+            InvalidApprovalStateError: If the challenge is not pending.
+        """
         with self._lock:
             challenge = self._lookup(approval_id)
             if (
@@ -159,6 +250,17 @@ class InMemoryApprovalStore:
             return challenge
 
     def state(self, approval_id: str) -> ApprovalState:
+        """Return the current state for a challenge.
+
+        Args:
+            approval_id: Identifier of the challenge.
+
+        Returns:
+            The challenge lifecycle state.
+
+        Raises:
+            InvalidApprovalStateError: If the identifier is unknown.
+        """
         with self._lock:
             self._lookup(approval_id)
             return self._states[approval_id]
@@ -192,7 +294,23 @@ def default_challenge(
     required_roles: tuple[str, ...] = (),
     principal_subject_id: str | None = None,
 ) -> ApprovalChallenge:
-    """Build a safe challenge payload for an invocation."""
+    """Build a safe challenge payload for an invocation.
+
+    Args:
+        context: Immutable authorization context for the invocation.
+        agent_id: Agent bound to the challenge.
+        capability_id: Capability bound to the challenge.
+        role: Role or aggregate role description displayed to approvers.
+        reason_code: Stable reason code for the challenge.
+        ttl_seconds: Number of seconds before the challenge expires.
+        identifiers: Identifier generator used for the challenge ID.
+        clock: Clock used for the creation timestamp.
+        required_roles: Roles that must independently approve.
+        principal_subject_id: Principal subject to bind, if overridden.
+
+    Returns:
+        An immutable approval challenge.
+    """
     now = (clock or SystemClock()).now()
     return ApprovalChallenge(
         identifiers(),

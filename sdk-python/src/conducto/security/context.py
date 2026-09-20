@@ -22,7 +22,16 @@ def _freeze(value: Any) -> Any:
 
 @dataclass(frozen=True, slots=True)
 class Principal:
-    """Authenticated identity facts; credentials and raw tokens are excluded."""
+    """Authenticated identity facts; credentials and raw tokens are excluded.
+
+    Attributes:
+        subject_id: Stable identifier for the authenticated principal.
+        issuer: Authority that issued the principal identity.
+        audience: Intended audience or audiences for the identity.
+        claims: Normalized claims available to application policy callbacks.
+        roles: Exact role values assigned to the principal.
+        scopes: Exact scope values assigned to the principal.
+    """
 
     subject_id: str
     issuer: str
@@ -32,6 +41,7 @@ class Principal:
     scopes: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
+        """Validate required identity fields and freeze nested values."""
         if not all(isinstance(value, str) and value for value in (self.subject_id, self.issuer)):
             raise ValueError("principal subject_id and issuer are required")
         audiences = (self.audience,) if isinstance(self.audience, str) else self.audience
@@ -47,7 +57,14 @@ class Principal:
 
 @dataclass(frozen=True, slots=True)
 class AuthorizationContext:
-    """Immutable facts supplied to authorization and approval policy callbacks."""
+    """Immutable facts supplied to authorization and approval policy callbacks.
+
+    Attributes:
+        principal: Authenticated identity facts for the invocation.
+        task_id: Identifier of the task bound to the invocation.
+        correlation_id: Identifier shared across the invocation lifecycle.
+        policy_metadata: Non-sensitive application metadata for policy callbacks.
+    """
 
     principal: Principal
     task_id: str
@@ -55,6 +72,7 @@ class AuthorizationContext:
     policy_metadata: Mapping[str, Any] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
+        """Validate invocation identifiers and freeze policy metadata."""
         if not self.task_id or not self.correlation_id:
             raise ValueError("task_id and correlation_id are required")
         object.__setattr__(self, "policy_metadata", _freeze(self.policy_metadata))
@@ -64,7 +82,20 @@ def delegate_context(
     parent: AuthorizationContext | None,
     candidate: AuthorizationContext | None,
 ) -> AuthorizationContext | None:
-    """Inherit or restrict authorization for nested local invocation."""
+    """Inherit or restrict authorization for nested local invocation.
+
+    Args:
+        parent: Active authorization context, if one exists.
+        candidate: Context requested by the nested invocation, if supplied.
+
+    Returns:
+        The inherited or validated candidate context.
+
+    Raises:
+        AuthorizationDeniedError: If the candidate broadens or changes the
+            caller's authorization.
+        MissingAuthorizationContextError: If either context is malformed.
+    """
     if candidate is None:
         return parent
     if not isinstance(candidate, AuthorizationContext):
