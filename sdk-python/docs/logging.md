@@ -85,8 +85,11 @@ The fields below are emitted when applicable:
 | `error_category`    | Stable category, not exception text.                                      |
 | `provider`          | Selected model provider identifier.                                       |
 | `model_reference`   | Effective model reference.                                                |
-| `resolution_source` | `invocation_override` or `orchestrator_default`.                          |
+| `resolution_source` | One of `call_override`, `run_override`, `agent_default`, or `runtime_default`. |
 | `agent_count`       | Number of registered or discovered local agents.                          |
+| `input_tokens`      | Prompt/input tokens reported by the provider, when available.            |
+| `output_tokens`     | Completion/output tokens reported by the provider, when available.        |
+| `total_tokens`      | Total tokens reported by the provider, when available.                   |
 
 Stable error categories currently include `target_not_found`,
 `argument_validation`, `timeout`, `capability_exception`,

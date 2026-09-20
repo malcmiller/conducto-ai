@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-
 import contextvars
 import math
 import threading
@@ -11,15 +10,18 @@ import time
 import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+
+from pydantic import BaseModel, ValidationError
 
 from .logging import MODEL_SELECTED, MODEL_USAGE_RECORDED, emit_event, log_context
 from .provider import (
     ChatMessage,
     GenerationOptions,
+    MalformedStructuredOutputError,
     ModelConfiguration,
     ModelProvider,
     ProviderCapabilities,
@@ -29,8 +31,22 @@ from .provider import (
     complete_with_retries,
 )
 
+if TYPE_CHECKING:
+    from .agent import BaseAgent
+    from .invocation import InvocationResult
 
-class ModelResolutionError(RuntimeError):
+ModelResponseT = TypeVar("ModelResponseT", bound=BaseModel)
+
+
+class ConductoError(RuntimeError):
+    """Base error for stable Conducto runtime failures."""
+
+
+class NoActiveRunContextError(ConductoError):
+    """Model-backed code was called without an active runtime invocation."""
+
+
+class ModelResolutionError(ConductoError):
     """Base error raised before model-backed work begins."""
 
 
@@ -110,13 +126,19 @@ def _thaw(value: Any) -> Any:
     return value
 
 
-def _validate_metadata(value: Mapping[str, Any]) -> None:
+def _validate_metadata(value: Any) -> None:
     sensitive = {"api_key", "authorization", "credential", "credentials", "secret", "token"}
-    invalid = {str(key).lower() for key in value} & sensitive
-    if invalid:
-        raise ValueError(f"Sensitive values are not allowed in run metadata: {sorted(invalid)!r}")
-    for item in value.values():
-        if isinstance(item, Mapping):
+    if isinstance(value, Mapping):
+        invalid = {str(key).lower() for key in value} & sensitive
+        if invalid:
+            raise ValueError(
+                f"Sensitive values are not allowed in run metadata: {sorted(invalid)!r}"
+            )
+        for item in value.values():
+            _validate_metadata(item)
+        return
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
             _validate_metadata(item)
 
 
@@ -253,17 +275,110 @@ class ModelPolicy(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ResolvedModel:
-    """Runtime-only binding between a safe reference and the provider client.
-
-    The client and provider configuration are deliberately excluded from
-    representations, equality, and serialized run-context forms.
-    """
+    """Credential-free description of the model selected for a run."""
 
     reference: ModelReference
     provider: str
+    source: ModelResolutionSource
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedModelBinding:
+    """Runtime-private model binding that owns provider access."""
+
+    model: ResolvedModel
     client: ModelProvider = field(repr=False, compare=False)
     configuration: ModelConfiguration = field(repr=False, compare=False)
-    source: ModelResolutionSource
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCallProvenance:
+    """Credential-free provenance for one provider request."""
+
+    purpose: str
+    model_reference: str
+    provider: str
+    resolution_source: ModelResolutionSource
+    usage: Usage = field(default_factory=Usage)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-compatible model-call record."""
+        return {
+            "purpose": self.purpose,
+            "model_reference": self.model_reference,
+            "provider": self.provider,
+            "resolution_source": self.resolution_source.value,
+            "usage": self.usage.model_dump(),
+        }
+
+
+def _aggregate_usage(calls: Sequence[ModelCallProvenance]) -> Usage:
+    return Usage(
+        input_tokens=sum(call.usage.input_tokens for call in calls),
+        output_tokens=sum(call.usage.output_tokens for call in calls),
+        total_tokens=sum(call.usage.total_tokens for call in calls),
+    )
+
+
+class _ModelCallRecorder:
+    def __init__(self) -> None:
+        self._calls: list[ModelCallProvenance] = []
+        self._lock = threading.Lock()
+
+    def append(self, call: ModelCallProvenance) -> None:
+        with self._lock:
+            self._calls.append(call)
+
+    def snapshot(self) -> tuple[ModelCallProvenance, ...]:
+        with self._lock:
+            return tuple(self._calls)
+
+
+class _InvocationState:
+    def __init__(self) -> None:
+        self._active = False
+        self._model_tasks: set[asyncio.Task[Any]] = set()
+        self._lock = threading.Lock()
+
+    def activate(self) -> None:
+        with self._lock:
+            self._active = True
+
+    def deactivate(self) -> None:
+        with self._lock:
+            self._active = False
+            tasks = tuple(self._model_tasks)
+            self._model_tasks.clear()
+        for task in tasks:
+            task.cancel()
+
+    def require_active(self) -> None:
+        with self._lock:
+            if not self._active:
+                raise NoActiveRunContextError(
+                    "Model gateway is only available within its active runtime invocation"
+                )
+
+    def begin_model_call(self) -> asyncio.Task[Any]:
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            current = None
+        if current is None:
+            raise NoActiveRunContextError(
+                "Model gateway requires an active asynchronous runtime invocation"
+            )
+        with self._lock:
+            if not self._active:
+                raise NoActiveRunContextError(
+                    "Model gateway is only available within its active runtime invocation"
+                )
+            self._model_tasks.add(current)
+        return current
+
+    def end_model_call(self, task: asyncio.Task[Any]) -> None:
+        with self._lock:
+            self._model_tasks.discard(task)
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +392,7 @@ class InvocationMetadata:
         provider: Public provider identifier, if a model was resolved.
         resolution_source: Precedence source for the effective model.
         usage: Provider-neutral usage counters.
+        model_calls: Ordered model calls made during the workflow.
         attributes: Frozen provider-neutral run metadata.
     """
 
@@ -286,6 +402,7 @@ class InvocationMetadata:
     provider: str | None = None
     resolution_source: ModelResolutionSource | None = None
     usage: Usage = field(default_factory=Usage)
+    model_calls: tuple[ModelCallProvenance, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -302,8 +419,29 @@ class InvocationMetadata:
                 self.resolution_source.value if self.resolution_source is not None else None
             ),
             "usage": self.usage.model_dump(),
+            "model_calls": [call.to_dict() for call in self.model_calls],
             "attributes": _thaw(self.attributes),
         }
+
+    def with_model_calls(
+        self,
+        *groups: Sequence[ModelCallProvenance],
+    ) -> InvocationMetadata:
+        """Return metadata containing this and additional ordered model calls."""
+        calls = self.model_calls + tuple(call for group in groups for call in group)
+        return replace(self, usage=_aggregate_usage(calls), model_calls=calls)
+
+    def with_prior_model_calls(
+        self,
+        calls: Sequence[ModelCallProvenance],
+    ) -> InvocationMetadata:
+        """Return metadata with earlier workflow model calls prepended."""
+        combined = tuple(calls) + self.model_calls
+        return replace(
+            self,
+            usage=_aggregate_usage(combined),
+            model_calls=combined,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,6 +481,18 @@ class RunContext:
     metadata: Mapping[str, Any] = field(default_factory=dict)
     agent_id: str = ""
     policy_context: RunConfig = field(default_factory=RunConfig, repr=False, compare=False)
+    _runtime: Runtime | None = field(default=None, repr=False, compare=False)
+    _binding: _ResolvedModelBinding | None = field(default=None, repr=False, compare=False)
+    _model_calls: _ModelCallRecorder = field(
+        default_factory=_ModelCallRecorder,
+        repr=False,
+        compare=False,
+    )
+    _invocation_state: _InvocationState = field(
+        default_factory=_InvocationState,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", _freeze(self.metadata))
@@ -353,9 +503,20 @@ class RunContext:
         return self.model.reference if self.model is not None else None
 
     @property
-    def model_client(self) -> ModelProvider | None:
-        """Return the runtime-only provider client for in-process model calls."""
-        return self.model.client if self.model is not None else None
+    def models(self) -> ModelGatewayCollection:
+        """Return the invocation-scoped, policy-aware model gateway."""
+        if self._runtime is None:
+            raise NoActiveRunContextError("Run context is not attached to a runtime")
+        return ModelGatewayCollection(self._runtime, self)
+
+    def remaining_timeout(self) -> float | None:
+        """Return the remaining run budget, raising when it has elapsed."""
+        if self.deadline is None:
+            return None
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Run deadline exceeded")
+        return remaining
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize only provider-neutral, credential-free run information."""
@@ -374,15 +535,85 @@ class RunContext:
 
     def invocation_metadata(self, usage: Usage | None = None) -> InvocationMetadata:
         """Create safe result metadata from this context and optional usage."""
+        calls = self._model_calls.snapshot()
         return InvocationMetadata(
             run_id=self.run_id,
             correlation_id=self.correlation_id,
             model_reference=str(self.model.reference) if self.model is not None else None,
             provider=self.model.provider if self.model is not None else None,
             resolution_source=self.model.source if self.model is not None else None,
-            usage=usage or Usage(),
+            usage=_aggregate_usage(calls) if calls else (usage or Usage()),
+            model_calls=calls,
             attributes=self.metadata,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class ModelGatewayCollection:
+    """Invocation-scoped entry point for policy-aware model access."""
+
+    _runtime: Runtime = field(repr=False, compare=False)
+    _context: RunContext = field(repr=False, compare=False)
+
+    def require(
+        self,
+        reference: ModelReference | str | None = None,
+    ) -> ModelGateway:
+        """Return a constrained gateway for the run model or a call override."""
+        self._context._invocation_state.require_active()
+        resolved = self._runtime._resolve_for_call_binding(self._context, reference)
+        if resolved is None:
+            raise MissingModelDefaultError(f"Agent '{self._context.agent_id}' requires a model")
+        return ModelGateway(self._runtime, self._context, reference)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelGateway:
+    """Constrained model API that enforces runtime policy and telemetry."""
+
+    _runtime: Runtime = field(repr=False, compare=False)
+    _context: RunContext = field(repr=False, compare=False)
+    _reference: ModelReference | str | None = field(default=None, repr=False)
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        structured_output: StructuredOutputRequest,
+    ) -> ModelCallResult:
+        """Complete one policy-aware model request within the run budget."""
+        task = self._context._invocation_state.begin_model_call()
+        try:
+            return await self._runtime.complete(
+                self._context,
+                messages,
+                structured_output=structured_output,
+                model=self._reference,
+                purpose="capability",
+            )
+        finally:
+            self._context._invocation_state.end_model_call(task)
+
+    async def complete_typed(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        response_type: type[ModelResponseT],
+    ) -> ModelResponseT:
+        """Complete and validate one structured response as a Pydantic model."""
+        request = StructuredOutputRequest(
+            name=response_type.__name__,
+            schema=response_type.model_json_schema(),
+        )
+        call = await self.complete(messages, structured_output=request)
+        if call.result.structured is None:
+            raise MalformedStructuredOutputError("Provider returned no structured response")
+        try:
+            return response_type.model_validate(call.result.structured)
+        except ValidationError as error:
+            raise MalformedStructuredOutputError(
+                "Provider returned malformed structured response"
+            ) from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,6 +714,16 @@ def get_run_context() -> RunContext | None:
     return _CURRENT_RUN_CONTEXT.get()
 
 
+def require_run_context() -> RunContext:
+    """Return the active run context or raise a stable Conducto error."""
+    context = get_run_context()
+    if context is None:
+        raise NoActiveRunContextError(
+            "No active Conducto run context; invoke this capability through Runtime"
+        )
+    return context
+
+
 @contextmanager
 def use_run_context(context: RunContext) -> Iterator[RunContext]:
     """Activate a run context for model calls and capability execution.
@@ -490,11 +731,13 @@ def use_run_context(context: RunContext) -> Iterator[RunContext]:
     Context variables isolate concurrent asyncio tasks and propagate into
     synchronous capability workers created with ``asyncio.to_thread``.
     """
+    context._invocation_state.activate()
     token = _CURRENT_RUN_CONTEXT.set(context)
     try:
         yield context
     finally:
         _CURRENT_RUN_CONTEXT.reset(token)
+        context._invocation_state.deactivate()
 
 
 class Runtime:
@@ -522,6 +765,44 @@ class Runtime:
         self.provider_registry = provider_registry or ProviderRegistry()
         self.config = config or RuntimeConfig()
         self.policy = policy
+        self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
+        self._execution_locks_guard = threading.Lock()
+
+    @staticmethod
+    def new_correlation_id() -> str:
+        """Return a new public correlation identifier."""
+        return str(uuid.uuid4())
+
+    def capability_lock(self, agent: BaseAgent, capability_name: str) -> threading.Lock:
+        """Return the shared lock for one synchronous capability."""
+        key = (id(agent), capability_name)
+        with self._execution_locks_guard:
+            return self._execution_locks.setdefault(key, threading.Lock())
+
+    async def invoke(
+        self,
+        agent: BaseAgent,
+        capability: str | Callable[..., Any],
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        correlation_id: str = "",
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
+    ) -> InvocationResult:
+        """Invoke an agent capability through the shared execution pipeline."""
+        from .invocation import invoke_agent
+
+        return await invoke_agent(
+            self,
+            agent,
+            capability,
+            arguments,
+            timeout=timeout,
+            correlation_id=correlation_id,
+            model_reference=model_reference,
+            run_config=run_config,
+        )
 
     def create_run_context(
         self,
@@ -558,7 +839,7 @@ class Runtime:
         """
         agent = agent_config or AgentModelConfig()
         run = run_config or RunConfig()
-        resolved = self.resolve_model(
+        binding = self._resolve_model_binding(
             agent_id=agent_id,
             agent_config=agent,
             run_config=run,
@@ -569,12 +850,14 @@ class Runtime:
         return RunContext(
             run_id=run_id or str(uuid.uuid4()),
             correlation_id=correlation_id or str(uuid.uuid4()),
-            model=resolved,
+            model=binding.model if binding is not None else None,
             timeout=timeout,
             deadline=time.monotonic() + timeout if timeout is not None else None,
             metadata=run.metadata,
             agent_id=agent_id,
             policy_context=run,
+            _runtime=self,
+            _binding=binding,
         )
 
     def resolve_model(
@@ -599,6 +882,24 @@ class Runtime:
             ModelOverrideDeniedError: If runtime policy denies the candidate.
             ProviderUnavailableError: If the provider is unavailable.
         """
+        binding = self._resolve_model_binding(
+            agent_id=agent_id,
+            agent_config=agent_config,
+            run_config=run_config,
+            call_override=call_override,
+            required_capabilities=required_capabilities,
+        )
+        return binding.model if binding is not None else None
+
+    def _resolve_model_binding(
+        self,
+        *,
+        agent_id: str,
+        agent_config: AgentModelConfig,
+        run_config: RunConfig,
+        call_override: ModelReference | str | None = None,
+        required_capabilities: frozenset[str] = frozenset(),
+    ) -> _ResolvedModelBinding | None:
         call_reference = _reference(call_override)
         candidates = (
             (call_reference, ModelResolutionSource.CALL_OVERRIDE),
@@ -634,12 +935,10 @@ class Runtime:
             raise ModelOverrideDeniedError(
                 f"Model reference '{reference}' is denied for agent '{agent_id}'"
             )
-        return ResolvedModel(
-            reference,
-            registration.provider,
+        return _ResolvedModelBinding(
+            ResolvedModel(reference, registration.provider, source),
             registration.client,
             registration.configuration,
-            source,
         )
 
     def resolve_for_call(
@@ -654,9 +953,30 @@ class Runtime:
         ``None`` reuses the context model. A non-``None`` override is resolved
         with call-level precedence and evaluated independently by policy.
         """
+        binding = self._resolve_for_call_binding(
+            context,
+            override,
+            required_capabilities=required_capabilities,
+        )
+        return binding.model if binding is not None else None
+
+    def _resolve_for_call_binding(
+        self,
+        context: RunContext,
+        override: ModelReference | str | None,
+        *,
+        required_capabilities: frozenset[str] = frozenset(),
+    ) -> _ResolvedModelBinding | None:
         if override is None:
-            return context.model
-        return self.resolve_model(
+            binding = context._binding
+            if binding is not None:
+                self._validate_capabilities(
+                    binding.model.reference,
+                    binding.client.capabilities,
+                    required_capabilities,
+                )
+            return binding
+        return self._resolve_model_binding(
             agent_id=context.agent_id,
             agent_config=AgentModelConfig(requirement=ModelRequirement.REQUIRED),
             run_config=context.policy_context,
@@ -671,6 +991,7 @@ class Runtime:
         *,
         structured_output: StructuredOutputRequest,
         model: ModelReference | str | None = None,
+        purpose: str = "model_call",
     ) -> ModelCallResult:
         """Execute one model call without changing the enclosing run context.
 
@@ -679,6 +1000,7 @@ class Runtime:
             messages: Provider-neutral messages for this call.
             structured_output: Required native structured-output contract.
             model: Optional call-only model override.
+            purpose: Credential-free label for workflow provenance.
 
         Returns:
             The provider result and credential-free call metadata.
@@ -696,21 +1018,33 @@ class Runtime:
         required = (
             frozenset({"structured_output"}) if structured_output.json_schema else frozenset()
         )
-        resolved = self.resolve_for_call(context, model, required_capabilities=required)
-        if resolved is None:
+        if context._runtime is not self:
+            raise ValueError("Run context belongs to a different runtime")
+        binding = self._resolve_for_call_binding(
+            context,
+            model,
+            required_capabilities=required,
+        )
+        if binding is None:
             raise MissingModelDefaultError(f"Agent '{context.agent_id}' requires a model")
         if context.cancellation.cancelled:
             raise asyncio.CancelledError
-        timeout = resolved.configuration.timeout
-        if context.deadline is not None:
+        resolved = binding.model
+
+        def _remaining_timeout() -> float | None:
+            if context.deadline is None:
+                return binding.configuration.timeout
             remaining = context.deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError("Run deadline exceeded")
-            timeout = min(timeout, remaining)
+            base = binding.configuration.timeout
+            return min(base, remaining)
+
+        timeout = _remaining_timeout()
         options = GenerationOptions(
-            model=resolved.configuration.model,
+            model=binding.configuration.model,
             timeout=timeout,
-            retries=resolved.configuration.retries,
+            retries=binding.configuration.retries,
         )
         with log_context(
             correlation_id=context.correlation_id,
@@ -725,10 +1059,11 @@ class Runtime:
                 outcome="success",
             )
             result = await complete_with_retries(
-                resolved.client,
+                binding.client,
                 messages,
                 options=options,
                 structured_output=structured_output,
+                deadline=context.deadline,
             )
             emit_event(
                 MODEL_USAGE_RECORDED,
@@ -740,6 +1075,14 @@ class Runtime:
                 total_tokens=result.usage.total_tokens,
                 outcome="success",
             )
+        model_call = ModelCallProvenance(
+            purpose=purpose,
+            model_reference=str(resolved.reference),
+            provider=resolved.provider,
+            resolution_source=resolved.source,
+            usage=result.usage,
+        )
+        context._model_calls.append(model_call)
         metadata = InvocationMetadata(
             run_id=context.run_id,
             correlation_id=context.correlation_id,
@@ -747,6 +1090,7 @@ class Runtime:
             provider=resolved.provider,
             resolution_source=resolved.source,
             usage=result.usage,
+            model_calls=(model_call,),
             attributes=context.metadata,
         )
         return ModelCallResult(result, metadata)

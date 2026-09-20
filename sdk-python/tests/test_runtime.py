@@ -182,7 +182,7 @@ def test_orchestrator_and_selected_agent_use_different_models() -> None:
         result = await orchestrator.route("work")
         assert isinstance(result, InvocationSuccess)
         assert result.value == "worker"
-        assert result.metadata and result.metadata.model_reference == "orchestrator"
+        assert result.metadata and result.metadata.model_reference == "worker"
 
     asyncio.run(exercise())
     assert routing_provider.calls == 1
@@ -283,3 +283,60 @@ def test_run_context_serialization_excludes_clients_and_provider_configuration()
     assert "configuration" not in serialized
     with pytest.raises(ValueError, match="Sensitive values"):
         RunConfig(metadata={"credentials": "must-not-enter-context"})
+
+
+def test_runtime_callable_invocation_supports_classmethods_and_rejects_other_instances() -> None:
+    @a2a_agent(name="CallableAgent", description="Tests callable targets.")
+    class CallableAgent(BaseAgent):
+        def __init__(self, label: str) -> None:
+            self.label = label
+            super().__init__()
+
+        @classmethod
+        @a2a_capability(name="class-call", description="Invokes a class method.")
+        def class_call(cls, value: str) -> str:
+            return f"{cls.__name__}:{value}"
+
+        @a2a_capability(name="instance-call", description="Invokes an instance method.")
+        def instance_call(self) -> str:
+            return self.label
+
+    async def exercise() -> None:
+        runtime = Runtime()
+        first = CallableAgent("first")
+        second = CallableAgent("second")
+
+        class_result = await runtime.invoke(first, first.class_call, {"value": "ok"})
+        assert isinstance(class_result, InvocationSuccess)
+        assert class_result.value == "CallableAgent:ok"
+
+        wrong_instance = await runtime.invoke(first, second.instance_call, {})
+        assert not isinstance(wrong_instance, InvocationSuccess)
+
+    asyncio.run(exercise())
+
+
+def test_model_free_capability_clears_inherited_provider_requirements() -> None:
+    @a2a_agent(name="MixedAgent", description="Has deterministic work.")
+    class MixedAgent(BaseAgent):
+        @a2a_capability(
+            name="deterministic",
+            description="Runs without a model.",
+            model_required=False,
+        )
+        def deterministic(self) -> str:
+            return "done"
+
+    agent = MixedAgent(
+        agent_config=AgentModelConfig(
+            requirement=ModelRequirement.REQUIRED,
+            required_capabilities=frozenset({"structured_output"}),
+        )
+    )
+
+    async def exercise() -> None:
+        result = await Runtime().invoke(agent, "deterministic", {})
+        assert isinstance(result, InvocationSuccess)
+        assert result.value == "done"
+
+    asyncio.run(exercise())

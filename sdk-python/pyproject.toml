@@ -10,7 +10,6 @@ name = "conducto-ai"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "contextvars>=2.4",
     "pydantic>=2.13.5",
 ]
 

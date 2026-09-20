@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
@@ -345,6 +346,7 @@ async def complete_with_retries(
     *,
     options: GenerationOptions,
     structured_output: StructuredOutputRequest,
+    deadline: float | None = None,
 ) -> ProviderResult:
     """Complete a provider request under timeout and safe-retry rules.
 
@@ -357,6 +359,7 @@ async def complete_with_retries(
         messages: Provider-neutral conversation messages.
         options: Generation, timeout, and retry settings.
         structured_output: Required native structured-output contract.
+        deadline: Optional monotonic deadline governing the whole request.
 
     Returns:
         The normalized provider result.
@@ -371,17 +374,29 @@ async def complete_with_retries(
     attempts = options.retries + 1
     for attempt in range(attempts):
         try:
+            timeout_for_attempt: float | None = None
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Run deadline exceeded")
+                timeout_for_attempt = remaining
+            if options.timeout is not None:
+                timeout_for_attempt = (
+                    min(options.timeout, timeout_for_attempt)
+                    if timeout_for_attempt is not None
+                    else options.timeout
+                )
             completion = provider.complete(
                 messages,
                 options=options,
                 structured_output=structured_output,
             )
-            if options.timeout is not None:
-                return await asyncio.wait_for(completion, options.timeout)
+            if timeout_for_attempt is not None:
+                return await asyncio.wait_for(completion, timeout_for_attempt)
             return await completion
         except TimeoutError as error:
             timeout_error = ProviderTimeoutError()
-            if attempt == attempts - 1:
+            if attempt == attempts - 1 or (deadline is not None and deadline <= time.monotonic()):
                 raise timeout_error from error
             await asyncio.sleep(0)
         except ProviderError as error:

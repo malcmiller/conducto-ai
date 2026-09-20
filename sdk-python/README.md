@@ -117,8 +117,8 @@ runtime = Runtime(
     config=RuntimeConfig(default_model=ModelReference("fast")),
 )
 
-result = await orchestrator.invoke(
-    "Worker",
+result = await runtime.invoke(
+    worker,
     "work",
     {},
     run_config=RunConfig(model=ModelReference("fast")),
@@ -129,6 +129,24 @@ result = await orchestrator.invoke(
 `InvocationMetadata` are immutable public contracts. `RunContext.to_dict()`
 includes only model provenance, timing, cancellation state, and
 provider-neutral metadata; it excludes provider clients and configuration.
+Model-backed capabilities use the invocation-scoped gateway rather than a raw
+provider:
+
+```python
+from conducto import ChatMessage, require_run_context
+
+context = require_run_context()
+draft = await context.models.require().complete_typed(
+    messages=(ChatMessage(role="user", content="Draft the audit report"),),
+    response_type=AuditReportDraft,
+)
+```
+
+`require_run_context()` raises `NoActiveRunContextError` when model-backed code
+is called directly instead of through `Runtime.invoke()` or
+`OrchestratorAgent.invoke()`. Routed invocation metadata retains ordered
+provenance and usage for both the routing model and capability model in
+`metadata.model_calls`.
 Use `model_required=False` on `@a2a_agent` or `@a2a_capability` for
 deterministic work. A runtime policy callback can deny selections using agent,
 caller, environment, cost-tier, and data-classification facts before any

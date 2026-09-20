@@ -3,6 +3,16 @@
 
 from .agent import A2A_AGENT_CARD_SPEC_VERSION, BaseAgent
 from .decorators import a2a_agent, a2a_capability, tool
+from .invocation import (
+    InvocationCancelled,
+    InvocationFailure,
+    InvocationResult,
+    InvocationSuccess,
+    InvocationTargetNotFound,
+    InvocationTimeout,
+    InvocationValidationFailure,
+    UnsupportedReturnValueError,
+)
 from .logging import (
     DevelopmentFormatter,
     JsonFormatter,
@@ -11,18 +21,7 @@ from .logging import (
     get_log_context,
     log_context,
 )
-from .orchestrator import (
-    InvocationCancelled,
-    InvocationFailure,
-    InvocationResult,
-    InvocationSuccess,
-    InvocationTargetNotFound,
-    InvocationTimeout,
-    InvocationValidationFailure,
-    OrchestratorAgent,
-    RoutingFailure,
-    UnsupportedReturnValueError,
-)
+from .orchestrator import OrchestratorAgent, RoutingFailure
 from .provider import (
     ChatMessage,
     FakeModel,
@@ -48,10 +47,14 @@ from .provider import (
 from .runtime import (
     AgentModelConfig,
     CancellationState,
+    ConductoError,
     IncompatibleProviderCapabilitiesError,
     InvocationMetadata,
     MissingModelDefaultError,
+    ModelCallProvenance,
     ModelCallResult,
+    ModelGateway,
+    ModelGatewayCollection,
     ModelOverrideDeniedError,
     ModelPolicy,
     ModelPolicyContext,
@@ -59,6 +62,7 @@ from .runtime import (
     ModelRequirement,
     ModelResolutionError,
     ModelResolutionSource,
+    NoActiveRunContextError,
     ProviderRegistry,
     ProviderUnavailableError,
     ResolvedModel,
@@ -68,6 +72,7 @@ from .runtime import (
     RuntimeConfig,
     UnknownModelReferenceError,
     get_run_context,
+    require_run_context,
 )
 
 __all__ = [
@@ -114,10 +119,14 @@ __all__ = [
     "parse_routing_selection",
     "AgentModelConfig",
     "CancellationState",
+    "ConductoError",
     "IncompatibleProviderCapabilitiesError",
     "InvocationMetadata",
     "MissingModelDefaultError",
     "ModelCallResult",
+    "ModelCallProvenance",
+    "ModelGateway",
+    "ModelGatewayCollection",
     "ModelOverrideDeniedError",
     "ModelPolicy",
     "ModelPolicyContext",
@@ -125,6 +134,7 @@ __all__ = [
     "ModelRequirement",
     "ModelResolutionError",
     "ModelResolutionSource",
+    "NoActiveRunContextError",
     "ProviderRegistry",
     "ProviderUnavailableError",
     "ResolvedModel",
@@ -134,4 +144,5 @@ __all__ = [
     "RuntimeConfig",
     "UnknownModelReferenceError",
     "get_run_context",
+    "require_run_context",
 ]

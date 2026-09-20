@@ -415,6 +415,8 @@ def test_orchestrator_route_reports_unsupported_provider_unknown_target_and_inva
             orchestrator.register_agent(RouteAgent())
             result = await orchestrator.route("Anything")
             assert isinstance(result, expected_type)
+            assert result.metadata is not None
+            assert [call.purpose for call in result.metadata.model_calls] == ["routing"]
 
     asyncio.run(exercise())
 

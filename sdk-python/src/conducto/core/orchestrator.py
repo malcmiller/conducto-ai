@@ -2,50 +2,37 @@
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
-import enum
-import inspect
 import json
-import math
 import threading
-import time
 import uuid
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
-from types import MappingProxyType
-from typing import Any, TypeAlias
-
-from pydantic import BaseModel, ValidationError
+from typing import Any
 
 from .agent import BaseAgent
+from .invocation import (
+    InvocationResult,
+    InvocationSuccess,
+    InvocationTargetNotFound,
+)
 from .logging import (
     AGENT_DISCOVERED,
     AGENT_REGISTERED,
-    ARGUMENTS_VALIDATED,
-    INVOCATION_CANCELLED,
-    INVOCATION_COMPLETED,
     INVOCATION_FAILED,
-    INVOCATION_STARTED,
-    INVOCATION_TIMED_OUT,
-    MODEL_SELECTED,
-    MODEL_USAGE_RECORDED,
     emit_event,
     log_context,
 )
 from .provider import (
     ChatMessage,
-    GenerationOptions,
     MalformedStructuredOutputError,
     ModelConfiguration,
     ModelProvider,
     ProviderError,
-    ProviderResult,
     StructuredOutputRequest,
     Usage,
     build_routing_schema,
-    complete_with_retries,
     parse_routing_selection,
 )
 from .runtime import (
@@ -59,108 +46,6 @@ from .runtime import (
     Runtime,
     use_run_context,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationSuccess:
-    """Successful capability invocation result.
-
-    Attributes:
-        correlation_id: Caller-supplied identifier for matching the response.
-        value: Deterministically serialized capability return value.
-        usage: Provider-neutral usage from orchestration model selection.
-        metadata: Credential-free run and effective-model provenance.
-    """
-
-    correlation_id: str
-    value: Any
-    usage: Usage = dataclasses.field(default_factory=Usage)
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationValidationFailure:
-    """Result returned when capability arguments fail Pydantic validation.
-
-    Attributes:
-        correlation_id: Caller-supplied identifier for matching the response.
-        errors: Immutable field-level Pydantic validation errors.
-        metadata: Credential-free run and effective-model provenance.
-    """
-
-    correlation_id: str
-    errors: tuple[Mapping[str, Any], ...]
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationTargetNotFound:
-    """Result returned when the requested agent or capability is unavailable.
-
-    Attributes:
-        correlation_id: Caller-supplied identifier for matching the response.
-        agent_id: Stable identifier that was requested.
-        capability_id: Capability name or generated skill identifier requested.
-        metadata: Credential-free run and effective-model provenance when a
-            run context was created.
-    """
-
-    correlation_id: str
-    agent_id: str
-    capability_id: str
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationTimeout:
-    """Result returned when a capability exceeds its invocation timeout.
-
-    Attributes:
-        correlation_id: Caller-supplied identifier for matching the response.
-        timeout: Timeout duration in seconds.
-        metadata: Credential-free run and effective-model provenance.
-    """
-
-    correlation_id: str
-    timeout: float
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationCancelled:
-    """Result returned when a capability cooperatively reports cancellation.
-
-    External cancellation of the caller's asyncio task is propagated instead of
-    being converted to this result.
-
-    Attributes:
-        correlation_id: Caller-supplied identifier for matching the response.
-        metadata: Credential-free run and effective-model provenance.
-    """
-
-    correlation_id: str
-    metadata: InvocationMetadata | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class InvocationFailure:
-    """Safe result for a capability exception or unsupported return value.
-
-    The public ``message`` intentionally omits exception details. The original
-    exception remains available through ``exception`` for local diagnostics.
-
-    Attributes:
-        correlation_id: Caller-supplied identifier for matching the response.
-        message: Safe, non-sensitive description suitable for callers.
-        exception: Original local exception, excluded from representation and
-            equality comparisons.
-        metadata: Credential-free run and effective-model provenance.
-    """
-
-    correlation_id: str
-    message: str
-    exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
-    metadata: InvocationMetadata | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,79 +66,6 @@ class RoutingFailure:
     usage: Usage = dataclasses.field(default_factory=Usage)
     retryable: bool = False
     metadata: InvocationMetadata | None = None
-
-
-InvocationResult: TypeAlias = (
-    InvocationSuccess
-    | InvocationValidationFailure
-    | InvocationTargetNotFound
-    | InvocationTimeout
-    | InvocationCancelled
-    | InvocationFailure
-)
-
-
-class UnsupportedReturnValueError(TypeError):
-    """Raised when a capability result cannot be represented safely."""
-
-
-class _CapabilityExecutionError(Exception):
-    """Wrap an exception raised by a capability before deadline handling."""
-
-    def __init__(self, exception: Exception) -> None:
-        super().__init__(str(exception))
-        self.exception = exception
-
-
-def _serialize_result(value: Any) -> Any:
-    """Convert supported capability results to canonical JSON-compatible data."""
-    if value is None or isinstance(value, (str, bool, int)):
-        return value
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            raise UnsupportedReturnValueError("Non-finite floats are unsupported")
-        return value
-    if isinstance(value, enum.Enum):
-        return _serialize_result(value.value)
-    if isinstance(value, BaseModel):
-        try:
-            return _serialize_result(value.model_dump(mode="json"))
-        except Exception as error:
-            raise UnsupportedReturnValueError(
-                f"Could not serialize Pydantic model: {type(value).__name__}"
-            ) from error
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return _serialize_result(dataclasses.asdict(value))
-    if isinstance(value, Mapping):
-        if any(not isinstance(key, str) for key in value):
-            raise UnsupportedReturnValueError("Mapping keys must be strings")
-        return {key: _serialize_result(value[key]) for key in sorted(value)}
-    if isinstance(value, (list, tuple)):
-        return [_serialize_result(item) for item in value]
-    if isinstance(value, (set, frozenset)):
-        serialized = [_serialize_result(item) for item in value]
-        return sorted(
-            serialized,
-            key=lambda item: json.dumps(
-                item, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-            ),
-        )
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_serialize_result(item) for item in value]
-    raise UnsupportedReturnValueError(
-        f"Unsupported capability return value: {type(value).__name__}"
-    )
-
-
-def _freeze_mapping(value: Any) -> Any:
-    """Recursively freeze validation details without changing their shape."""
-    if isinstance(value, dict):
-        return MappingProxyType({key: _freeze_mapping(item) for key, item in value.items()})
-    if isinstance(value, list):
-        return tuple(_freeze_mapping(item) for item in value)
-    if isinstance(value, tuple):
-        return tuple(_freeze_mapping(item) for item in value)
-    return value
 
 
 class OrchestratorAgent(BaseAgent):
@@ -303,7 +115,6 @@ class OrchestratorAgent(BaseAgent):
         self._legacy_direct_provider = model_provider is not None
         self._registered_agents: dict[str, BaseAgent] = {}
         self._registered_capabilities: dict[str, BaseAgent] = {}
-        self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._registry_lock = threading.RLock()
         effective_reference = model_reference or (model_config.model if model_config else None)
         if isinstance(effective_reference, str):
@@ -411,8 +222,6 @@ class OrchestratorAgent(BaseAgent):
                 raise
             return RoutingFailure(str(error), error)
         assert context.model is not None
-        config = context.model.configuration
-        provider = context.model.client
         with (
             use_run_context(context),
             log_context(
@@ -420,25 +229,9 @@ class OrchestratorAgent(BaseAgent):
                 run_id=context.run_id,
             ),
         ):
-            emit_event(
-                MODEL_SELECTED,
-                provider=context.model.provider,
-                model_reference=str(context.model.reference),
-                resolution_source=(
-                    "invocation_override"
-                    if model_provider is not None
-                    else context.model.source.value
-                ),
-                outcome="success",
-            )
             request = StructuredOutputRequest(
                 name="conducto_capability_selection",
                 schema=build_routing_schema(self.get_routing_metadata()),
-            )
-            options = GenerationOptions(
-                model=config.model,
-                timeout=config.timeout if timeout is None else timeout,
-                retries=config.retries,
             )
             messages = (
                 ChatMessage(
@@ -454,18 +247,18 @@ class OrchestratorAgent(BaseAgent):
                     content=json.dumps(self.get_routing_metadata(), sort_keys=True),
                 ),
             )
-            provider_result: ProviderResult | None = None
+            call = None
             try:
-                result = await complete_with_retries(
-                    provider,
+                call = await active_runtime.complete(
+                    context,
                     messages,
-                    options=options,
                     structured_output=request,
+                    purpose="routing",
                 )
-                provider_result = result
+                result = call.result
                 selection = parse_routing_selection(result)
             except MalformedStructuredOutputError as error:
-                usage = provider_result.usage if provider_result is not None else Usage()
+                usage = call.result.usage if call is not None else Usage()
                 return RoutingFailure(
                     str(error),
                     error,
@@ -473,24 +266,12 @@ class OrchestratorAgent(BaseAgent):
                     metadata=context.invocation_metadata(usage),
                 )
             except ProviderError as error:
-                usage = provider_result.usage if provider_result is not None else Usage()
                 return RoutingFailure(
                     str(error),
                     error,
-                    usage=usage,
                     retryable=error.retryable,
-                    metadata=context.invocation_metadata(usage),
+                    metadata=context.invocation_metadata(),
                 )
-            emit_event(
-                MODEL_USAGE_RECORDED,
-                provider=context.model.provider,
-                model_reference=str(context.model.reference),
-                resolution_source=context.model.source.value,
-                input_tokens=result.usage.input_tokens,
-                output_tokens=result.usage.output_tokens,
-                total_tokens=result.usage.total_tokens,
-                outcome="success",
-            )
             invocation = await self.invoke(
                 selection.agent_id,
                 selection.capability_id,
@@ -499,11 +280,19 @@ class OrchestratorAgent(BaseAgent):
                 correlation_id=correlation_id,
                 run_config=agent_run_config,
             )
+            capability_metadata = invocation.metadata
+            if capability_metadata is not None:
+                invocation = dataclasses.replace(
+                    invocation,
+                    metadata=capability_metadata.with_prior_model_calls(call.metadata.model_calls),
+                )
+            else:
+                invocation = dataclasses.replace(invocation, metadata=call.metadata)
             if isinstance(invocation, InvocationSuccess):
                 return dataclasses.replace(
                     invocation,
                     usage=result.usage,
-                    metadata=context.invocation_metadata(result.usage),
+                    metadata=invocation.metadata or call.metadata,
                 )
             return invocation
 
@@ -672,32 +461,10 @@ class OrchestratorAgent(BaseAgent):
             The effective context is available inside the capability through:
             func:`conducto.get_run_context`.
         """
-        if not isinstance(arguments, Mapping):
-            raise TypeError("Invocation arguments must be a mapping")
-        if timeout is None:
-            timeout_value = None
-        elif isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
-            raise ValueError("Invocation timeout must be a finite positive number")
-        else:
-            try:
-                timeout_value = float(timeout)
-            except (OverflowError, ValueError) as error:
-                raise ValueError("Invocation timeout must be a finite positive number") from error
-            if not math.isfinite(timeout_value) or timeout_value <= 0:
-                raise ValueError("Invocation timeout must be a finite positive number")
-        correlation_id = correlation_id or str(uuid.uuid4())
-
         with self._registry_lock:
             agent = self._registered_agents.get(agent_id)
-            capability_name = capability_id
-            registered = agent.capabilities.get(capability_id) if agent else None
-            if registered is None and agent is not None:
-                for candidate_name, candidate in agent.capabilities.items():
-                    if agent._skill_id(candidate_name) == capability_id:
-                        capability_name = candidate_name
-                        registered = candidate
-                        break
-        if agent is None or registered is None:
+        if agent is None:
+            correlation_id = correlation_id or str(uuid.uuid4())
             with log_context(
                 correlation_id=correlation_id,
                 agent_id=agent_id,
@@ -710,174 +477,15 @@ class OrchestratorAgent(BaseAgent):
                     error_category="target_not_found",
                 )
             return InvocationTargetNotFound(correlation_id, agent_id, capability_id)
-        capability_metadata = registered.capability
-        capability_requirement = (
-            capability_metadata.model_required if capability_metadata is not None else None
-        )
-        agent_model_config = (
-            dataclasses.replace(
-                agent.agent_config,
-                requirement=(
-                    ModelRequirement.REQUIRED if capability_requirement else ModelRequirement.NONE
-                ),
-            )
-            if capability_requirement is not None
-            else agent.agent_config
-        )
-        effective_run = run_config or RunConfig()
-        if timeout is not None:
-            effective_run = dataclasses.replace(effective_run, timeout=timeout)
-        context = self.runtime.create_run_context(
-            agent_id=agent_id,
-            agent_config=agent_model_config,
-            run_config=effective_run,
-            call_override=model_reference,
+        return await self.runtime.invoke(
+            agent,
+            capability_id,
+            arguments,
+            timeout=timeout,
             correlation_id=correlation_id,
+            model_reference=model_reference,
+            run_config=run_config,
         )
-        invocation_metadata = context.invocation_metadata()
-        target = registered.callable
-        parameter_model = registered.parameter_model
-        execution_lock = self._execution_locks.setdefault(
-            (id(agent), capability_name),
-            threading.Lock(),
-        )
-        model_log_context = (
-            {
-                "provider": context.model.provider,
-                "model_reference": str(context.model.reference),
-                "resolution_source": context.model.source.value,
-            }
-            if context.model is not None
-            else {}
-        )
-
-        with (
-            use_run_context(context),
-            log_context(
-                correlation_id=correlation_id,
-                run_id=context.run_id,
-                agent_id=agent_id,
-                capability_id=capability_name,
-                **model_log_context,
-            ),
-        ):
-            try:
-                validated = parameter_model.model_validate(dict(arguments))
-            except ValidationError as error:
-                emit_event(
-                    ARGUMENTS_VALIDATED,
-                    outcome="failure",
-                    error_category="argument_validation",
-                )
-                emit_event(
-                    INVOCATION_FAILED,
-                    outcome="failure",
-                    error_category="argument_validation",
-                )
-                return InvocationValidationFailure(
-                    correlation_id,
-                    tuple(_freeze_mapping(item) for item in error.errors()),
-                    invocation_metadata,
-                )
-            emit_event(ARGUMENTS_VALIDATED, outcome="success")
-
-            async def execute() -> Any:
-                call_arguments = {
-                    name: getattr(validated, name) for name in parameter_model.model_fields
-                }
-                try:
-                    if inspect.iscoroutinefunction(target):
-                        return await target(**call_arguments)
-
-                    def run_sync() -> Any:
-                        with execution_lock:
-                            return target(**call_arguments)
-
-                    return await asyncio.to_thread(run_sync)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as capability_error:
-                    raise _CapabilityExecutionError(capability_error) from capability_error
-
-            started = time.perf_counter()
-            emit_event(INVOCATION_STARTED)
-            try:
-                result = await asyncio.wait_for(execute(), timeout=timeout_value)
-                serialized = _serialize_result(result)
-                emit_event(
-                    INVOCATION_COMPLETED,
-                    outcome="success",
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                )
-                return InvocationSuccess(
-                    correlation_id,
-                    serialized,
-                    metadata=invocation_metadata,
-                )
-            except asyncio.CancelledError:
-                # Preserve caller cancellation but report a capability that
-                # explicitly cooperatively canceled as a typed outcome.
-                current_task = asyncio.current_task()
-                if current_task is not None and current_task.cancelling():
-                    raise
-                emit_event(
-                    INVOCATION_CANCELLED,
-                    outcome="cancelled",
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                )
-                return InvocationCancelled(correlation_id, invocation_metadata)
-            except TimeoutError:
-                assert timeout_value is not None
-                emit_event(
-                    INVOCATION_TIMED_OUT,
-                    level=30,
-                    outcome="timeout",
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                    error_category="timeout",
-                )
-                return InvocationTimeout(correlation_id, timeout_value, invocation_metadata)
-            except _CapabilityExecutionError as error:
-                emit_event(
-                    INVOCATION_FAILED,
-                    level=40,
-                    outcome="failure",
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                    error_category="capability_exception",
-                )
-                return InvocationFailure(
-                    correlation_id,
-                    "Capability execution failed",
-                    error.exception,
-                    invocation_metadata,
-                )
-            except UnsupportedReturnValueError as error:
-                emit_event(
-                    INVOCATION_FAILED,
-                    level=30,
-                    outcome="failure",
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                    error_category="unsupported_return_value",
-                )
-                return InvocationFailure(
-                    correlation_id,
-                    str(error),
-                    error,
-                    invocation_metadata,
-                )
-            except Exception as error:
-                emit_event(
-                    INVOCATION_FAILED,
-                    level=40,
-                    outcome="failure",
-                    duration_ms=(time.perf_counter() - started) * 1000,
-                    error_category="internal_error",
-                )
-                return InvocationFailure(
-                    correlation_id,
-                    "Capability execution failed",
-                    error,
-                    invocation_metadata,
-                )
 
     async def invoke_capability(
         self,
