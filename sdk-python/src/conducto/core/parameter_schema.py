@@ -20,9 +20,9 @@ class ParameterSchemaError(ValueError):
 
 
 def build_parameter_model(
-    agent_type: type[Any],
-    attribute_name: str,
-    method: Callable[..., Any],
+        agent_type: type[Any],
+        attribute_name: str,
+        method: Callable[..., Any],
 ) -> type[BaseModel]:
     """Build one strict Pydantic model for a reflected method.
 
@@ -80,9 +80,9 @@ def build_parameter_model(
 
 
 def build_parameter_schema(
-    agent_type: type[Any],
-    attribute_name: str,
-    parameter_model: type[BaseModel],
+        agent_type: type[Any],
+        attribute_name: str,
+        parameter_model: type[BaseModel],
 ) -> dict[str, Any]:
     """Derive JSON schema from an already-created parameter model.
 

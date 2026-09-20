@@ -30,13 +30,13 @@ class ProviderRegistry:
         self._lock = threading.RLock()
 
     def register(
-        self,
-        reference: ModelReference | str,
-        client: ModelProvider,
-        configuration: ModelConfiguration,
-        *,
-        available: bool | Callable[[], bool] = True,
-        replace: bool = False,
+            self,
+            reference: ModelReference | str,
+            client: ModelProvider,
+            configuration: ModelConfiguration,
+            *,
+            available: bool | Callable[[], bool] = True,
+            replace: bool = False,
     ) -> None:
         """Register a provider client for a model reference.
 

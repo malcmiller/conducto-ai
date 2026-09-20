@@ -118,10 +118,10 @@ class RunConfig:
     def __post_init__(self) -> None:
         object.__setattr__(self, "model", normalize_reference(self.model))
         if self.timeout is not None and (
-            isinstance(self.timeout, bool)
-            or not isinstance(self.timeout, (int, float))
-            or not math.isfinite(self.timeout)
-            or self.timeout <= 0
+                isinstance(self.timeout, bool)
+                or not isinstance(self.timeout, (int, float))
+                or not math.isfinite(self.timeout)
+                or self.timeout <= 0
         ):
             raise ValueError("Run timeout must be a finite positive number")
         validate_metadata(self.metadata)

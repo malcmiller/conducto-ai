@@ -220,7 +220,7 @@ class AgentRegistry:
 
 
 def routing_prompt_context(routing: list[dict[str, Any]]) -> str:
-    """Render one routing metadata snapshot as prompt-safe context."""
+    """Render one routing metadata snapshot as a prompt-safe context."""
     payload = json.dumps(routing, ensure_ascii=True, sort_keys=True)
     payload = payload.replace("[", "\\u005b").replace("]", "\\u005d")
     if not routing:

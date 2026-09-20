@@ -48,15 +48,15 @@ class ModelResolver:
         self.provider_registry = provider_registry
 
     def resolve_binding(
-        self,
-        *,
-        agent_id: str,
-        agent_config: AgentModelConfig,
-        run_config: RunConfig,
-        runtime_config: RuntimeConfig,
-        policy: ModelPolicy | None,
-        call_override: ModelReference | str | None = None,
-        required_capabilities: frozenset[str] = frozenset(),
+            self,
+            *,
+            agent_id: str,
+            agent_config: AgentModelConfig,
+            run_config: RunConfig,
+            runtime_config: RuntimeConfig,
+            policy: ModelPolicy | None,
+            call_override: ModelReference | str | None = None,
+            required_capabilities: frozenset[str] = frozenset(),
     ) -> _ResolvedModelBinding | None:
         """Resolve the best available model binding for an invocation.
 
@@ -70,11 +70,11 @@ class ModelResolver:
             required_capabilities: Capabilities required by the invocation.
 
         Returns:
-            The resolved binding for the selected model, if one is available.
+            The resolved binding for the selected model if one is available.
 
         Raises:
             MissingModelDefaultError: If a model is required but unavailable.
-            ModelOverrideDeniedError: If the selected model fails the policy hook.
+            ModelOverrideDeniedError: If the selected model fails, the policy hook.
             IncompatibleProviderCapabilitiesError: If the provider lacks required features.
         """
         call_reference = normalize_reference(call_override)
@@ -119,13 +119,13 @@ class ModelResolver:
         )
 
     def resolve_for_call_binding(
-        self,
-        context: RunContext,
-        override: ModelReference | str | None,
-        *,
-        runtime_config: RuntimeConfig,
-        policy: ModelPolicy | None,
-        required_capabilities: frozenset[str] = frozenset(),
+            self,
+            context: RunContext,
+            override: ModelReference | str | None,
+            *,
+            runtime_config: RuntimeConfig,
+            policy: ModelPolicy | None,
+            required_capabilities: frozenset[str] = frozenset(),
     ) -> _ResolvedModelBinding | None:
         """Resolve a model binding using the active invocation context.
 
@@ -160,9 +160,9 @@ class ModelResolver:
 
     @staticmethod
     def validate_capabilities(
-        reference: ModelReference,
-        capabilities: ProviderCapabilities,
-        required: frozenset[str],
+            reference: ModelReference,
+            capabilities: ProviderCapabilities,
+            required: frozenset[str],
     ) -> None:
         """Ensure the provider supports every required capability.
 

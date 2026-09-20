@@ -124,11 +124,11 @@ class Runtime:
     """Compose provider registration, resolution, contexts, and invocation."""
 
     def __init__(
-        self,
-        *,
-        provider_registry: ProviderRegistry | None = None,
-        config: RuntimeConfig | None = None,
-        policy: ModelPolicy | None = None,
+            self,
+            *,
+            provider_registry: ProviderRegistry | None = None,
+            config: RuntimeConfig | None = None,
+            policy: ModelPolicy | None = None,
     ) -> None:
         self._provider_registry = provider_registry or ProviderRegistry()
         self._model_resolver = ModelResolver(self._provider_registry)
@@ -163,7 +163,7 @@ class Runtime:
 
         Args:
             agent: Agent owning the capability.
-            capability_name: Name of the capability to serialize.
+            capability_name: Name of the ability to serialize.
 
         Returns:
             A reentrant lock used for capability-level serialization.
@@ -173,15 +173,15 @@ class Runtime:
             return self._execution_locks.setdefault(key, threading.Lock())
 
     async def invoke(
-        self,
-        agent: BaseAgent,
-        capability: str | Callable[..., Any],
-        arguments: Mapping[str, Any],
-        *,
-        timeout: float | None = None,
-        correlation_id: str = "",
-        model_reference: ModelReference | str | None = None,
-        run_config: RunConfig | None = None,
+            self,
+            agent: BaseAgent,
+            capability: str | Callable[..., Any],
+            arguments: Mapping[str, Any],
+            *,
+            timeout: float | None = None,
+            correlation_id: str = "",
+            model_reference: ModelReference | str | None = None,
+            run_config: RunConfig | None = None,
     ) -> InvocationResult:
         """Invoke a capability through the runtime-owned execution pipeline.
 
@@ -211,15 +211,15 @@ class Runtime:
         )
 
     def create_run_context(
-        self,
-        *,
-        agent_id: str,
-        agent_config: AgentModelConfig | None = None,
-        run_config: RunConfig | None = None,
-        call_override: ModelReference | str | None = None,
-        correlation_id: str = "",
-        run_id: str = "",
-        required_capabilities: frozenset[str] = frozenset(),
+            self,
+            *,
+            agent_id: str,
+            agent_config: AgentModelConfig | None = None,
+            run_config: RunConfig | None = None,
+            call_override: ModelReference | str | None = None,
+            correlation_id: str = "",
+            run_id: str = "",
+            required_capabilities: frozenset[str] = frozenset(),
     ) -> RunContext:
         """Create a new run context for an invocation.
 
@@ -259,13 +259,13 @@ class Runtime:
         )
 
     def resolve_model(
-        self,
-        *,
-        agent_id: str,
-        agent_config: AgentModelConfig,
-        run_config: RunConfig,
-        call_override: ModelReference | str | None = None,
-        required_capabilities: frozenset[str] = frozenset(),
+            self,
+            *,
+            agent_id: str,
+            agent_config: AgentModelConfig,
+            run_config: RunConfig,
+            call_override: ModelReference | str | None = None,
+            required_capabilities: frozenset[str] = frozenset(),
     ) -> ResolvedModel | None:
         """Resolve the model for a run without creating a full run context.
 
@@ -289,13 +289,13 @@ class Runtime:
         return binding.model if binding is not None else None
 
     def _resolve_model_binding(
-        self,
-        *,
-        agent_id: str,
-        agent_config: AgentModelConfig,
-        run_config: RunConfig,
-        call_override: ModelReference | str | None = None,
-        required_capabilities: frozenset[str] = frozenset(),
+            self,
+            *,
+            agent_id: str,
+            agent_config: AgentModelConfig,
+            run_config: RunConfig,
+            call_override: ModelReference | str | None = None,
+            required_capabilities: frozenset[str] = frozenset(),
     ) -> _ResolvedModelBinding | None:
         return self._model_resolver.resolve_binding(
             agent_id=agent_id,
@@ -308,11 +308,11 @@ class Runtime:
         )
 
     def resolve_for_call(
-        self,
-        context: RunContext,
-        override: ModelReference | str | None,
-        *,
-        required_capabilities: frozenset[str] = frozenset(),
+            self,
+            context: RunContext,
+            override: ModelReference | str | None,
+            *,
+            required_capabilities: frozenset[str] = frozenset(),
     ) -> ResolvedModel | None:
         """Resolve a model for the current call using the active run context."""
         binding = self._resolve_for_call_binding(
@@ -323,11 +323,11 @@ class Runtime:
         return binding.model if binding is not None else None
 
     def _resolve_for_call_binding(
-        self,
-        context: RunContext,
-        override: ModelReference | str | None,
-        *,
-        required_capabilities: frozenset[str] = frozenset(),
+            self,
+            context: RunContext,
+            override: ModelReference | str | None,
+            *,
+            required_capabilities: frozenset[str] = frozenset(),
     ) -> _ResolvedModelBinding | None:
         return self._model_resolver.resolve_for_call_binding(
             context,
@@ -338,13 +338,13 @@ class Runtime:
         )
 
     async def complete(
-        self,
-        context: RunContext,
-        messages: Sequence[ChatMessage],
-        *,
-        structured_output: StructuredOutputRequest,
-        model: ModelReference | str | None = None,
-        purpose: str = "model_call",
+            self,
+            context: RunContext,
+            messages: Sequence[ChatMessage],
+            *,
+            structured_output: StructuredOutputRequest,
+            model: ModelReference | str | None = None,
+            purpose: str = "model_call",
     ) -> ModelCallResult:
         """Execute a provider completion from the current run context.
 
@@ -374,9 +374,9 @@ class Runtime:
 
     @staticmethod
     def _validate_capabilities(
-        reference: ModelReference,
-        capabilities: ProviderCapabilities,
-        required: frozenset[str],
+            reference: ModelReference,
+            capabilities: ProviderCapabilities,
+            required: frozenset[str],
     ) -> None:
         ModelResolver.validate_capabilities(reference, capabilities, required)
 

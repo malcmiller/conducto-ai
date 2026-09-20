@@ -73,23 +73,23 @@ timestamps with millisecond precision.
 
 The fields below are emitted when applicable:
 
-| Field               | Description                                                               |
-|---------------------|---------------------------------------------------------------------------|
-| `schema_version`    | Structured event schema version, currently `"1"`.                         |
-| `event`             | Stable, versioned event name.                                             |
-| `outcome`           | One of `success`, `failure`, `timeout`, or `cancelled`.                   |
-| `correlation_id`    | Caller-provided invocation/route ID. If omitted, Conducto creates a UUID. |
-| `agent_id`          | Published local agent name.                                               |
-| `capability_id`     | Published capability name.                                                |
-| `duration_ms`       | Capability execution duration in milliseconds.                            |
-| `error_category`    | Stable category, not exception text.                                      |
-| `provider`          | Selected model provider identifier.                                       |
-| `model_reference`   | Effective model reference.                                                |
+| Field               | Description                                                                    |
+|---------------------|--------------------------------------------------------------------------------|
+| `schema_version`    | Structured event schema version, currently `"1"`.                              |
+| `event`             | Stable, versioned event name.                                                  |
+| `outcome`           | One of `success`, `failure`, `timeout`, or `cancelled`.                        |
+| `correlation_id`    | Caller-provided invocation/route ID. If omitted, Conducto creates a UUID.      |
+| `agent_id`          | Published local agent name.                                                    |
+| `capability_id`     | Published capability name.                                                     |
+| `duration_ms`       | Capability execution duration in milliseconds.                                 |
+| `error_category`    | Stable category, not exception text.                                           |
+| `provider`          | Selected model provider identifier.                                            |
+| `model_reference`   | Effective model reference.                                                     |
 | `resolution_source` | One of `call_override`, `run_override`, `agent_default`, or `runtime_default`. |
-| `agent_count`       | Number of registered or discovered local agents.                          |
-| `input_tokens`      | Prompt/input tokens reported by the provider, when available.            |
-| `output_tokens`     | Completion/output tokens reported by the provider, when available.        |
-| `total_tokens`      | Total tokens reported by the provider, when available.                   |
+| `agent_count`       | Number of registered or discovered local agents.                               |
+| `input_tokens`      | Prompt/input tokens reported by the provider, when available.                  |
+| `output_tokens`     | Completion/output tokens reported by the provider, when available.             |
+| `total_tokens`      | Total tokens reported by the provider, when available.                         |
 
 Stable error categories currently include `target_not_found`,
 `argument_validation`, `timeout`, `capability_exception`,

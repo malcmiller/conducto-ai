@@ -1,6 +1,8 @@
 # `conducto-ai` (Python SDK)
 
-The **`conducto-ai`** Python SDK is the foundational client and server framework for **Conducto**. It provides runtime reflection, Pydantic-based schema generation, security guardrails, and A2A (Agent2Agent) protocol transport for Python-based agents.
+The **`conducto-ai`** Python SDK is the foundational client and server framework for **Conducto**. It provides runtime
+reflection, Pydantic-based schema generation, security guardrails, and A2A (Agent2Agent) protocol transport for
+Python-based agents.
 
 Agent Cards are generated against the pinned **A2A Agent Card specification
 0.3.0** (`A2A_AGENT_CARD_SPEC_VERSION`). Use
@@ -15,14 +17,13 @@ standard `AgentSkill` object.
 ## 🛠️ Requirements & Tooling
 
 * **Python:** 3.12+
-* **Package & Project Manager:** [`uv`](https://github.com/astral-sh/uv?utm_source=gemini) (recommended) or `poetry` / `pip`
+* **Package & Project Manager:** [`uv`](https://github.com/astral-sh/uv?utm_source=gemini) (recommended) or `poetry` /
+  `pip`
 * **Core Dependencies:**
 * `pydantic-ai` for dynamic model execution and structured outputs
 * `fastapi` & `uvicorn` for hosting JSON-RPC / Agent Card endpoints
 * `httpx` for mTLS client transport
 * `authlib` & `cryptography` for OAuth 2.0 OBO token exchange and ECDSA signatures
-
-
 
 ---
 
@@ -200,30 +201,35 @@ CI failure locally.
 `windows-latest`.
 
 1. **Install dependencies (including dev tools), from the lockfile:**
+
 ```bash
 uv sync --locked --group dev
 
 ```
 
 2. **Format check:**
+
 ```bash
 uv run ruff format --check .
 
 ```
 
 3. **Lint:**
+
 ```bash
 uv run ruff check .
 
 ```
 
 4. **Static type-check:**
+
 ```bash
 uv run mypy src
 
 ```
 
 5. **Unit & schema/golden-fixture tests:**
+
 ```bash
 uv run pytest -m "not acceptance"
 
@@ -231,12 +237,14 @@ uv run pytest -m "not acceptance"
 
 6. **Milestone 1 quick-start acceptance suite** (the stable, story-level gate
    for `@a2a_agent` / `@a2a_capability` / `get_agent_card()` / `OrchestratorAgent`):
+
 ```bash
 uv run pytest -m acceptance
 
 ```
 
 7. **Build the package:**
+
 ```bash
 uv build
 
@@ -244,6 +252,7 @@ uv build
 
 8. **Installed-wheel smoke test** (verifies the *built artifact* imports and
    runs the quick-start flow with no dev dependencies on the path):
+
 ```bash
 wheel=$(ls dist/*.whl)
 uv run --no-project --with "$wheel" python scripts/smoke_test.py
@@ -252,8 +261,8 @@ uv run --no-project --with "$wheel" python scripts/smoke_test.py
 
 ### Continuous Integration
 
-Pull requests and pushes to `main` run a single required check named
-**`Python CI (required)`**. It aggregates: formatting, linting, `mypy`,
+Pull requests and pushes to `main` run a single required check named **`Python CI (required)`**. It aggregates:
+formatting, linting, `mypy`,
 unit/schema tests, and package build + installed-wheel smoke tests across
 the full OS/Python matrix, plus the Milestone 1 acceptance suite across the
 OS matrix (Python 3.12 only). The check still reports (as a fast no-op

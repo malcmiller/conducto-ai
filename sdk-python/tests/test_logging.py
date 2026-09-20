@@ -22,8 +22,8 @@ from conducto import (
 )
 
 
-def _event_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
-    return [record for record in caplog.records if record.name == "conducto.events"]
+def _event_records(catalog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in catalog.records if record.name == "conducto.events"]
 
 
 @contextmanager
@@ -40,8 +40,8 @@ def _saved_logging_state() -> Iterator[tuple[logging.Logger, logging.Logger]]:
         yield logger, sensitive_logger
     finally:
         for active_logger, handlers in (
-            (logger, original_handlers),
-            (sensitive_logger, original_sensitive_handlers),
+                (logger, original_handlers),
+                (sensitive_logger, original_sensitive_handlers),
         ):
             for handler in tuple(active_logger.handlers):
                 if getattr(handler, "_conducto_owned", False) or handler not in handlers:
@@ -111,14 +111,14 @@ def test_configure_logging_replaces_only_owned_handler() -> None:
         assert sum(getattr(item, "_conducto_owned", False) for item in logger.handlers) == 1
 
 
-def test_default_events_redact_payloads_and_exceptions(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level(logging.INFO, logger="conducto"):
+def test_default_events_redact_payloads_and_exceptions(catalog: pytest.LogCaptureFixture) -> None:
+    with catalog.at_level(logging.INFO, logger="conducto"):
         emit_event(
             "conducto.test.v1",
             payload={"token": "secret-token", "prompt": "sensitive prompt"},
         )
 
-    record = _event_records(caplog)[0]
+    record = _event_records(catalog)[0]
     assert not hasattr(record, "payload")
     assert record.exc_info is None
     assert record.exc_text is None
@@ -163,7 +163,7 @@ def test_opted_in_payload_isolated_to_sensitive_handler() -> None:
 
 
 def test_concurrent_async_and_sync_invocations_keep_context_isolated(
-    caplog: pytest.LogCaptureFixture,
+        catalog: pytest.LogCaptureFixture,
 ) -> None:
     @a2a_agent(name="ContextAgent", version="1.0", description="Tests context.")
     class ContextAgent(BaseAgent):
@@ -184,25 +184,25 @@ def test_concurrent_async_and_sync_invocations_keep_context_isolated(
             orchestrator.invoke("ContextAgent", "async", {"value": "two"}, correlation_id="two"),
         )
 
-    with caplog.at_level(logging.DEBUG, logger="conducto"):
+    with catalog.at_level(logging.DEBUG, logger="conducto"):
         asyncio.run(exercise())
 
     completed = [
         record
-        for record in _event_records(caplog)
+        for record in _event_records(catalog)
         if getattr(record, "event", None) == "conducto.capability.invocation_completed.v1"
     ]
     assert {
-        (getattr(record, "correlation_id", None), getattr(record, "capability_id", None))
-        for record in completed
-    } == {
-        ("one", "sync"),
-        ("two", "async"),
-    }
+               (getattr(record, "correlation_id", None), getattr(record, "capability_id", None))
+               for record in completed
+           } == {
+               ("one", "sync"),
+               ("two", "async"),
+           }
 
 
 def test_concurrent_model_overrides_keep_provenance_isolated(
-    caplog: pytest.LogCaptureFixture,
+        catalog: pytest.LogCaptureFixture,
 ) -> None:
     @a2a_agent(name="ModelAgent", version="1.0", description="Tests model provenance.")
     class ModelAgent(BaseAgent):
@@ -228,30 +228,30 @@ def test_concurrent_model_overrides_keep_provenance_isolated(
             ),
         )
 
-    with caplog.at_level(logging.DEBUG, logger="conducto"):
+    with catalog.at_level(logging.DEBUG, logger="conducto"):
         asyncio.run(exercise())
 
     models = [
         record
-        for record in _event_records(caplog)
+        for record in _event_records(catalog)
         if getattr(record, "event", None) == "conducto.model.selected.v1"
     ]
     assert {
-        (
-            getattr(record, "correlation_id", None),
-            getattr(record, "provider", None),
-            getattr(record, "model_reference", None),
-            getattr(record, "resolution_source", None),
-        )
-        for record in models
-    } == {
-        ("first-correlation", "first", "model-one", "call_override"),
-        ("second-correlation", "second", "model-two", "call_override"),
-    }
+               (
+                   getattr(record, "correlation_id", None),
+                   getattr(record, "provider", None),
+                   getattr(record, "model_reference", None),
+                   getattr(record, "resolution_source", None),
+               )
+               for record in models
+           } == {
+               ("first-correlation", "first", "model-one", "call_override"),
+               ("second-correlation", "second", "model-two", "call_override"),
+           }
 
     discovered = [
         record
-        for record in _event_records(caplog)
+        for record in _event_records(catalog)
         if getattr(record, "event", None) == "conducto.agent.discovered.v1"
     ]
     assert {getattr(record, "correlation_id", None) for record in discovered} == {

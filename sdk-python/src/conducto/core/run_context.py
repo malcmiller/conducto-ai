@@ -104,7 +104,7 @@ class _ModelCallRecorder:
         self._lock = threading.Lock()
 
     def append(self, call: ModelCallProvenance) -> None:
-        """Record one model call in call-order sequence."""
+        """Record one model call in a call-order sequence."""
         with self._lock:
             self._calls.append(call)
 
@@ -202,10 +202,10 @@ class InvocationMetadata:
         }
 
     def with_model_calls(
-        self,
-        *groups: Sequence[ModelCallProvenance],
+            self,
+            *groups: Sequence[ModelCallProvenance],
     ) -> InvocationMetadata:
-        """Return a copy of the metadata with additional model call provenance.
+        """Return a copy of the metadata with an additional model call provenance.
 
         Args:
             *groups: Sequences of model-call provenance records to append.
@@ -217,8 +217,8 @@ class InvocationMetadata:
         return replace(self, usage=aggregate_usage(calls), model_calls=calls)
 
     def with_prior_model_calls(
-        self,
-        calls: Sequence[ModelCallProvenance],
+            self,
+            calls: Sequence[ModelCallProvenance],
     ) -> InvocationMetadata:
         """Return a copy with earlier model calls prepended to this metadata.
 

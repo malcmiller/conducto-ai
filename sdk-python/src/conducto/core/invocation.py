@@ -65,8 +65,8 @@ class _CapabilityExecutionError(Exception):
 
 
 def _resolve_capability(
-    agent: BaseAgent,
-    capability: str | Callable[..., Any],
+        agent: BaseAgent,
+        capability: str | Callable[..., Any],
 ) -> tuple[str, RegisteredMethod] | None:
     if isinstance(capability, str):
         registered = agent.capabilities.get(capability)
@@ -79,9 +79,9 @@ def _resolve_capability(
 
     bound_instance = getattr(capability, "__self__", None)
     if (
-        bound_instance is not None
-        and bound_instance is not agent
-        and bound_instance is not type(agent)
+            bound_instance is not None
+            and bound_instance is not agent
+            and bound_instance is not type(agent)
     ):
         return None
     requested_function = getattr(capability, "__func__", capability)
@@ -107,15 +107,15 @@ def _validated_timeout(timeout: float | None) -> float | None:
 
 
 async def invoke_agent(
-    runtime: Runtime,
-    agent: BaseAgent,
-    capability: str | Callable[..., Any],
-    arguments: Mapping[str, Any],
-    *,
-    timeout: float | None = None,
-    correlation_id: str = "",
-    model_reference: ModelReference | str | None = None,
-    run_config: RunConfig | None = None,
+        runtime: Runtime,
+        agent: BaseAgent,
+        capability: str | Callable[..., Any],
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        correlation_id: str = "",
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
 ) -> InvocationResult:
     """Execute one capability through the shared runtime-owned pipeline."""
     if not isinstance(agent, BaseAgent):

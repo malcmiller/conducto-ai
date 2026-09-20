@@ -77,7 +77,7 @@ class InvocationTimeout:
 
 @dataclass(frozen=True, slots=True)
 class InvocationCancelled:
-    """Envelope for a cancelled capability invocation.
+    """Envelope for a canceled capability invocation.
 
     Attributes:
         correlation_id: Correlation identifier shared with the invocation.
@@ -106,12 +106,12 @@ class InvocationFailure:
 
 
 InvocationResult: TypeAlias = (
-    InvocationSuccess
-    | InvocationValidationFailure
-    | InvocationTargetNotFound
-    | InvocationTimeout
-    | InvocationCancelled
-    | InvocationFailure
+        InvocationSuccess
+        | InvocationValidationFailure
+        | InvocationTargetNotFound
+        | InvocationTimeout
+        | InvocationCancelled
+        | InvocationFailure
 )
 
 

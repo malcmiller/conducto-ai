@@ -71,8 +71,8 @@ def test_model_resolution_precedence_and_immutable_configuration() -> None:
     )
 
     assert (
-        runtime_context.model
-        and runtime_context.model.source is ModelResolutionSource.RUNTIME_DEFAULT
+            runtime_context.model
+            and runtime_context.model.source is ModelResolutionSource.RUNTIME_DEFAULT
     )
     assert agent_context.model and agent_context.model.source is ModelResolutionSource.AGENT_DEFAULT
     assert run_context.model and run_context.model.source is ModelResolutionSource.RUN_OVERRIDE

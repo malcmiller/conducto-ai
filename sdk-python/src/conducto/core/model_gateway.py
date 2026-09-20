@@ -45,8 +45,8 @@ class ModelGatewayCollection:
     _context: RunContext = field(repr=False, compare=False)
 
     def require(
-        self,
-        reference: ModelReference | str | None = None,
+            self,
+            reference: ModelReference | str | None = None,
     ) -> ModelGateway:
         """Resolve and return a model gateway for the active invocation.
 
@@ -75,10 +75,10 @@ class ModelGateway:
     _reference: ModelReference | str | None = field(default=None, repr=False)
 
     async def complete(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        structured_output: StructuredOutputRequest,
+            self,
+            messages: Sequence[ChatMessage],
+            *,
+            structured_output: StructuredOutputRequest,
     ) -> ModelCallResult:
         """Execute a provider call through the active runtime context.
 
@@ -102,10 +102,10 @@ class ModelGateway:
             self._context._invocation_state.end_model_call(task)
 
     async def complete_typed(
-        self,
-        messages: Sequence[ChatMessage],
-        *,
-        response_type: type[ModelResponseT],
+            self,
+            messages: Sequence[ChatMessage],
+            *,
+            response_type: type[ModelResponseT],
     ) -> ModelResponseT:
         """Execute a provider call and validate a typed structured response.
 
@@ -135,13 +135,13 @@ class ModelGateway:
 
 
 async def complete_model_call(
-    runtime: Runtime,
-    context: RunContext,
-    messages: Sequence[ChatMessage],
-    *,
-    structured_output: StructuredOutputRequest,
-    model: ModelReference | str | None = None,
-    purpose: str = "model_call",
+        runtime: Runtime,
+        context: RunContext,
+        messages: Sequence[ChatMessage],
+        *,
+        structured_output: StructuredOutputRequest,
+        model: ModelReference | str | None = None,
+        purpose: str = "model_call",
 ) -> ModelCallResult:
     """Resolve and execute one provider call without mutating the run context."""
     required = frozenset({"structured_output"}) if structured_output.json_schema else frozenset()
@@ -170,9 +170,9 @@ async def complete_model_call(
         retries=binding.configuration.retries,
     )
     with log_context(
-        correlation_id=context.correlation_id,
-        run_id=context.run_id,
-        agent_id=context.agent_id,
+            correlation_id=context.correlation_id,
+            run_id=context.run_id,
+            agent_id=context.agent_id,
     ):
         emit_event(
             MODEL_SELECTED,

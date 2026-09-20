@@ -42,30 +42,30 @@ class _RegistrationHost(Protocol):
     def _resolved_attributes(self) -> list[tuple[str, Any]]: ...
 
     def _build_parameter_model(
-        self,
-        attribute_name: str,
-        method: Callable[..., Any],
+            self,
+            attribute_name: str,
+            method: Callable[..., Any],
     ) -> type[BaseModel]: ...
 
     def _resolve_export_metadata(
-        self,
-        attribute_name: str,
-        method: Callable[..., Any],
-        metadata: ExportMetadata | None,
+            self,
+            attribute_name: str,
+            method: Callable[..., Any],
+            metadata: ExportMetadata | None,
     ) -> ExportMetadata | None: ...
 
     def _add_export(
-        self,
-        registry: dict[str, RegisteredMethod],
-        export_name: str,
-        method: RegisteredMethod,
-        *,
-        export_kind: str,
+            self,
+            registry: dict[str, RegisteredMethod],
+            export_name: str,
+            method: RegisteredMethod,
+            *,
+            export_kind: str,
     ) -> None: ...
 
 
 def register_decorated_methods(
-    agent: _RegistrationHost,
+        agent: _RegistrationHost,
 ) -> tuple[
     dict[str, RegisteredMethod],
     dict[str, RegisteredMethod],
@@ -187,9 +187,9 @@ def resolve_agent_metadata(agent_type: type[Any]) -> AgentMetadata:
 
 
 def resolve_export_metadata(
-    attribute_name: str,
-    method: Callable[..., Any],
-    metadata: ExportMetadata | None,
+        attribute_name: str,
+        method: Callable[..., Any],
+        metadata: ExportMetadata | None,
 ) -> ExportMetadata | None:
     """Fill omitted export fields from the method declaration.
 
@@ -211,12 +211,12 @@ def resolve_export_metadata(
 
 
 def add_export(
-    agent_type: type[Any],
-    registry: dict[str, RegisteredMethod],
-    export_name: str,
-    method: RegisteredMethod,
-    *,
-    export_kind: str,
+        agent_type: type[Any],
+        registry: dict[str, RegisteredMethod],
+        export_name: str,
+        method: RegisteredMethod,
+        *,
+        export_kind: str,
 ) -> None:
     """Add an export while preserving duplicate-name diagnostics.
 
