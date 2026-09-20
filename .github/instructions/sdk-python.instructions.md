@@ -43,19 +43,22 @@ Apply these instructions to every change under `sdk-python/`.
 
 ## Required validation
 
-Run commands from `sdk-python/` after code changes. Do not consider the work complete until all
-applicable commands pass without errors or warnings:
+These commands are mandatory completion criteria, not suggestions. Run them from `sdk-python/`
+after every Python code change. Do not consider the work complete until all applicable commands
+pass without errors or warnings:
 
 ```bash
 uv run ruff format .
 uv run ruff format --check .
 uv run ruff check .
-uv run mypy src
+uv run mypy src examples scripts tests/acceptance
 uv run pytest
 ```
 
 - Run the smallest relevant tests while developing, followed by the full commands above before
   completion.
+- From the repository root, also run `git diff --check`, inspect the complete diff, and use
+  `git status --short` to identify every changed or untracked file.
 - Resolve all Ruff, mypy, test, and available IDE/code-inspection errors and warnings in files
   touched by the change.
 - Do not suppress an inspection, add `noqa`, weaken a type, or exclude a file merely to make a
@@ -63,6 +66,7 @@ uv run pytest
   and document why it is necessary.
 - If a required command cannot run because of an environment or tooling limitation, report the
   exact command and blocker; do not claim validation passed.
+- In the final response, list every required validation command that ran and whether it passed.
 
 ## Packaging changes
 
