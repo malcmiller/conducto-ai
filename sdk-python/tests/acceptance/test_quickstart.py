@@ -146,8 +146,7 @@ def test_quickstart_success_path_has_typed_immutable_envelope_and_provenance() -
         }
         assert dataclasses.is_dataclass(result)
         with pytest.raises(dataclasses.FrozenInstanceError):
-            # noinspection dataclass
-            result.correlation_id = "mutated"
+            setattr(result, "correlation_id", "mutated") # noqa: B010
         assert result.metadata is not None
         assert result.metadata.correlation_id == "quickstart-provenance"
         assert [(call.purpose, call.model_reference) for call in result.metadata.model_calls] == [
