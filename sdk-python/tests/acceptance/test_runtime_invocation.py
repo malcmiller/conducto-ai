@@ -33,6 +33,17 @@ from conducto import (
 pytestmark = pytest.mark.acceptance
 
 
+def _inspect_current_model() -> dict[str, str]:
+    """Return the model facts exposed by the active run context."""
+    context = require_run_context()
+    assert context.model is not None
+    return {
+        "reference": str(context.model.reference),
+        "provider": context.model.provider,
+        "source": context.model.source.value,
+    }
+
+
 class AuditReportDraft(BaseModel):
     report: str
 
@@ -210,13 +221,7 @@ def test_model_resolution_precedence_uses_public_configuration_types() -> None:
     class ResolutionAgent(BaseAgent):
         @a2a_capability(name="inspect", description="Reports the current model.")
         def inspect(self) -> dict[str, str]:
-            context = require_run_context()
-            assert context.model is not None
-            return {
-                "reference": str(context.model.reference),
-                "provider": context.model.provider,
-                "source": context.model.source.value,
-            }
+            return _inspect_current_model()
 
     @a2a_agent(
         name="RuntimeDefaultAgent",
@@ -227,13 +232,7 @@ def test_model_resolution_precedence_uses_public_configuration_types() -> None:
     class RuntimeDefaultAgent(BaseAgent):
         @a2a_capability(name="inspect", description="Reports the current model.")
         def inspect(self) -> dict[str, str]:
-            context = require_run_context()
-            assert context.model is not None
-            return {
-                "reference": str(context.model.reference),
-                "provider": context.model.provider,
-                "source": context.model.source.value,
-            }
+            return _inspect_current_model()
 
     registry = ProviderRegistry()
     for reference in ("runtime", "agent", "run", "call"):

@@ -172,7 +172,7 @@ class ES256Verifier:
         max_lifetime_seconds: int = MAX_LIFETIME_SECONDS,
         clock_skew_seconds: int = MAX_CLOCK_SKEW_SECONDS,
     ) -> None:
-        """Configure trusted issuer, audience, time bounds, and key resolver."""
+        """Configure a trusted issuer, audience, time bounds, and key resolver."""
         if max_lifetime_seconds <= 0 or max_lifetime_seconds > MAX_LIFETIME_SECONDS:
             raise ValueError("invalid maximum token lifetime")
         if clock_skew_seconds < 0 or clock_skew_seconds > MAX_CLOCK_SKEW_SECONDS:

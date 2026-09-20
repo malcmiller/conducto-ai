@@ -106,7 +106,7 @@ class SecurityPipeline:
             approved_approval_id: Approval ID used by an approved resume.
 
         Returns:
-            A typed allow, approval-required, or authorization-failure result.
+            A typed allowed, approval-required, or authorization-failure result.
         """
         guardrails = discover_guardrails(target)
         if approved_approval_id is not None:
@@ -180,7 +180,7 @@ class SecurityPipeline:
             InvalidApprovalStateError: If the challenge is unknown, stale, or
                 bound to a different invocation.
             AuthorizationDeniedError: If the decision denies approval.
-            ApprovalRequiredError: If additional roles must still approve.
+            ApprovalRequiredError: If additional roles must still be approved.
 
         The store performs the compare-and-transition operation, so stale or
         duplicate decisions cannot run business logic twice.

@@ -251,7 +251,7 @@ class InMemoryApprovalStore:
             return challenge
 
     def state(self, approval_id: str) -> ApprovalState:
-        """Return the current state for a challenge.
+        """Return to the current state for a challenge.
 
         Args:
             approval_id: Identifier of the challenge.
@@ -306,7 +306,7 @@ def default_challenge(
         ttl_seconds: Number of seconds before the challenge expires.
         identifiers: Identifier generator used for the challenge ID.
         clock: Clock used for the creation timestamp.
-        required_roles: Roles that must independently approve.
+        required_roles: Roles that must be independently approved.
         principal_subject_id: Principal subject to bind, if overridden.
 
     Returns:

@@ -42,7 +42,8 @@ def _requires_finance_approval(
     _context: AuthorizationContext, arguments: Mapping[str, Any]
 ) -> bool:
     """Require finance approval only for high-value invoices."""
-    return arguments["amount"] >= 5000
+    amount = arguments["amount"]
+    return isinstance(amount, (int, float)) and amount >= 5000
 
 
 @a2a_agent(

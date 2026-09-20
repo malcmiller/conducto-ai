@@ -33,9 +33,9 @@ def test_runtime_activation_is_isolated_between_asyncio_tasks() -> None:
             Runtime.deactivate(token)
 
     async def exercise() -> None:
-        assert await asyncio.gather(observe("first"), observe("second")) == [
+        assert tuple(await asyncio.gather(observe("first"), observe("second"))) == (
             "first",
             "second",
-        ]
+        )
 
     asyncio.run(exercise())

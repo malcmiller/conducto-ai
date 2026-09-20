@@ -214,7 +214,7 @@ def test_deterministic_capability_runs_without_a_model() -> None:
 def test_resolution_failures_happen_before_capability_or_provider_calls() -> None:
     registry = ProviderRegistry()
     incompatible = FakeModel({})
-    incompatible.capabilities = ProviderCapabilities()  # type: ignore[misc]
+    incompatible.capabilities = ProviderCapabilities()
     registry.register(
         "incompatible",
         incompatible,

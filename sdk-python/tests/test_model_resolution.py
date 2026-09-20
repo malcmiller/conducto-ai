@@ -2,7 +2,7 @@
 
 import pytest
 
-from conducto import FakeModel, ModelConfiguration, ProviderCapabilities
+from conducto import FakeModel, ModelConfiguration, ModelPolicyContext, ProviderCapabilities
 from conducto.core.model_config import (
     AgentModelConfig,
     ModelReference,
@@ -33,6 +33,12 @@ def _resolver(*references: str) -> ModelResolver:
 def test_model_resolver_preserves_precedence_and_policy_facts() -> None:
     resolver = _resolver("runtime", "agent", "run", "call")
     observed: list[tuple[ModelReference, ModelResolutionSource]] = []
+
+    def observe_policy(context: ModelPolicyContext) -> bool:
+        """Record the resolved policy facts and allow the call."""
+        observed.append((context.model_reference, context.source))
+        return True
+
     binding = resolver.resolve_binding(
         agent_id="Agent",
         agent_config=AgentModelConfig(
@@ -41,7 +47,7 @@ def test_model_resolver_preserves_precedence_and_policy_facts() -> None:
         ),
         run_config=RunConfig(model="run", caller="caller"),
         runtime_config=RuntimeConfig("runtime"),
-        policy=lambda context: observed.append((context.model_reference, context.source)) is None,
+        policy=observe_policy,
         call_override="call",
     )
 
@@ -53,7 +59,7 @@ def test_model_resolver_preserves_precedence_and_policy_facts() -> None:
 def test_model_resolver_denies_policy_and_incompatible_capabilities() -> None:
     registry = ProviderRegistry()
     provider = FakeModel({})
-    provider.capabilities = ProviderCapabilities()  # type: ignore[misc]
+    provider.capabilities = ProviderCapabilities()
     registry.register(
         "model",
         provider,

@@ -24,7 +24,8 @@ from conducto.security import (
 class FixedClock:
     """Deterministic verification clock."""
 
-    def now(self) -> datetime:
+    @staticmethod
+    def now() -> datetime:
         """Return the fixed contract timestamp."""
         return datetime(2026, 1, 1, tzinfo=UTC)
 
