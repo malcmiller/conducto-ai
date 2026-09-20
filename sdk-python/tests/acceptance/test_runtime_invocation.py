@@ -8,20 +8,25 @@ import pytest
 from pydantic import BaseModel
 
 from conducto import (
+    AgentModelConfig,
     BaseAgent,
     ChatMessage,
     FakeModel,
     InvocationSuccess,
     InvocationTimeout,
     ModelConfiguration,
+    ModelRequirement,
+    ModelResolutionSource,
     NoActiveRunContextError,
     OrchestratorAgent,
     ProviderRegistry,
     RunConfig,
     Runtime,
+    RuntimeConfig,
     Usage,
     a2a_agent,
     a2a_capability,
+    get_run_context,
     require_run_context,
 )
 
@@ -139,8 +144,14 @@ def test_direct_model_backed_capability_call_fails_without_runtime_context() -> 
 def test_concurrent_standalone_and_orchestrated_runs_are_isolated() -> None:
     async def exercise() -> None:
         runtime, _router, _worker = _runtime()
-        first = FakeModel({"report": "first"})
-        second = FakeModel({"report": "second"})
+        first = FakeModel(
+            {"report": "first"},
+            usage=Usage(input_tokens=1, output_tokens=2, total_tokens=3),
+        )
+        second = FakeModel(
+            {"report": "second"},
+            usage=Usage(input_tokens=4, output_tokens=5, total_tokens=9),
+        )
         runtime.provider_registry.register(
             "first",
             first,
@@ -178,10 +189,143 @@ def test_concurrent_standalone_and_orchestrated_runs_are_isolated() -> None:
         assert routed.metadata is not None
         assert standalone.metadata.model_reference == "first"
         assert routed.metadata.model_reference == "second"
+        assert standalone.metadata.usage == Usage(input_tokens=1, output_tokens=2, total_tokens=3)
+        assert routed.metadata.usage == Usage(input_tokens=9, output_tokens=7, total_tokens=16)
         assert [call.model_reference for call in routed.metadata.model_calls] == [
             "router",
             "second",
         ]
+
+    asyncio.run(exercise())
+
+
+def test_model_resolution_precedence_uses_public_configuration_types() -> None:
+    @a2a_agent(
+        name="ResolutionAgent",
+        version="1.0",
+        description="Reports effective model resolution.",
+        default_model="agent",
+        model_required=True,
+    )
+    class ResolutionAgent(BaseAgent):
+        @a2a_capability(name="inspect", description="Reports the current model.")
+        def inspect(self) -> dict[str, str]:
+            context = require_run_context()
+            assert context.model is not None
+            return {
+                "reference": str(context.model.reference),
+                "provider": context.model.provider,
+                "source": context.model.source.value,
+            }
+
+    @a2a_agent(
+        name="RuntimeDefaultAgent",
+        version="1.0",
+        description="Uses only the runtime default.",
+        model_required=True,
+    )
+    class RuntimeDefaultAgent(BaseAgent):
+        @a2a_capability(name="inspect", description="Reports the current model.")
+        def inspect(self) -> dict[str, str]:
+            context = require_run_context()
+            assert context.model is not None
+            return {
+                "reference": str(context.model.reference),
+                "provider": context.model.provider,
+                "source": context.model.source.value,
+            }
+
+    registry = ProviderRegistry()
+    for reference in ("runtime", "agent", "run", "call"):
+        registry.register(
+            reference,
+            FakeModel({"unused": reference}),
+            ModelConfiguration(provider=f"{reference}-provider", model=f"{reference}-model"),
+        )
+    runtime = Runtime(provider_registry=registry, config=RuntimeConfig(default_model="runtime"))
+
+    async def exercise() -> None:
+        runtime_default = await runtime.invoke(RuntimeDefaultAgent(), "inspect", {})
+        agent_default = await runtime.invoke(ResolutionAgent(), "inspect", {})
+        run_override = await runtime.invoke(
+            ResolutionAgent(),
+            "inspect",
+            {},
+            run_config=RunConfig(model="run"),
+        )
+        call_override = await runtime.invoke(
+            ResolutionAgent(),
+            "inspect",
+            {},
+            run_config=RunConfig(model="run"),
+            model_reference="call",
+        )
+
+        assert isinstance(runtime_default, InvocationSuccess)
+        assert isinstance(agent_default, InvocationSuccess)
+        assert isinstance(run_override, InvocationSuccess)
+        assert isinstance(call_override, InvocationSuccess)
+        assert runtime_default.value == {
+            "reference": "runtime",
+            "provider": "runtime-provider",
+            "source": ModelResolutionSource.RUNTIME_DEFAULT.value,
+        }
+        assert agent_default.value == {
+            "reference": "agent",
+            "provider": "agent-provider",
+            "source": ModelResolutionSource.AGENT_DEFAULT.value,
+        }
+        assert run_override.value == {
+            "reference": "run",
+            "provider": "run-provider",
+            "source": ModelResolutionSource.RUN_OVERRIDE.value,
+        }
+        assert call_override.value == {
+            "reference": "call",
+            "provider": "call-provider",
+            "source": ModelResolutionSource.CALL_OVERRIDE.value,
+        }
+
+    asyncio.run(exercise())
+
+
+def test_deterministic_capability_executes_without_model_registration() -> None:
+    @a2a_agent(
+        name="DeterministicAcceptanceAgent",
+        version="1.0",
+        description="Has a deterministic capability despite an agent model requirement.",
+        model_required=True,
+    )
+    class DeterministicAcceptanceAgent(BaseAgent):
+        @a2a_capability(
+            name="add",
+            description="Adds one without model access.",
+            model_required=False,
+        )
+        def add(self, value: int) -> dict[str, object]:
+            context = get_run_context()
+            assert context is not None
+            return {
+                "model": context.model is None,
+                "value": value + 1,
+            }
+
+    async def exercise() -> None:
+        result = await Runtime().invoke(
+            DeterministicAcceptanceAgent(
+                agent_config=AgentModelConfig(requirement=ModelRequirement.REQUIRED)
+            ),
+            "add",
+            {"value": 41},
+            correlation_id="deterministic-no-model",
+        )
+
+        assert isinstance(result, InvocationSuccess)
+        assert result.correlation_id == "deterministic-no-model"
+        assert result.value == {"model": True, "value": 42}
+        assert result.metadata is not None
+        assert result.metadata.model_reference is None
+        assert result.metadata.model_calls == ()
 
     asyncio.run(exercise())
 

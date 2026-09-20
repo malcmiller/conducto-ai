@@ -17,9 +17,11 @@ import asyncio
 import io
 import json
 import sys
+from pathlib import Path
 
 
 def main() -> int:
+    import conducto
     from conducto import (
         A2A_AGENT_CARD_SPEC_VERSION,
         BaseAgent,
@@ -32,30 +34,59 @@ def main() -> int:
         configure_logging,
     )
 
-    @a2a_agent(name="SmokeAgent", version="1.0.0", description="Installed-wheel smoke test agent.")
-    class SmokeAgent(BaseAgent):
-        @a2a_capability(name="ping", description="Replies with pong.")
-        def ping(self) -> str:
-            return "pong"
+    source_root = Path(__file__).resolve().parents[1] / "src"
+    imported_from = Path(conducto.__file__ or "").resolve()
+    if imported_from.is_relative_to(source_root):
+        raise AssertionError(f"conducto imported from source checkout: {imported_from}")
 
-    agent = SmokeAgent()
-    card = agent.get_agent_card("https://smoke.conducto.test/a2a")
-    assert card["protocolVersion"] == A2A_AGENT_CARD_SPEC_VERSION
-    assert card["name"] == "SmokeAgent"
+    @a2a_agent(
+        name="SmokeInvoiceAgent",
+        version="1.0.0",
+        description="Installed-wheel invoice smoke test agent.",
+    )
+    class SmokeInvoiceAgent(BaseAgent):
+        @a2a_capability(name="classify", description="Classifies an invoice.")
+        def classify(self, vendor_id: str, amount: float) -> dict[str, object]:
+            return {"vendor_id": vendor_id, "amount": amount, "approved": amount < 1000}
+
+    @a2a_agent(
+        name="SmokeIncidentAgent",
+        version="1.0.0",
+        description="Installed-wheel incident smoke test agent.",
+    )
+    class SmokeIncidentAgent(BaseAgent):
+        @a2a_capability(name="summarize", description="Summarizes an incident.")
+        def summarize(self, service: str, severity: int) -> dict[str, object]:
+            return {"service": service, "severity": severity, "priority": severity >= 4}
+
+    agents = (SmokeInvoiceAgent(), SmokeIncidentAgent())
+    cards = [
+        agents[0].get_agent_card("https://smoke.conducto.test/invoice"),
+        agents[1].get_agent_card("https://smoke.conducto.test/incident"),
+    ]
+    assert [card["protocolVersion"] for card in cards] == [A2A_AGENT_CARD_SPEC_VERSION] * 2
+    assert [card["name"] for card in cards] == ["SmokeInvoiceAgent", "SmokeIncidentAgent"]
 
     async def invoke() -> None:
         stream = io.StringIO()
         configure_logging(format="json", stream=stream)
         orchestrator = OrchestratorAgent(
             model_provider=FakeModel(
-                {"agent_id": "SmokeAgent", "capability_id": "ping"},
+                {
+                    "agent_id": "SmokeIncidentAgent",
+                    "capability_id": "summarize",
+                    "arguments": {"service": "checkout", "severity": 5},
+                },
             ),
             model_config=ModelConfiguration(provider="fake", model="smoke-model"),
         )
-        orchestrator.register_agent(agent)
-        result = await orchestrator.route("ping", correlation_id="smoke")
+        for agent in agents:
+            orchestrator.register_agent(agent)
+        result = await orchestrator.route("summarize checkout", correlation_id="smoke")
         assert isinstance(result, InvocationSuccess)
-        assert result.value == "pong"
+        assert result.value == {"priority": True, "service": "checkout", "severity": 5}
+        assert result.metadata is not None
+        assert result.metadata.model_calls[0].model_reference == "smoke-model"
         events = [json.loads(line) for line in stream.getvalue().splitlines()]
         assert {(event["event"], event.get("correlation_id")) for event in events} >= {
             ("conducto.model.selected.v1", "smoke"),
@@ -64,7 +95,7 @@ def main() -> int:
 
     asyncio.run(invoke())
 
-    print("Smoke test passed: conducto-ai wheel is importable and functional.")
+    print("Smoke test passed: installed conducto-ai wheel routed a two-agent local flow.")
     return 0
 
 

@@ -1,0 +1,116 @@
+# Conducto Python SDK quick start
+
+This guide proves the Milestone 1 local-agent flow from a clean checkout, using
+only the public `conducto` package API and deterministic `FakeModel` routing.
+No network access, model downloads, or credentials are required.
+
+## 1. Start from a clean checkout
+
+```bash
+git clone https://github.com/malcmiller/conducto-ai.git
+cd conducto-ai/sdk-python
+git status --short
+```
+
+`git status --short` should print nothing before you compare local results with
+CI.
+
+## 2. Install development dependencies
+
+```bash
+uv sync --locked --group dev
+```
+
+## 3. Run the CI-equivalent checks
+
+```bash
+uv run ruff format --check .
+uv run ruff check .
+uv run mypy src examples scripts tests/acceptance
+uv run pytest -m "not acceptance"
+uv run pytest -m acceptance
+```
+
+The acceptance suite exercises this flow:
+
+```text
+request
+  -> model selects one registered agent and capability
+  -> generated arguments are validated
+  -> capability executes
+  -> result is serialized into a typed envelope
+  -> model and invocation provenance share one correlation ID
+```
+
+## 4. Build both distributions
+
+```bash
+rm -rf dist
+uv build
+ls dist
+```
+
+The `dist` directory should contain both a wheel (`.whl`) and source
+distribution (`.tar.gz`).
+
+## 5. Run the example from an installed wheel
+
+Create a clean environment that does not install development dependencies:
+
+```bash
+wheel=$(ls dist/*.whl)
+uv run --no-project --with "$wheel" python examples/quickstart.py
+```
+
+Expected output:
+
+```text
+quickstart result: agent=InvoiceAgent capability=classify_invoice value={"amount": 1250.0, "approved": false, "decision": "review", "vendor_id": "vendor-42"} correlation_id=quickstart-local-001
+```
+
+On Windows PowerShell, use:
+
+```powershell
+$wheel = (Get-ChildItem dist\*.whl | Select-Object -First 1).FullName
+uv run --no-project --with "$wheel" python examples\quickstart.py
+```
+
+## 6. Run the installed-wheel smoke test
+
+```bash
+wheel=$(ls dist/*.whl)
+uv run --no-project --with "$wheel" python scripts/smoke_test.py
+```
+
+PowerShell:
+
+```powershell
+$wheel = (Get-ChildItem dist\*.whl | Select-Object -First 1).FullName
+uv run --no-project --with "$wheel" python scripts\smoke_test.py
+```
+
+The smoke test fails if `conducto` imports from `sdk-python/src` instead of the
+installed wheel.
+
+## What the example demonstrates
+
+`examples/quickstart.py` defines `InvoiceAgent` and `IncidentAgent`, publishes
+deterministic Agent Cards for both, registers them with one `OrchestratorAgent`,
+uses `FakeModel` to select a target capability, validates generated arguments,
+invokes the selected local capability, receives an immutable
+`InvocationSuccess` envelope, and checks structured model/invocation logs under
+one caller-supplied correlation ID.
+
+The quickstart imports SDK names only from the public `conducto` package. It
+does not import `conducto.core`, contact live providers, read credentials, or
+depend on test-only packages.
+
+## Troubleshooting
+
+| Symptom                                                  | Fix                                                                                                                 |
+|----------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| `uv: command not found`                                  | Install `uv` from <https://docs.astral.sh/uv/> and reopen the shell.                                                |
+| `ModuleNotFoundError: conducto`                          | Build the wheel first, then run with `uv run --no-project --with "$wheel" ...`.                                     |
+| Smoke test says `conducto imported from source checkout` | Run the documented `uv run --no-project --with "$wheel"` command instead of activating the development environment. |
+| Acceptance tests fail after Agent Card changes           | Review the generated card diff; Agent Cards are a public wire contract pinned to A2A `0.3.0`.                       |
+| PowerShell does not understand `wheel=$(ls dist/*.whl)`  | Use the PowerShell commands shown above.                                                                            |
