@@ -1,0 +1,26 @@
+{
+  "contract": "conducto.approval+jwt;v1",
+  "key": {
+    "issuer": "approval-authority",
+    "kid": "key-1",
+    "private_scalar_hex": "01"
+  },
+  "claims": {
+    "iss": "approval-authority",
+    "aud": "conducto-runtime",
+    "sub": "approver-1",
+    "iat": 1767225600,
+    "nbf": 1767225600,
+    "exp": 1767225900,
+    "jti": "token-1",
+    "challenge_id": "challenge-1",
+    "task_id": "task-1",
+    "agent_id": "agent-1",
+    "capability_id": "capability-1",
+    "decision": "approve",
+    "required_role": "owner",
+    "policy_version": "policy-7",
+    "ver": "1"
+  },
+  "token_base64": "ZXlKaGJHY2lPaUpGVXpJMU5pSXNJbXRwWkNJNkltdGxlUzB4SWl3aWRIbHdJam9pWTI5dVpIVmpkRzh1WVhCd2NtOTJZV3dyYW5kME8zWXhJbjAuZXlKaFoyVnVkRjlwWkNJNkltRm5aVzUwTFRFaUxDSmhkV1FpT2lKamIyNWtkV04wYnkxeWRXNTBhVzFsSWl3aVkyRndZV0pwYkdsMGVWOXBaQ0k2SW1OaGNHRmlhV3hwZEhrdE1TSXNJbU5vWVd4c1pXNW5aVjlwWkNJNkltTm9ZV3hzWlc1blpTMHhJaXdpWkdWamFYTnBiMjRpT2lKaGNIQnliM1psSWl3aVpYaHdJam94TnpZM01qSTFPVEF3TENKcFlYUWlPakUzTmpjeU1qVTJNREFzSW1semN5STZJbUZ3Y0hKdmRtRnNMV0YxZEdodmNtbDBlU0lzSW1wMGFTSTZJblJ2YTJWdUxURWlMQ0p1WW1ZaU9qRTNOamN5TWpVMk1EQXNJbkJ2YkdsamVWOTJaWEp6YVc5dUlqb2ljRzlzYVdONUxUY2lMQ0p5WlhGMWFYSmxaRjl5YjJ4bElqb2liM2R1WlhJaUxDSnpkV0lpT2lKaGNIQnliM1psY2kweElpd2lkR0Z6YTE5cFpDSTZJblJoYzJzdE1TSXNJblpsY2lJNklqRWlmUS52VVJpNTZPTUVzaG03VWhQMVYxUXZrUy12ZExPYmNQMllXckhENDYxelZuSENJVEd2WmdUOFk0LWxXZm9Hck5PZ25kWG01bkw5bjY0cFVuS1gyWGtaUQ=="
+}

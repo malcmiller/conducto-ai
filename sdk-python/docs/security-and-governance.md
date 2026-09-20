@@ -22,3 +22,20 @@ single-process applications. Production applications own durable persistence,
 distributed locking, authentication, and transport integration. Approval
 payloads intentionally do not contain credentials, raw tokens, claims,
 protected arguments, or tracebacks.
+
+## Portable approval tokens
+
+Approval decisions can cross process boundaries as compact RFC 7515 JWS tokens
+using the pinned `conducto.approval+jwt;v1` type and ES256. Applications own
+private-key custody through `ES256Signer`; runtimes receive only trusted public
+keys through `StaticApprovalKeyResolver` or an application resolver. Configure
+one current signing key and retain overlapping active verification keys during
+rotation. Revoked keys must stop verifying immediately according to the
+application's resolver cache policy.
+
+Keep clocks synchronized. The verifier uses injected UTC time, bounded skew,
+and a maximum 15-minute lifetime. Replay stores must be durable and provide an
+atomic consume operation for `jti`; the challenge store must provide an atomic
+approved-to-completed transition. Tokens, private keys, complete claims, and
+protected capability arguments must not be logged or included in result
+envelopes.

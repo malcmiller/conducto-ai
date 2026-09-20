@@ -308,6 +308,56 @@ class Runtime:
                 error.reason_code,
             )
 
+    async def resume_approval_token(
+        self,
+        agent: BaseAgent,
+        capability: str | Callable[..., Any],
+        arguments: Mapping[str, Any],
+        token: str,
+        *,
+        authorization: AuthorizationContext,
+    ) -> InvocationResult:
+        """Verify a portable approval token before resuming one invocation."""
+        from .invocation import invoke_agent
+
+        if self.security_pipeline.token_service is None:
+            from .invocation_results import InvocationAuthorizationFailure
+
+            return InvocationAuthorizationFailure(
+                authorization.correlation_id,
+                "invalid_state_transition",
+            )
+        claims = self.security_pipeline.token_service.verifier.verify(token)
+
+        async def execute() -> InvocationResult:
+            return await invoke_agent(
+                self,
+                agent,
+                capability,
+                arguments,
+                correlation_id=authorization.correlation_id,
+                authorization=authorization,
+                security_pipeline=self.security_pipeline,
+                approved_approval_id=claims["challenge_id"],
+            )
+
+        try:
+            return cast(
+                InvocationResult,
+                await self.security_pipeline.resume_token(
+                    token,
+                    execute,
+                    context=authorization,
+                ),
+            )
+        except SecurityError as error:
+            from .invocation_results import InvocationAuthorizationFailure
+
+            return InvocationAuthorizationFailure(
+                authorization.correlation_id,
+                error.reason_code,
+            )
+
     def create_run_context(
         self,
         *,

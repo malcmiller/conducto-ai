@@ -16,6 +16,7 @@ from .approval import (
     IdentifierGenerator,
     default_challenge,
 )
+from .approval_token import ApprovalTokenService
 from .context import AuthorizationContext
 from .errors import (
     ApprovalRequiredError,
@@ -52,6 +53,7 @@ class SecurityPipeline:
         *,
         clock: Clock | None = None,
         identifiers: IdentifierGenerator | None = None,
+        token_service: ApprovalTokenService | None = None,
     ) -> None:
         """Initialize a pipeline with optional approval persistence.
 
@@ -60,10 +62,28 @@ class SecurityPipeline:
                 challenges are returned without persistence.
             clock: Clock used to create challenge timestamps.
             identifiers: Identifier generator used for challenge IDs.
+            token_service: Optional portable-token verifier and consumer.
         """
         self.store = store
         self.clock = clock
         self.identifiers = identifiers
+        self.token_service = token_service
+
+    async def resume_token(
+        self,
+        token: str,
+        execute: Callable[[], Any],
+        *,
+        context: AuthorizationContext,
+    ) -> Any:
+        """Verify and atomically consume a portable approval token."""
+        if self.token_service is None:
+            raise InvalidApprovalStateError("an approval token service is required")
+        return await self.token_service.consume_token_and_resume(
+            token,
+            execute,
+            context=context,
+        )
 
     def check(
         self,

@@ -57,6 +57,7 @@ class ApprovalChallenge:
     display: Mapping[str, str] = field(default_factory=dict)
     required_roles: tuple[str, ...] = ()
     principal_subject_id: str = ""
+    policy_version: str = "1"
 
     def __post_init__(self) -> None:
         """Freeze display metadata so the challenge remains immutable."""

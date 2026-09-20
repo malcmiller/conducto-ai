@@ -152,10 +152,7 @@ async def route_once(
     )
     if isinstance(result, InvocationApprovalRequired):
         challenge = result.challenge
-        print(
-            "approval required: "
-            f"role={challenge.required_role}; granting local demo approval"
-        )
+        print(f"approval required: role={challenge.required_role}; granting local demo approval")
         # Production applications should collect this decision from an authorized approver.
         resumed = await orchestrator.resume_approval(
             challenge.agent_id,
