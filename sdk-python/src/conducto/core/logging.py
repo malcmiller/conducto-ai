@@ -26,6 +26,7 @@ _SENSITIVE_LOGGER_NAME: Final = "conducto.sensitive"
 AGENT_REGISTERED: Final = "conducto.agent.registered.v1"
 AGENT_DISCOVERED: Final = "conducto.agent.discovered.v1"
 MODEL_SELECTED: Final = "conducto.model.selected.v1"
+MODEL_USAGE_RECORDED: Final = "conducto.model.usage_recorded.v1"
 ARGUMENTS_VALIDATED: Final = "conducto.capability.arguments_validated.v1"
 INVOCATION_STARTED: Final = "conducto.capability.invocation_started.v1"
 INVOCATION_COMPLETED: Final = "conducto.capability.invocation_completed.v1"
@@ -58,6 +59,7 @@ _RECORD_FIELDS: Final = (
     "event",
     "outcome",
     "correlation_id",
+    "run_id",
     "agent_id",
     "capability_id",
     "duration_ms",
@@ -66,6 +68,9 @@ _RECORD_FIELDS: Final = (
     "model_reference",
     "resolution_source",
     "agent_count",
+    "input_tokens",
+    "output_tokens",
+    "total_tokens",
 )
 _PACKAGE_LOGGER = logging.getLogger(LOGGER_NAME)
 _PACKAGE_LOGGER.addHandler(logging.NullHandler())
@@ -213,6 +218,7 @@ def configure_logging(
     return handler
 
 
+# noinspection PyShadowingBuiltins
 def _create_handler(
     *,
     format: Literal["json", "development"],

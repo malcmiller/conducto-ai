@@ -3,6 +3,8 @@ import io
 import logging
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -22,6 +24,36 @@ from conducto import (
 
 def _event_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     return [record for record in caplog.records if record.name == "conducto.events"]
+
+
+@contextmanager
+def _saved_logging_state() -> Iterator[tuple[logging.Logger, logging.Logger]]:
+    logger = logging.getLogger("conducto")
+    sensitive_logger = logging.getLogger("conducto.sensitive")
+    original_handlers = tuple(logger.handlers)
+    original_sensitive_handlers = tuple(sensitive_logger.handlers)
+    original_level = logger.level
+    original_propagate = logger.propagate
+    original_sensitive_level = sensitive_logger.level
+    original_sensitive_propagate = sensitive_logger.propagate
+    try:
+        yield logger, sensitive_logger
+    finally:
+        for active_logger, handlers in (
+            (logger, original_handlers),
+            (sensitive_logger, original_sensitive_handlers),
+        ):
+            for handler in tuple(active_logger.handlers):
+                if getattr(handler, "_conducto_owned", False) or handler not in handlers:
+                    active_logger.removeHandler(handler)
+                    handler.close()
+            for handler in handlers:
+                if handler not in active_logger.handlers:
+                    active_logger.addHandler(handler)
+        logger.setLevel(original_level)
+        logger.propagate = original_propagate
+        sensitive_logger.setLevel(original_sensitive_level)
+        sensitive_logger.propagate = original_sensitive_propagate
 
 
 def test_import_does_not_configure_root_logging() -> None:
@@ -68,42 +100,15 @@ def test_json_events_match_golden_fixture() -> None:
 
 
 def test_configure_logging_replaces_only_owned_handler() -> None:
-    logger = logging.getLogger("conducto")
-    sensitive_logger = logging.getLogger("conducto.sensitive")
-    original_handlers = tuple(logger.handlers)
-    original_sensitive_handlers = tuple(sensitive_logger.handlers)
-    original_level = logger.level
-    original_propagate = logger.propagate
-    original_sensitive_level = sensitive_logger.level
-    original_sensitive_propagate = sensitive_logger.propagate
-    external = logging.NullHandler()
-    logger.addHandler(external)
-    try:
+    with _saved_logging_state() as (logger, _sensitive_logger):
+        external = logging.NullHandler()
+        logger.addHandler(external)
         first = configure_logging(stream=io.StringIO())
         second = configure_logging(stream=io.StringIO(), format="json")
         assert first not in logger.handlers
         assert second in logger.handlers
         assert external in logger.handlers
         assert sum(getattr(item, "_conducto_owned", False) for item in logger.handlers) == 1
-    finally:
-        for handler in tuple(logger.handlers):
-            if getattr(handler, "_conducto_owned", False) or handler is external:
-                logger.removeHandler(handler)
-                handler.close()
-        for handler in original_handlers:
-            if handler not in logger.handlers:
-                logger.addHandler(handler)
-        for handler in tuple(sensitive_logger.handlers):
-            if getattr(handler, "_conducto_owned", False):
-                sensitive_logger.removeHandler(handler)
-                handler.close()
-        for handler in original_sensitive_handlers:
-            if handler not in sensitive_logger.handlers:
-                sensitive_logger.addHandler(handler)
-        logger.setLevel(original_level)
-        logger.propagate = original_propagate
-        sensitive_logger.setLevel(original_sensitive_level)
-        sensitive_logger.propagate = original_sensitive_propagate
 
 
 def test_default_events_redact_payloads_and_exceptions(caplog: pytest.LogCaptureFixture) -> None:
@@ -137,15 +142,7 @@ def test_sensitive_fields_are_rejected() -> None:
 def test_opted_in_payload_isolated_to_sensitive_handler() -> None:
     normal_stream = io.StringIO()
     sensitive_stream = io.StringIO()
-    logger = logging.getLogger("conducto")
-    sensitive_logger = logging.getLogger("conducto.sensitive")
-    original_handlers = tuple(logger.handlers)
-    original_sensitive_handlers = tuple(sensitive_logger.handlers)
-    original_level = logger.level
-    original_sensitive_level = sensitive_logger.level
-    original_propagate = logger.propagate
-    original_sensitive_propagate = sensitive_logger.propagate
-    try:
+    with _saved_logging_state() as (_logger, sensitive_logger):
         configure_logging(format="json", stream=normal_stream, include_sensitive_data=False)
         sensitive_handler = logging.StreamHandler(sensitive_stream)
         sensitive_handler._conducto_owned = True  # type: ignore[attr-defined]
@@ -163,22 +160,6 @@ def test_opted_in_payload_isolated_to_sensitive_handler() -> None:
 
         assert "secret-token" not in normal_stream.getvalue()
         assert "secret-token" in sensitive_stream.getvalue()
-    finally:
-        for active_logger, handlers in (
-            (logger, original_handlers),
-            (sensitive_logger, original_sensitive_handlers),
-        ):
-            for handler in tuple(active_logger.handlers):
-                if handler not in handlers:
-                    active_logger.removeHandler(handler)
-                    handler.close()
-            for handler in handlers:
-                if handler not in active_logger.handlers:
-                    active_logger.addHandler(handler)
-        logger.setLevel(original_level)
-        logger.propagate = original_propagate
-        sensitive_logger.setLevel(original_sensitive_level)
-        sensitive_logger.propagate = original_sensitive_propagate
 
 
 def test_concurrent_async_and_sync_invocations_keep_context_isolated(
@@ -264,8 +245,8 @@ def test_concurrent_model_overrides_keep_provenance_isolated(
         )
         for record in models
     } == {
-        ("first-correlation", "first", "model-one", "invocation_override"),
-        ("second-correlation", "second", "model-two", "invocation_override"),
+        ("first-correlation", "first", "model-one", "call_override"),
+        ("second-correlation", "second", "model-two", "call_override"),
     }
 
     discovered = [
