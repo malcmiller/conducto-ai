@@ -126,7 +126,11 @@ async def invoke_agent(
     timeout_value = _validated_timeout(timeout)
     correlation_id = correlation_id or runtime.new_correlation_id()
     resolved = _resolve_capability(agent, capability)
-    capability_id = capability if isinstance(capability, str) else capability.__name__
+    capability_id = capability if isinstance(capability, str) else getattr(
+        capability,
+        "__name__",
+        capability.__class__.__name__,
+    )
     agent_id = agent.agent_metadata.name
     if resolved is None:
         with log_context(correlation_id=correlation_id, agent_id=agent_id):

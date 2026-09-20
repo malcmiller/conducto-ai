@@ -5,14 +5,14 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from typing import Any, Literal, TypeVar, cast
+from typing import Any, Literal, TypeVar, cast, overload
 
 _AGENT_METADATA_ATTRIBUTE = "__conducto_agent_metadata__"
 _METHOD_METADATA_ATTRIBUTE = "__conducto_method_metadata__"
 
 ExportKind = Literal["capability", "tool"]
 F = TypeVar("F", bound=Callable[..., Any])
-T = TypeVar("T", bound=type)
+T = TypeVar("T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +63,29 @@ class MethodMetadata:
 
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
+
+
+@overload
+def a2a_agent(
+        cls: T,
+        *,
+        name: str | None = None,
+        version: str = "0.1.0",
+        description: str | None = None,
+        default_model: str | None = None,
+        model_required: bool = False,
+) -> T: ...
+
+
+@overload
+def a2a_agent(
+        *,
+        name: str | None = None,
+        version: str = "0.1.0",
+        description: str | None = None,
+        default_model: str | None = None,
+        model_required: bool = False,
+) -> Callable[[T], T]: ...
 
 
 def a2a_agent(

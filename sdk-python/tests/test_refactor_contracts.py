@@ -38,7 +38,7 @@ def test_registration_constructs_one_parameter_model_per_method(
     calls = 0
     original_create_model = parameter_schema.create_model
 
-    def counting_create_model(*args: object, **kwargs: object) -> Any:
+    def counting_create_model(*args: Any, **kwargs: Any) -> Any:
         nonlocal calls
         calls += 1
         return original_create_model(*args, **kwargs)

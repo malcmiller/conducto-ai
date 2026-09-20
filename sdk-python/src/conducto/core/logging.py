@@ -76,6 +76,13 @@ _PACKAGE_LOGGER = logging.getLogger(LOGGER_NAME)
 _PACKAGE_LOGGER.addHandler(logging.NullHandler())
 
 
+class _ConductoStreamHandler(logging.StreamHandler):
+    """Stream handler tags used by the local Conducto logging facade."""
+
+    _conducto_owned: bool
+    _conducto_include_sensitive_data: bool
+
+
 @contextmanager
 def log_context(**fields: str) -> Iterator[None]:
     """Bind non-sensitive context to all nested Conducto events.
@@ -240,10 +247,10 @@ def _create_handler(
         format: Literal["json", "development"],
         stream: Any,
         include_sensitive_data: bool,
-) -> logging.Handler:
-    handler = logging.StreamHandler(stream if stream is not None else sys.stderr)
-    handler._conducto_owned = True  # type: ignore[attr-defined]
-    handler._conducto_include_sensitive_data = include_sensitive_data  # type: ignore[attr-defined]
+) -> _ConductoStreamHandler:
+    handler = _ConductoStreamHandler(stream if stream is not None else sys.stderr)
+    handler._conducto_owned = True
+    handler._conducto_include_sensitive_data = include_sensitive_data
     handler.setFormatter(JsonFormatter() if format == "json" else DevelopmentFormatter())
     return handler
 

@@ -90,7 +90,7 @@ def validate_metadata(value: Any) -> None:
 class AgentModelConfig:
     """Immutable model policy attached to an agent."""
 
-    default_model: ModelReference | None = None
+    default_model: ModelReference | str | None = None
     requirement: ModelRequirement = ModelRequirement.NONE
     required_capabilities: frozenset[str] = frozenset()
 
@@ -107,7 +107,7 @@ class AgentModelConfig:
 class RunConfig:
     """Immutable per-run override and policy input."""
 
-    model: ModelReference | None = None
+    model: ModelReference | str | None = None
     timeout: float | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
     caller: str | None = None
@@ -132,7 +132,7 @@ class RunConfig:
 class RuntimeConfig:
     """Immutable runtime-wide model defaults."""
 
-    default_model: ModelReference | None = None
+    default_model: ModelReference | str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "default_model", normalize_reference(self.default_model))

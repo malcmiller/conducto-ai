@@ -61,7 +61,7 @@ class ModelPolicyContext:
 class ModelPolicy(Protocol):
     """Policy hook that approves or denies a candidate model selection."""
 
-    def __call__(self, context: ModelPolicyContext) -> bool: ...
+    def __call__(self, context: ModelPolicyContext, /) -> bool: ...
 
 
 @dataclass(frozen=True, slots=True)

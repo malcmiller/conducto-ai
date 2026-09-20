@@ -80,9 +80,9 @@ class ModelResolver:
         call_reference = normalize_reference(call_override)
         candidates = (
             (call_reference, ModelResolutionSource.CALL_OVERRIDE),
-            (run_config.model, ModelResolutionSource.RUN_OVERRIDE),
-            (agent_config.default_model, ModelResolutionSource.AGENT_DEFAULT),
-            (runtime_config.default_model, ModelResolutionSource.RUNTIME_DEFAULT),
+            (normalize_reference(run_config.model), ModelResolutionSource.RUN_OVERRIDE),
+            (normalize_reference(agent_config.default_model), ModelResolutionSource.AGENT_DEFAULT),
+            (normalize_reference(runtime_config.default_model), ModelResolutionSource.RUNTIME_DEFAULT),
         )
         selected = next(((ref, source) for ref, source in candidates if ref is not None), None)
         if selected is None:

@@ -1,6 +1,7 @@
 """Focused contracts for immutable runtime configuration."""
 
 from dataclasses import FrozenInstanceError
+from typing import cast
 
 import pytest
 
@@ -42,9 +43,10 @@ def test_run_config_recursively_freezes_safe_metadata() -> None:
 
     assert config.metadata["labels"] == ("one",)
     assert config.metadata["nested"]["enabled"] is True
+    mutable_metadata = cast(dict[str, object], config.metadata)
     with pytest.raises(TypeError):
-        config.metadata["changed"] = True  # type: ignore[index]
+        mutable_metadata["changed"] = True
     with pytest.raises(FrozenInstanceError):
-        config.timeout = 1  # type: ignore[misc]
+        object.__setattr__(config, "timeout", 1)
     with pytest.raises(ValueError, match="Sensitive values"):
         RunConfig(metadata={"nested": {"token": "secret"}})

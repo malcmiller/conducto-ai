@@ -41,7 +41,7 @@ def test_model_resolver_preserves_precedence_and_policy_facts() -> None:
         ),
         run_config=RunConfig(model="run", caller="caller"),
         runtime_config=RuntimeConfig("runtime"),
-        policy=lambda context: not observed.append((context.model_reference, context.source)),
+        policy=lambda context: observed.append((context.model_reference, context.source)) is None,
         call_override="call",
     )
 
@@ -60,18 +60,20 @@ def test_model_resolver_denies_policy_and_incompatible_capabilities() -> None:
         ModelConfiguration(provider="fake", model="model"),
     )
     resolver = ModelResolver(registry)
-    arguments = {
-        "agent_id": "Agent",
-        "agent_config": AgentModelConfig(requirement=ModelRequirement.REQUIRED),
-        "run_config": RunConfig(model="model"),
-        "runtime_config": RuntimeConfig(),
-    }
-
     with pytest.raises(ModelOverrideDeniedError):
-        resolver.resolve_binding(**arguments, policy=lambda _context: False)
+        resolver.resolve_binding(
+            agent_id="Agent",
+            agent_config=AgentModelConfig(requirement=ModelRequirement.REQUIRED),
+            run_config=RunConfig(model="model"),
+            runtime_config=RuntimeConfig(),
+            policy=lambda _context: False,
+        )
     with pytest.raises(IncompatibleProviderCapabilitiesError):
         resolver.resolve_binding(
-            **arguments,
+            agent_id="Agent",
+            agent_config=AgentModelConfig(requirement=ModelRequirement.REQUIRED),
+            run_config=RunConfig(model="model"),
+            runtime_config=RuntimeConfig(),
             policy=None,
             required_capabilities=frozenset({"structured_output"}),
         )

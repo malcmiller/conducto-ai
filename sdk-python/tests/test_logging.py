@@ -6,6 +6,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -145,8 +146,9 @@ def test_opted_in_payload_isolated_to_sensitive_handler() -> None:
     with _saved_logging_state() as (_logger, sensitive_logger):
         configure_logging(format="json", stream=normal_stream, include_sensitive_data=False)
         sensitive_handler = logging.StreamHandler(sensitive_stream)
-        sensitive_handler._conducto_owned = True  # type: ignore[attr-defined]
-        sensitive_handler._conducto_include_sensitive_data = True  # type: ignore[attr-defined]
+        dynamic_handler = cast(Any, sensitive_handler)
+        dynamic_handler._conducto_owned = True
+        dynamic_handler._conducto_include_sensitive_data = True
         sensitive_handler.setFormatter(JsonFormatter())
         sensitive_logger.addHandler(sensitive_handler)
         sensitive_logger.setLevel(logging.INFO)
