@@ -72,6 +72,8 @@ class RemainingDelegationBudget:
 class DelegationBudget:
     """Thread-safe shared call, token, and cost reservation ledger."""
 
+    __slots__ = ("_cost", "_calls", "_lock", "_max_depth", "_tokens")
+
     def __init__(
         self,
         *,
@@ -86,11 +88,16 @@ class DelegationBudget:
             raise ValueError("Delegation token budget cannot be negative")
         if cost is not None and (not math.isfinite(cost) or cost < 0):
             raise ValueError("Delegation cost budget must be a finite non-negative number")
-        self.max_depth = max_depth
+        self._max_depth = max_depth
         self._calls = calls
         self._tokens = tokens
         self._cost = cost
         self._lock = threading.Lock()
+
+    @property
+    def max_depth(self) -> int:
+        """Return the immutable configured delegation depth limit."""
+        return self._max_depth
 
     def snapshot(
         self,
@@ -101,7 +108,7 @@ class DelegationBudget:
         """Return an immutable snapshot without exposing mutable ledger state."""
         with self._lock:
             return RemainingDelegationBudget(
-                depth=max(0, self.max_depth - current_depth),
+                depth=max(0, self._max_depth - current_depth),
                 calls=self._calls,
                 tokens=self._tokens,
                 cost=self._cost,
@@ -437,6 +444,10 @@ class RunContext:
     def require_active(self) -> None:
         """Ensure this context is active for invocation-scoped model access."""
         self._invocation_state.require_active()
+        if _CURRENT_RUN_CONTEXT.get() is not self:
+            raise NoActiveRunContextError(
+                "Gateway context is not the active task-local runtime invocation"
+            )
 
     def begin_model_call(self) -> asyncio.Task[Any]:
         """Register and return the current task as an active model call."""

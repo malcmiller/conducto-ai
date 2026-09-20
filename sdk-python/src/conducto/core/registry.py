@@ -114,6 +114,22 @@ class AgentRegistry:
             conflicts = self.conflicting_capabilities(agent)
             if conflicts and not allow_capability_conflicts and not replace:
                 raise ValueError("Capability name conflict(s): " + ", ".join(sorted(conflicts)))
+
+            next_generation = self._generation + 1
+            descriptor = _build_agent_descriptor(
+                agent,
+                generation=next_generation,
+                lifecycle=RegistrationLifecycle.ACTIVE,
+                healthy=True,
+            )
+            registration = _Registration(
+                agent,
+                next_generation,
+                RegistrationLifecycle.ACTIVE,
+                True,
+                descriptor,
+            )
+
             if conflicts and not allow_capability_conflicts:
                 for conflicting_name in sorted(conflicts):
                     for owner in tuple(self._capability_index.get(conflicting_name, {}).values()):
@@ -122,20 +138,7 @@ class AgentRegistry:
 
             if existing is not None:
                 self._remove_mapping_locked(existing.agent)
-            self._generation += 1
-            descriptor = _build_agent_descriptor(
-                agent,
-                generation=self._generation,
-                lifecycle=RegistrationLifecycle.ACTIVE,
-                healthy=True,
-            )
-            registration = _Registration(
-                agent,
-                self._generation,
-                RegistrationLifecycle.ACTIVE,
-                True,
-                descriptor,
-            )
+            self._generation = next_generation
             self._registrations[agent_name] = registration
             self.agents[agent_name] = agent
             self._removed.discard(agent_name)

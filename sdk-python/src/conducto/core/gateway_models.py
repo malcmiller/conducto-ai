@@ -203,6 +203,7 @@ class ToolDiscoveryResult:
     registry_revision: int
     tools: tuple[ToolDescriptor, ...] = ()
     failure: GatewayFailure | None = None
+    truncated: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tools", tuple(self.tools))
@@ -233,6 +234,8 @@ class GatewayFailureCode(StrEnum):
     CYCLE_DETECTED = "cycle_detected"
     DEPTH_EXCEEDED = "depth_exceeded"
     RESULT_LIMIT_EXCEEDED = "result_limit_exceeded"
+    POLICY_EVALUATION_FAILED = "policy_evaluation_failed"
+    UNSUPPORTED_SCHEMA = "unsupported_schema"
 
 
 @dataclass(frozen=True, slots=True)
@@ -250,6 +253,7 @@ class DiscoveryResult:
     registry_revision: int
     candidates: tuple[BoundCapability, ...] = ()
     failure: GatewayFailure | None = None
+    truncated: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidates", tuple(self.candidates))
@@ -271,6 +275,7 @@ class SelectionStatus(StrEnum):
     NO_MATCH = "no_match"
     AMBIGUOUS = "ambiguous"
     DENIED = "denied"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True, slots=True)
@@ -282,6 +287,7 @@ class SelectionOutcome:
     descriptor: CapabilityDescriptor | None = None
     candidates: tuple[CapabilityDescriptor, ...] = ()
     failure: GatewayFailure | None = None
+    truncated: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "candidates", tuple(self.candidates))
