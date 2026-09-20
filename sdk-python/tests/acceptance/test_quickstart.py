@@ -8,6 +8,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -175,7 +176,7 @@ def test_quickstart_success_path_has_typed_immutable_envelope_and_provenance() -
 
 def test_quickstart_script_executes_and_prints_concise_result() -> None:
     completed = subprocess.run(
-        [sys.executable, "examples\\quickstart.py"],
+        [sys.executable, str(Path("examples") / "quickstart.py")],
         check=True,
         capture_output=True,
         text=True,

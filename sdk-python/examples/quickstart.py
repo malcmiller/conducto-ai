@@ -2,7 +2,7 @@ r"""Deterministic two-agent Conducto quick start.
 
 Run from ``sdk-python`` after installing the built wheel:
 
-    python examples\quickstart.py
+    python examples/quickstart.py
 """
 
 from __future__ import annotations

@@ -45,13 +45,19 @@ request
 ## 4. Build both distributions
 
 ```bash
-rm -rf dist
 uv build
-ls dist
+python -c "from pathlib import Path; print('\n'.join(path.name for path in sorted(Path('dist').iterdir())))"
 ```
 
 The `dist` directory should contain both a wheel (`.whl`) and source
 distribution (`.tar.gz`).
+
+To force a clean build first, remove `dist` with the command for your shell:
+
+```bash
+python -c "import shutil; shutil.rmtree('dist', ignore_errors=True)"
+uv build
+```
 
 ## 5. Run the example from an installed wheel
 
