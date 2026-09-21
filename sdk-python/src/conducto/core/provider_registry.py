@@ -4,13 +4,13 @@ This module maps two distinct, credential-free registration operations onto
 immutable published bindings:
 
 * Provider type registration describes how trusted application code
-  constructs one provider family (: meth:`ProviderRegistry.register_provider_type`).
+  constructs one provider family (:meth:`ProviderRegistry.register_provider_type`).
 * Model reference registration binds a credential-free model reference to one
   configured provider client, either built from a typed configuration source
-  (: meth:`ProviderRegistry.register_provider`) or supplied preconstructed by the
-  caller (: meth:`ProviderRegistry.register_client`).
+  (:meth:`ProviderRegistry.register_provider`) or supplied preconstructed by the
+  caller (:meth:`ProviderRegistry.register_client`).
 
-Model resolution (: meth:`ProviderRegistry.resolve`) only ever selects an
+Model resolution (:meth:`ProviderRegistry.resolve`) only ever selects an
 already-published, immutable binding; it never constructs a client.
 
 ``ProviderRegistry.register`` remains available as a deprecated compatibility
@@ -22,6 +22,7 @@ from __future__ import annotations
 import threading
 import warnings
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -44,8 +45,21 @@ from .runtime_errors import (
     ProviderFactoryValidationError,
     ProviderTypeMismatchError,
     ProviderUnavailableError,
+    StaleProviderConstructionError,
     UnknownModelReferenceError,
     UnknownProviderTypeError,
+)
+
+#: Default bound applied to a callable ``available`` predicate. A predicate
+#: that has not completed within this many seconds is treated as unavailable
+#: rather than blocking resolution, listing, or snapshotting indefinitely.
+DEFAULT_AVAILABILITY_TIMEOUT_SECONDS = 2.0
+
+#: Shared, bounded worker pool used to evaluate callable availability
+#: predicates off the calling thread so a slow or hung health check cannot
+#: block the registry lock or the caller.
+_AVAILABILITY_EXECUTOR = ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="conducto-provider-availability"
 )
 
 
@@ -141,6 +155,7 @@ class ProviderRegistration:
     available: bool | Callable[[], bool] = field(default=True, repr=False, compare=False)
     ownership: ProviderOwnership = ProviderOwnership.CALLER_OWNED
     provider_type: ProviderType | None = field(default=None, compare=False)
+    available_timeout: float = field(default=DEFAULT_AVAILABILITY_TIMEOUT_SECONDS, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,9 +191,23 @@ def _validate_client_structure(client: ModelProvider, provider_label: ProviderTy
         )
 
 
-def _evaluate_available(available: bool | Callable[[], bool]) -> bool:
-    """Evaluate a fixed or callable availability state without mutating state."""
-    return bool(available() if callable(available) else available)
+def _evaluate_available(available: bool | Callable[[], bool], timeout: float) -> bool:
+    """Evaluate a fixed or bounded callable availability state.
+
+    A callable predicate never runs inline on the calling thread; it is
+    submitted to a bounded worker pool and given at most ``timeout`` seconds
+    to complete. A predicate that raises, hangs, or exceeds the timeout is
+    treated as unavailable rather than propagating or blocking indefinitely,
+    so a slow or hung health check can never stall resolution, listing, or
+    snapshotting.
+    """
+    if not callable(available):
+        return bool(available)
+    future = _AVAILABILITY_EXECUTOR.submit(available)
+    try:
+        return bool(future.result(timeout=timeout))
+    except Exception:  # noqa: BLE001 - bounded predicate, never propagate or block
+        return False
 
 
 def _to_snapshot(registration: ProviderRegistration) -> ModelBindingSnapshot:
@@ -188,7 +217,7 @@ def _to_snapshot(registration: ProviderRegistration) -> ModelBindingSnapshot:
         registration.provider,
         registration.provider_type,
         registration.ownership,
-        _evaluate_available(registration.available),
+        _evaluate_available(registration.available, registration.available_timeout),
     )
 
 
@@ -204,6 +233,7 @@ class ProviderRegistry:
     def __init__(self) -> None:
         self._provider_types: dict[ProviderType, ProviderTypeRegistration] = {}
         self._registrations: dict[ModelReference, ProviderRegistration] = {}
+        self._generations: dict[ModelReference, int] = {}
         self._lock = threading.RLock()
 
     # ---- provider type registration --------------------------------------------------
@@ -243,7 +273,7 @@ class ProviderRegistry:
         """Remove a provider type factory registration.
 
         Existing published model bindings continue to resolve normally;
-        only later: meth:`register_provider` calls for this provider type
+        only later :meth:`register_provider` calls for this provider type
         are affected.
 
         Args:
@@ -274,6 +304,7 @@ class ProviderRegistry:
         configuration: ProviderClientConfig,
         model_configuration: ModelConfiguration,
         available: bool | Callable[[], bool] = True,
+        available_timeout: float = DEFAULT_AVAILABILITY_TIMEOUT_SECONDS,
         ownership: ProviderOwnership = ProviderOwnership.RUNTIME_OWNED,
         replace: bool = False,
         required_capabilities: frozenset[str] = frozenset(),
@@ -286,6 +317,17 @@ class ProviderRegistry:
         construction, structural validation, and capability validation all
         succeed, so other runs never observe a partially constructed binding.
 
+        A duplicate reference is rejected before construction starts so a
+        factory is never invoked for a registration that cannot be
+        published. The reference's mutation generation is also captured
+        before construction starts; if another thread replaces or
+        deregisters this exact reference while construction is still in
+        flight, the now-stale result is discarded with
+        :class:`StaleProviderConstructionError` instead of silently
+        overwriting the newer binding or resurrecting a deregistered
+        reference. A final atomic duplicate check still runs at publish time
+        to close the race between the preflight check and construction.
+
         Args:
             reference: Credential-free model reference to bind.
             provider_type: Registered provider type whose factory constructs the client.
@@ -295,6 +337,9 @@ class ProviderRegistry:
             model_configuration: Safe, provider-neutral model configuration stored
                 on the published binding.
             available: Optional availability predicate or fixed state.
+            available_timeout: Bound, in seconds, on how long a callable
+                ``available`` predicate may run before being treated as
+                unavailable.
             ownership: Lifecycle ownership recorded for Story 6.3 shutdown.
                 Defaults to runtime-owned, since the registry constructed the client.
             replace: Whether to replace an existing registration for this reference.
@@ -307,11 +352,13 @@ class ProviderRegistry:
             UnknownProviderTypeError: If the provider type has no registered factory.
             ProviderTypeMismatchError: If the model configuration provider does not
                 match the provider type.
+            DuplicateModelReferenceError: If already registered and replace is False.
             ProviderConstructionError: If the factory raises while constructing the client.
             ProviderClientValidationError: If the constructed client fails structural
                 validation.
             IncompatibleProviderCapabilitiesError: If a required capability is missing.
-            DuplicateModelReferenceError: If already registered and replace is False.
+            StaleProviderConstructionError: If the reference was replaced or
+                deregistered while construction was in flight.
         """
         model_reference = normalize_reference(reference)
         assert model_reference is not None
@@ -321,6 +368,12 @@ class ProviderRegistry:
                 f"Model configuration provider '{model_configuration.provider}' does not "
                 f"match provider type '{normalized_type}'"
             )
+        with self._lock:
+            if model_reference in self._registrations and not replace:
+                raise DuplicateModelReferenceError(
+                    f"Model reference '{model_reference}' is already registered"
+                )
+            expected_generation = self._generations.get(model_reference, 0)
         factory = self._get_factory(normalized_type)
         try:
             client = factory.create(configuration)
@@ -339,8 +392,11 @@ class ProviderRegistry:
             available,
             ownership,
             normalized_type,
+            available_timeout,
         )
-        self._publish(model_reference, registration, replace=replace)
+        self._publish(
+            model_reference, registration, replace=replace, expected_generation=expected_generation
+        )
         return registration
 
     # ---- preconstructed client --------------------------------------------------------
@@ -354,6 +410,7 @@ class ProviderRegistry:
         ownership: ProviderOwnership = ProviderOwnership.CALLER_OWNED,
         connection_config: ProviderClientConfig | None = None,
         available: bool | Callable[[], bool] = True,
+        available_timeout: float = DEFAULT_AVAILABILITY_TIMEOUT_SECONDS,
         replace: bool = False,
         required_capabilities: frozenset[str] = frozenset(),
     ) -> ProviderRegistration:
@@ -363,7 +420,8 @@ class ProviderRegistry:
             reference: Credential-free model reference to bind.
             client: An object satisfying the Story 6.1 structural provider protocol.
             configuration: Safe, provider-neutral model configuration stored on the
-                published binding.
+                published binding. Its ``endpoint`` must be left unset; the client
+                already embeds whatever endpoint it was constructed with.
             ownership: Whether the caller retains ownership or transfers it to the
                 runtime for Story 6.3 shutdown. Defaults to caller-owned, since the
                 caller constructed the client.
@@ -371,6 +429,9 @@ class ProviderRegistry:
                 connection-affecting values alongside a ready client is rejected
                 since the client was already constructed with its own settings.
             available: Optional availability predicate or fixed state.
+            available_timeout: Bound, in seconds, on how long a callable
+                ``available`` predicate may run before being treated as
+                unavailable.
             replace: Whether to replace an existing registration for this reference.
             required_capabilities: Capabilities the client must advertise.
 
@@ -379,7 +440,8 @@ class ProviderRegistry:
 
         Raises:
             ContradictoryProviderConfigurationError: If connection_config carries
-                non-default endpoint, credential, proxy, TLS, or transport values.
+                non-default endpoint, credential, proxy, TLS, or transport values,
+                or if configuration.endpoint is set.
             ProviderClientValidationError: If the client fails structural validation.
             IncompatibleProviderCapabilitiesError: If a required capability is missing.
             DuplicateModelReferenceError: If already registered and replace is False.
@@ -391,6 +453,11 @@ class ProviderRegistry:
                 "Connection configuration cannot be combined with a preconstructed "
                 "provider client; construct the client with that configuration instead"
             )
+        if configuration.endpoint is not None:
+            raise ContradictoryProviderConfigurationError(
+                "Model configuration endpoint cannot be combined with a preconstructed "
+                "provider client; construct the client with that endpoint instead"
+            )
         _validate_client_structure(client, configuration.provider)
         validate_provider_capabilities(model_reference, client.capabilities, required_capabilities)
         registration = ProviderRegistration(
@@ -401,6 +468,7 @@ class ProviderRegistry:
             available,
             ownership,
             None,
+            available_timeout,
         )
         self._publish(model_reference, registration, replace=replace)
         return registration
@@ -419,8 +487,8 @@ class ProviderRegistry:
         """Register a provider client for a model reference.
 
         Deprecated:
-            Use :meth:`register_client 'for preconstructed clients or:
-            meth:`register_provider` for factory-constructed clients instead.
+            Use :meth:`register_client` for preconstructed clients or
+            :meth:`register_provider` for factory-constructed clients instead.
             This method assumes caller ownership and no connection
             configuration; it is kept only as a compatibility path and will be
             removed once Story 6.3 lands.
@@ -473,7 +541,7 @@ class ProviderRegistry:
             registration = self._registrations.get(model_reference)
         if registration is None:
             raise UnknownModelReferenceError(f"Unknown model reference '{model_reference}'")
-        if not _evaluate_available(registration.available):
+        if not _evaluate_available(registration.available, registration.available_timeout):
             raise ProviderUnavailableError(
                 f"Provider for model reference '{model_reference}' is unavailable"
             )
@@ -483,7 +551,7 @@ class ProviderRegistry:
         """Remove a published model binding.
 
         Deregistration prevents later resolution but does not invalidate a
-        binding already returned by a prior, in-flight call to: meth:`resolve`.
+        binding already returned by a prior, in-flight call to :meth:`resolve`.
 
         Args:
             reference: Model reference to remove.
@@ -496,6 +564,7 @@ class ProviderRegistry:
         with self._lock:
             if self._registrations.pop(model_reference, None) is None:
                 raise UnknownModelReferenceError(f"Unknown model reference '{model_reference}'")
+            self._generations[model_reference] = self._generations.get(model_reference, 0) + 1
 
     def _publish(
         self,
@@ -503,27 +572,53 @@ class ProviderRegistry:
         registration: ProviderRegistration,
         *,
         replace: bool,
+        expected_generation: int | None = None,
     ) -> None:
-        """Atomically insert a registration, honoring duplicate/replace rules."""
+        """Atomically insert a registration, honoring duplicate/replace/staleness rules.
+
+        Args:
+            reference: Model reference being published.
+            registration: Fully constructed and validated registration to publish.
+            replace: Whether to replace an existing registration for this reference.
+            expected_generation: Mutation generation observed before construction
+                started. When provided and it no longer matches the reference's
+                current generation, another thread replaced or deregistered this
+                reference while construction was in flight, and the stale result
+                is rejected instead of being published.
+        """
         with self._lock:
+            if (
+                expected_generation is not None
+                and self._generations.get(reference, 0) != expected_generation
+            ):
+                raise StaleProviderConstructionError(
+                    f"Model reference '{reference}' was replaced or deregistered while "
+                    "its provider client was under construction"
+                )
             if reference in self._registrations and not replace:
                 raise DuplicateModelReferenceError(
                     f"Model reference '{reference}' is already registered"
                 )
             self._registrations[reference] = registration
+            self._generations[reference] = self._generations.get(reference, 0) + 1
 
     # ---- snapshots -----------------------------------------------------------------------
 
+    def _collect(
+        self,
+    ) -> tuple[tuple[ProviderRegistration, ...], tuple[ProviderType, ...]]:
+        """Capture registrations and provider types from one lock acquisition."""
+        with self._lock:
+            return tuple(self._registrations.values()), tuple(self._provider_types)
+
     def list_provider_types(self) -> tuple[ProviderType, ...]:
         """Return registered provider types in deterministic sorted order."""
-        with self._lock:
-            types = tuple(self._provider_types)
+        _, types = self._collect()
         return tuple(sorted(types, key=str))
 
     def list_models(self) -> tuple[ModelBindingSnapshot, ...]:
         """Return published model bindings as safe, deterministic snapshots."""
-        with self._lock:
-            registrations = tuple(self._registrations.values())
+        registrations, _ = self._collect()
         return tuple(
             sorted(
                 (_to_snapshot(item) for item in registrations),
@@ -532,5 +627,18 @@ class ProviderRegistry:
         )
 
     def snapshot(self) -> ProviderRegistrySnapshot:
-        """Return an immutable, deterministically ordered view of the registry."""
-        return ProviderRegistrySnapshot(self.list_models(), self.list_provider_types())
+        """Return an immutable, deterministically ordered view of the registry.
+
+        Both halves of the snapshot are captured from a single lock
+        acquisition, so a concurrent mutation cannot combine model bindings
+        and provider types that never coexisted.
+        """
+        registrations, types = self._collect()
+        models = tuple(
+            sorted(
+                (_to_snapshot(item) for item in registrations),
+                key=lambda item: item.reference.value,
+            )
+        )
+        provider_types = tuple(sorted(types, key=str))
+        return ProviderRegistrySnapshot(models, provider_types)

@@ -57,6 +57,7 @@ from .provider import (
     complete_with_retries,
 )
 from .provider_registry import (
+    DEFAULT_AVAILABILITY_TIMEOUT_SECONDS,
     ModelBindingSnapshot,
     ProviderClientConfig,
     ProviderFactory,
@@ -98,6 +99,7 @@ from .runtime_errors import (
     ProviderRegistrationError,
     ProviderTypeMismatchError,
     ProviderUnavailableError,
+    StaleProviderConstructionError,
     UnknownModelReferenceError,
     UnknownProviderTypeError,
 )
@@ -112,6 +114,7 @@ __all__ = [
     "AgentModelConfig",
     "CancellationState",
     "ContradictoryProviderConfigurationError",
+    "DEFAULT_AVAILABILITY_TIMEOUT_SECONDS",
     "DelegationBudget",
     "DelegationFrame",
     "ConductoError",
@@ -162,6 +165,7 @@ __all__ = [
     "RunContext",
     "Runtime",
     "RuntimeConfig",
+    "StaleProviderConstructionError",
     "StructuredOutputRequest",
     "UnknownModelReferenceError",
     "UnknownProviderTypeError",

@@ -131,6 +131,7 @@ from .provider import (
 )
 from .registry import AgentRegistry
 from .runtime import (
+    DEFAULT_AVAILABILITY_TIMEOUT_SECONDS,
     AgentModelConfig,
     CancellationState,
     ConductoError,
@@ -175,6 +176,7 @@ from .runtime import (
     RunContext,
     Runtime,
     RuntimeConfig,
+    StaleProviderConstructionError,
     UnknownModelReferenceError,
     UnknownProviderTypeError,
     get_run_context,
@@ -304,6 +306,7 @@ __all__ = [
     "AgentModelConfig",
     "CancellationState",
     "ContradictoryProviderConfigurationError",
+    "DEFAULT_AVAILABILITY_TIMEOUT_SECONDS",
     "DelegationBudget",
     "DelegationFrame",
     "ConductoError",
@@ -345,6 +348,7 @@ __all__ = [
     "RunContext",
     "Runtime",
     "RuntimeConfig",
+    "StaleProviderConstructionError",
     "UnknownModelReferenceError",
     "UnknownProviderTypeError",
     "get_run_context",

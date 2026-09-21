@@ -3,7 +3,7 @@
 `ProviderRegistry` maps two distinct, credential-free registration operations
 onto immutable, published bindings. Applications register **how** to build a
 provider family once, then bind **one configured client** to each
-credential-free model reference agent and runs use.
+credential-free model reference that agents and runs use.
 
 Model resolution (`ProviderRegistry.resolve`) only ever selects an
 already-published binding — it never constructs a client on the call path.
@@ -64,6 +64,8 @@ satisfies the Story 6.1 structural provider protocol (`capabilities` plus a
 callable `complete(...)`), without any inheritance requirement.
 
 ```python
+from conducto import ProviderOwnership
+
 registry.register_client(
     "custom-model",
     my_custom_client,
@@ -90,6 +92,12 @@ endpoint, credential, proxy, TLS, and transport configuration.
   `registry.deregister_provider_type(provider_type)` remove a binding.
   Deregistration prevents *later* resolution; it never invalidates a binding a
   call already received from `resolve()`.
+- `register_provider()` rejects a duplicate reference before invoking the
+  factory, and tracks each reference's mutation generation. If another thread
+  replaces or deregisters the same reference while a factory-constructed
+  client is still being built, the now-stale construction is discarded with
+  `StaleProviderConstructionError` instead of silently overwriting the newer
+  binding or resurrecting a deregistered reference.
 
 ## Inspecting the registry safely
 
@@ -114,20 +122,34 @@ availability boolean.
 | `UnknownModelReferenceError`              | `resolve`/`deregister_model` for an unregistered reference              |
 | `UnknownProviderTypeError`                | `register_provider`/`deregister_provider_type` for an unregistered type |
 | `ProviderUnavailableError`                | Binding resolved but marked unavailable                                 |
-| `ContradictoryProviderConfigurationError` | `connection_config` supplied alongside a preconstructed client          |
+| `ContradictoryProviderConfigurationError` | `connection_config` or `configuration.endpoint` supplied alongside a preconstructed client |
 | `ProviderTypeMismatchError`               | `model_configuration.provider` does not match `provider_type`           |
 | `ProviderFactoryValidationError`          | Factory has no callable `create(configuration)`                         |
 | `ProviderClientValidationError`           | Client lacks `capabilities` or a callable `complete(...)`               |
 | `ProviderConstructionError`               | The factory raised while constructing a client                          |
+| `StaleProviderConstructionError`          | The reference was replaced/deregistered while construction was in flight |
 | `IncompatibleProviderCapabilitiesError`   | Client does not advertise a required capability                         |
 
-All of the above derive from `ProviderRegistrationError` (itself a
-`ConductoError`); the duplicate/contradictory/mismatch errors also derive from
-`ValueError`, and the factory/client validation errors also derive from
-`TypeError`, for compatibility with common exception-handling idioms.
-Construction failures never echo the underlying provider exception's message
-into the raised error; the original exception remains available as
-`__cause__` for local debugging only.
+`DuplicateModelReferenceError`, `DuplicateProviderTypeError`,
+`UnknownProviderTypeError`, `ContradictoryProviderConfigurationError`,
+`ProviderTypeMismatchError`, `ProviderFactoryValidationError`,
+`ProviderClientValidationError`, `ProviderConstructionError`, and
+`StaleProviderConstructionError` derive from `ProviderRegistrationError`
+(itself a `ConductoError`); the duplicate/contradictory/mismatch errors also
+derive from `ValueError`, and the factory/client validation errors also
+derive from `TypeError`, for compatibility with common exception-handling
+idioms. `UnknownModelReferenceError`, `ProviderUnavailableError`, and
+`IncompatibleProviderCapabilitiesError` instead derive from the pre-existing
+`ModelResolutionError`, since they are raised during model resolution rather
+than registration. Construction failures never echo the underlying provider
+exception's message into the raised error; the original exception remains
+available as `__cause__` for local debugging only.
+
+A callable `available` predicate is always run on a bounded worker thread,
+never inline on the caller's thread; a predicate that raises, hangs, or
+exceeds `available_timeout` seconds (`DEFAULT_AVAILABILITY_TIMEOUT_SECONDS`
+by default) is treated as unavailable rather than blocking `resolve()`,
+`list_models()`, or `snapshot()`.
 
 ## Migrating from `ProviderRegistry.register(...)`
 

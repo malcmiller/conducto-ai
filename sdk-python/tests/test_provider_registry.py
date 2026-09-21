@@ -1,6 +1,7 @@
 """Focused contracts for runtime-owned provider registration."""
 
 import threading
+import time
 
 import pytest
 
@@ -22,6 +23,7 @@ from conducto.core.runtime import (
     ProviderRegistry,
     ProviderTypeMismatchError,
     ProviderUnavailableError,
+    StaleProviderConstructionError,
     UnknownModelReferenceError,
     UnknownProviderTypeError,
 )
@@ -260,3 +262,120 @@ def test_concurrent_register_resolve_replace_deregister_stay_isolated() -> None:
     assert errors == []
     remaining = registry.snapshot().models
     assert all(item.reference.value.startswith("model-") for item in remaining)
+
+
+def test_register_client_rejects_contradictory_model_configuration_endpoint() -> None:
+    registry = ProviderRegistry()
+    with pytest.raises(ContradictoryProviderConfigurationError):
+        registry.register_client(
+            "model",
+            FakeModel({}),
+            ModelConfiguration(provider="fake", model="test", endpoint="https://example.test"),
+        )
+    with pytest.raises(UnknownModelReferenceError):
+        registry.resolve("model")
+
+
+def test_register_provider_duplicate_rejected_before_factory_runs() -> None:
+    registry = ProviderRegistry()
+    factory = _RecordingFactory()
+    registry.register_provider_type("fake", factory)
+    registry.register_provider(
+        "model",
+        provider_type="fake",
+        configuration=ProviderClientConfig(),
+        model_configuration=ModelConfiguration(provider="fake", model="test"),
+    )
+    assert len(factory.calls) == 1
+
+    with pytest.raises(DuplicateModelReferenceError):
+        registry.register_provider(
+            "model",
+            provider_type="fake",
+            configuration=ProviderClientConfig(),
+            model_configuration=ModelConfiguration(provider="fake", model="test"),
+        )
+
+    # The factory must never be invoked for a registration that cannot be published.
+    assert len(factory.calls) == 1
+
+
+def test_available_predicate_that_hangs_is_bounded_and_treated_as_unavailable() -> None:
+    registry = ProviderRegistry()
+
+    def hangs_forever() -> bool:
+        time.sleep(5)
+        return True
+
+    registry.register_client(
+        "model",
+        FakeModel({}),
+        ModelConfiguration(provider="fake", model="test"),
+        available=hangs_forever,
+        available_timeout=0.05,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(ProviderUnavailableError):
+        registry.resolve("model")
+    assert time.monotonic() - started < 2.0
+
+
+def test_available_predicate_that_raises_is_treated_as_unavailable() -> None:
+    registry = ProviderRegistry()
+
+    def explodes() -> bool:
+        raise RuntimeError("boom")
+
+    registry.register_client(
+        "model",
+        FakeModel({}),
+        ModelConfiguration(provider="fake", model="test"),
+        available=explodes,
+    )
+
+    with pytest.raises(ProviderUnavailableError):
+        registry.resolve("model")
+
+
+def test_replace_during_slow_factory_construction_discards_stale_result() -> None:
+    registry = ProviderRegistry()
+    started = threading.Event()
+    release = threading.Event()
+
+    class _SlowFactory:
+        def create(self, configuration: ProviderClientConfig) -> FakeModel:
+            started.set()
+            release.wait(timeout=5)
+            return FakeModel({})
+
+    registry.register_provider_type("fake", _SlowFactory())
+    registry.register_client(
+        "model", FakeModel({}), ModelConfiguration(provider="fake", model="test")
+    )
+
+    outcome: list[BaseException] = []
+
+    def slow_register() -> None:
+        try:
+            registry.register_provider(
+                "model",
+                provider_type="fake",
+                configuration=ProviderClientConfig(),
+                model_configuration=ModelConfiguration(provider="fake", model="test"),
+                replace=True,
+            )
+        except BaseException as exc:  # noqa: BLE001 - captured for assertion below
+            outcome.append(exc)
+
+    thread = threading.Thread(target=slow_register)
+    thread.start()
+    started.wait(timeout=5)
+    registry.deregister_model("model")
+    release.set()
+    thread.join(timeout=5)
+
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], StaleProviderConstructionError)
+    with pytest.raises(UnknownModelReferenceError):
+        registry.resolve("model")

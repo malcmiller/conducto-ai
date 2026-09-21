@@ -246,7 +246,7 @@ class ToolResultMessage:
 
 @dataclass(frozen=True, slots=True)
 class FakeModelRequest:
-    """Safe observation of one request issued to: class:`FakeModel`."""
+    """Safe observation of one request issued to :class:`FakeModel`."""
 
     message_roles: tuple[str, ...]
     options: GenerationOptions
@@ -578,7 +578,7 @@ class ProviderEndpointUnavailableError(ProviderError):
 
 
 class ProviderCancellationError(ProviderError):
-    """The caller canceled an in-flight provider request."""
+    """The caller cancelled an in-flight provider request."""
 
     def __init__(self, message: str = "Provider request cancelled") -> None:
         super().__init__(message, category=ProviderFailureCategory.CANCELLATION)

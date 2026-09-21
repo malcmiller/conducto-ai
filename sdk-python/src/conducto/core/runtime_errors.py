@@ -67,3 +67,13 @@ class ProviderClientValidationError(ProviderRegistrationError, TypeError):
 
 class ProviderConstructionError(ProviderRegistrationError):
     """A registered factory failed to construct a provider client."""
+
+
+class StaleProviderConstructionError(ProviderRegistrationError):
+    """A concurrent replacement or deregistration invalidated an in-flight construction.
+
+    Raised when a provider client finished construction after the target
+    model reference was replaced or deregistered by another thread. The
+    stale result is discarded instead of silently overwriting the newer
+    binding or resurrecting a deregistered reference.
+    """

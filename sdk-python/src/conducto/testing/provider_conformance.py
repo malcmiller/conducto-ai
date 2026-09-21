@@ -1,6 +1,6 @@
 """Deterministic, provider-neutral conformance helpers.
 
-Application providers can use: func:`assert_provider_conformance` with
+Application providers can use :func:`assert_provider_conformance` with a
 credential-free scripted transport. The helper intentionally uses only public
 Conducto contracts and never inspects provider internals.
 """
@@ -114,7 +114,7 @@ async def assert_provider_conformance(provider: ModelProvider) -> None:
     """Run the mandatory deterministic checks shared by provider adapters.
 
     The provider is expected to be a fresh fixture-backed instance. Conditional
-    capability checks are represented by: data:`MANDATORY_FIXTURES` and can be
+    capability checks are represented by :data:`MANDATORY_FIXTURES` and can be
     run by adapter-specific suites without network access.
     """
     request = StructuredOutputRequest(
