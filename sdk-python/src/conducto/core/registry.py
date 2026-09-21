@@ -395,12 +395,6 @@ class AgentRegistry:
 
 
 def _parameter_map_from_card(card: Mapping[str, Any]) -> Mapping[str, Any]:
-    legacy = card.get("x-conducto")
-    if isinstance(legacy, Mapping):
-        parameters = legacy.get("parameters")
-        if isinstance(parameters, Mapping):
-            return parameters
-
     capabilities = card.get("capabilities")
     if not isinstance(capabilities, Mapping):
         return {}
@@ -423,9 +417,6 @@ def _parameter_map_from_card(card: Mapping[str, Any]) -> Mapping[str, Any]:
 
 
 def _primary_interface_url(card: Mapping[str, Any]) -> str | None:
-    legacy_url = card.get("url")
-    if isinstance(legacy_url, str):
-        return legacy_url
     interfaces = card.get("supportedInterfaces", [])
     if isinstance(interfaces, (str, bytes)) or not isinstance(interfaces, Sequence):
         return None

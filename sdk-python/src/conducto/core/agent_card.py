@@ -202,7 +202,9 @@ def validate_card_metadata(
             "Agent Card preferred_transport cannot contain surrounding whitespace"
         )
     if preferred_transport != A2A_JSONRPC_BINDING:
-        raise AgentRegistrationError("Conducto's A2A 1.0 profile only supports JSONRPC")
+        raise AgentRegistrationError(
+            f"Conducto's A2A 1.0 profile only supports JSONRPC; received {preferred_transport!r}"
+        )
     if not metadata.name.strip():
         raise AgentRegistrationError("Agent Card agent name cannot be empty")
     if not metadata.version.strip():
@@ -334,6 +336,15 @@ def validate_security_schemes(
 
 
 def _convert_oauth2_scheme(scheme: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert an OpenAPI-style OAuth2 scheme to A2A 1.0 JSON fields.
+
+    Args:
+        scheme: Validated OAuth2 security scheme using OpenAPI flow names.
+
+    Returns:
+        A dictionary shaped for the A2A ``oauth2SecurityScheme`` oneof wrapper,
+        preserving optional authorization, token, refresh, and metadata URLs.
+    """
     flows = scheme["flows"]
     converted_flows: dict[str, Any] = {}
     for flow_name, flow in flows.items():

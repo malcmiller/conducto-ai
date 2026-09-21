@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any
 
 from a2a.types.a2a_pb2 import AgentCard, Message, Task
-from google.protobuf.json_format import MessageToDict, ParseDict, ParseError
-from google.protobuf.message import Message as ProtobufMessage
+from google.protobuf.json_format import ParseDict, ParseError
 
 A2A_PROTOCOL_VERSION = "1.0"
 A2A_PROTOCOL_RELEASE = "1.0.0"
@@ -43,22 +42,6 @@ class A2AProtocolError(ValueError):
     """Raised when an A2A payload is incompatible with Conducto's profile."""
 
 
-def proto_json_dict(message: ProtobufMessage) -> dict[str, Any]:
-    """Return canonical protobuf JSON field names for an official A2A SDK message.
-
-    Args:
-        message: Official protobuf message from the pinned A2A SDK.
-
-    Returns:
-        A JSON-compatible dictionary using A2A 1.0 lowerCamel field names.
-    """
-    return MessageToDict(
-        message,
-        preserving_proto_field_name=False,
-        always_print_fields_with_no_presence=True,
-    )
-
-
 def parse_agent_card(payload: Mapping[str, Any]) -> AgentCard:
     """Parse and validate an Agent Card with official A2A SDK contracts.
 
@@ -86,7 +69,7 @@ def parse_agent_card(payload: Mapping[str, Any]) -> AgentCard:
         for interface in card.supported_interfaces
     ):
         raise A2AProtocolError("Agent Card must advertise JSON-RPC A2A protocol version 1.0")
-    validate_required_extensions(proto_json_dict(card))
+    _validate_required_extensions(card)
     return card
 
 
@@ -109,11 +92,9 @@ def parse_message(payload: Mapping[str, Any]) -> Message:
     if len(message.parts) > MAX_MESSAGE_PARTS:
         raise A2AProtocolError(f"Message parts exceed limit {MAX_MESSAGE_PARTS}")
     _validate_metadata_size(payload.get("metadata"))
-    for part in proto_json_dict(message).get("parts", []):
-        if isinstance(part, Mapping):
-            media_type = part.get("mediaType")
-            if media_type is not None and media_type not in SUPPORTED_MEDIA_TYPES:
-                raise A2AProtocolError(f"Unsupported media type: {media_type}")
+    for part in message.parts:
+        if part.media_type and part.media_type not in SUPPORTED_MEDIA_TYPES:
+            raise A2AProtocolError(f"Unsupported media type: {part.media_type}")
     return message
 
 
@@ -157,27 +138,20 @@ def validate_jsonrpc_method(method: str) -> None:
         raise A2AProtocolError(f"Unsupported A2A JSON-RPC method: {method}")
 
 
-def validate_required_extensions(agent_card: Mapping[str, Any]) -> None:
+def _validate_required_extensions(agent_card: AgentCard) -> None:
     """Reject unknown required Agent Card extensions.
 
     Args:
-        agent_card: A2A 1.0 Agent Card payload using JSON field names.
+        agent_card: A2A 1.0 Agent Card parsed through the official SDK.
 
     Raises:
         A2AProtocolError: If a required extension is not supported by Conducto.
     """
-    capabilities = agent_card.get("capabilities")
-    if not isinstance(capabilities, Mapping):
+    if not agent_card.HasField("capabilities"):
         return
-    extensions = capabilities.get("extensions", [])
-    if not isinstance(extensions, Sequence) or isinstance(extensions, (str, bytes)):
-        raise A2AProtocolError("Agent Card capabilities.extensions must be a list")
-    for extension in extensions:
-        if not isinstance(extension, Mapping):
-            raise A2AProtocolError("Agent Card extension entries must be objects")
-        uri = extension.get("uri")
-        if extension.get("required") is True and uri not in SUPPORTED_REQUIRED_EXTENSIONS:
-            raise A2AProtocolError(f"Unsupported required Agent Card extension: {uri}")
+    for extension in agent_card.capabilities.extensions:
+        if extension.required and extension.uri not in SUPPORTED_REQUIRED_EXTENSIONS:
+            raise A2AProtocolError(f"Unsupported required Agent Card extension: {extension.uri}")
 
 
 def validate_task_transition(current_state: str, next_state: str) -> None:

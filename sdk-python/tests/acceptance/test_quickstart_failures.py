@@ -196,6 +196,8 @@ def test_timeout_preserves_correlation_id_and_returns_timeout_envelope() -> None
                 "arguments": {"delay": 0.05},
             },
             correlation_id="failure-timeout",
+            # Keep this focused on the selected capability deadline. The route-wide
+            # timeout also covers structured routing and A2A profile validation.
             agent_timeout=0.001,
         )
 

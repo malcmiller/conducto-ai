@@ -109,6 +109,19 @@ def test_agent_card_validates_security_objects_and_uses_standard_security_field(
         security_requirements=[{"oauth": ["read"]}],
     )
     assert card["securityRequirements"] == [{"schemes": {"oauth": {"list": ["read"]}}}]
+    assert card["securitySchemes"] == {
+        "oauth": {
+            "oauth2SecurityScheme": {
+                "description": "",
+                "flows": {
+                    "clientCredentials": {
+                        "scopes": {},
+                        "tokenUrl": "https://example.test/token",
+                    }
+                },
+            }
+        }
+    }
     assert "security" not in card
 
     with pytest.raises(ValueError, match="scopes must be a sequence"):
