@@ -4,6 +4,8 @@ import pytest
 
 from conducto import (
     A2A_AGENT_CARD_SPEC_VERSION,
+    A2A_JSONRPC_BINDING,
+    A2A_PROTOCOL_VERSION,
     BaseAgent,
     a2a_agent,
     a2a_capability,
@@ -41,11 +43,24 @@ def test_base_agent_generates_deterministic_a2a_agent_card() -> None:
     agent = RegistryAgent()
     card = agent.get_agent_card("https://example.test/a2a")
 
-    assert card["protocolVersion"] == A2A_AGENT_CARD_SPEC_VERSION == "0.3.0"
+    assert A2A_AGENT_CARD_SPEC_VERSION == A2A_PROTOCOL_VERSION == "1.0"
+    assert card["supportedInterfaces"] == [
+        {
+            "protocolBinding": A2A_JSONRPC_BINDING,
+            "protocolVersion": A2A_AGENT_CARD_SPEC_VERSION,
+            "tenant": "",
+            "url": "https://example.test/a2a",
+        }
+    ]
     assert card["skills"][0]["id"].startswith("conducto-")
     assert card["skills"][0]["name"] == "greet"
     skill_id = card["skills"][0]["id"]
-    assert card["x-conducto"]["parameters"][skill_id]["properties"]["name"]["type"] == "string"
+    extension = card["capabilities"]["extensions"][0]
+    assert extension["uri"] == "https://conducto.ai/a2a/extensions/parameters/v1"
+    assert extension["required"] is False
+    assert extension["params"]["x-conducto"]["parameters"][skill_id]["properties"]["name"][
+        "type"
+    ] == "string"
     serialized = agent.get_agent_card_json("https://example.test/a2a")
     assert serialized == agent.get_agent_card_json("https://example.test/a2a")
     assert json.loads(serialized) == card
@@ -92,8 +107,8 @@ def test_agent_card_validates_security_objects_and_uses_standard_security_field(
         },
         security_requirements=[{"oauth": ["read"]}],
     )
-    assert card["security"] == [{"oauth": ["read"]}]
-    assert "securityRequirements" not in card
+    assert card["securityRequirements"] == [{"schemes": {"oauth": {"list": ["read"]}}}]
+    assert "security" not in card
 
     with pytest.raises(ValueError, match="scopes must be a sequence"):
         agent.get_agent_card(
@@ -133,4 +148,20 @@ def test_agent_card_rejects_invalid_hostname_and_transport_whitespace() -> None:
         agent.get_agent_card(
             "https://example.test/a2a",
             preferred_transport=" JSONRPC ",
+        )
+    with pytest.raises(ValueError, match="only supports JSONRPC"):
+        agent.get_agent_card(
+            "https://example.test/a2a",
+            preferred_transport="GRPC",
+        )
+
+
+def test_agent_card_rejects_unsupported_media_modes() -> None:
+    class Agent(BaseAgent):
+        """An agent."""
+
+    with pytest.raises(ValueError, match="unsupported media type"):
+        Agent().get_agent_card(
+            "https://example.test/a2a",
+            default_input_modes=["image/png"],
         )

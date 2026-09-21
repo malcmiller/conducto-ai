@@ -8,12 +8,19 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 from urllib.parse import urlparse
 
+from .a2a_profile import (
+    A2A_JSONRPC_BINDING,
+    A2A_PROTOCOL_VERSION,
+    CONDUCTO_PARAMETER_EXTENSION_URI,
+    SUPPORTED_MEDIA_TYPES,
+    parse_agent_card,
+)
 from .decorators import AgentMetadata
 from .registration import AgentRegistrationError, RegisteredMethod
 
-A2A_AGENT_CARD_SPEC_VERSION = "0.3.0"
-DEFAULT_INPUT_MODES = ("text",)
-DEFAULT_OUTPUT_MODES = ("text",)
+A2A_AGENT_CARD_SPEC_VERSION = A2A_PROTOCOL_VERSION
+DEFAULT_INPUT_MODES = ("text/plain",)
+DEFAULT_OUTPUT_MODES = ("text/plain",)
 
 
 def stable_skill_id(agent_name: str, capability_name: str) -> str:
@@ -69,7 +76,7 @@ def build_agent_card(
     agent_capabilities = {
         "streaming": False,
         "pushNotifications": False,
-        "stateTransitionHistory": False,
+        "extendedAgentCard": False,
     }
     if capabilities is not None and not isinstance(capabilities, Mapping):
         raise AgentRegistrationError("capabilities must be a mapping")
@@ -104,28 +111,53 @@ def build_agent_card(
                 "tags": [skill_id],
                 "inputModes": list(input_modes),
                 "outputModes": list(output_modes),
+                "examples": [],
+                "securityRequirements": [],
             }
         )
         parameter_schemas[skill_id] = registered.parameter_schema
 
-    return {
-        "protocolVersion": A2A_AGENT_CARD_SPEC_VERSION,
+    card = {
         "name": metadata.name,
         "description": metadata.description,
-        "url": url,
-        "preferredTransport": preferred_transport,
+        "supportedInterfaces": [
+            {
+                "url": url,
+                "protocolBinding": preferred_transport,
+                "protocolVersion": A2A_AGENT_CARD_SPEC_VERSION,
+                "tenant": "",
+            }
+        ],
         "version": metadata.version,
-        "capabilities": agent_capabilities,
+        "capabilities": {
+            "streaming": agent_capabilities["streaming"],
+            "pushNotifications": agent_capabilities["pushNotifications"],
+            "extendedAgentCard": agent_capabilities["extendedAgentCard"],
+            "extensions": [
+                {
+                    "uri": CONDUCTO_PARAMETER_EXTENSION_URI,
+                    "description": "Conducto reflected JSON parameter schemas keyed by A2A skill id.",
+                    "required": False,
+                    "params": {
+                        "x-conducto": {
+                            "parameters": parameter_schemas,
+                            "skillIdStrategy": (
+                                "conducto-<sha256(agent-name:capability-name)[:16]>"
+                            ),
+                        }
+                    },
+                }
+            ],
+        },
         "defaultInputModes": list(input_modes),
         "defaultOutputModes": list(output_modes),
         "skills": skills,
         "securitySchemes": normalized_security_schemes,
-        "security": normalized_security,
-        "x-conducto": {
-            "parameters": parameter_schemas,
-            "skillIdStrategy": "conducto-<sha256(agent-name:capability-name)[:16]>",
-        },
+        "securityRequirements": normalized_security,
+        "signatures": [],
     }
+    parse_agent_card(card)
+    return card
 
 
 def serialize_agent_card(card: Mapping[str, Any]) -> str:
@@ -165,6 +197,8 @@ def validate_card_metadata(
         raise AgentRegistrationError(
             "Agent Card preferred_transport cannot contain surrounding whitespace"
         )
+    if preferred_transport != A2A_JSONRPC_BINDING:
+        raise AgentRegistrationError("Conducto's A2A 1.0 profile only supports JSONRPC")
     if not metadata.name.strip():
         raise AgentRegistrationError("Agent Card agent name cannot be empty")
     if not metadata.version.strip():
@@ -211,6 +245,12 @@ def validate_modes(modes: Sequence[str], label: str) -> tuple[str, ...]:
     normalized = tuple(mode.strip() for mode in modes if isinstance(mode, str))
     if len(normalized) != len(modes) or not normalized or any(not mode for mode in normalized):
         raise AgentRegistrationError(f"default_{label}_modes must contain non-empty strings")
+    unsupported = set(normalized) - SUPPORTED_MEDIA_TYPES
+    if unsupported:
+        raise AgentRegistrationError(
+            f"default_{label}_modes contain unsupported media type(s): "
+            + ", ".join(sorted(unsupported))
+        )
     return normalized
 
 
@@ -249,24 +289,67 @@ def validate_security_schemes(
                 raise AgentRegistrationError(
                     f"apiKey security scheme '{name}' requires in=header, query, or cookie"
                 )
+            validated[name] = {
+                "apiKeySecurityScheme": {
+                    "description": scheme.get("description", ""),
+                    "location": scheme["in"],
+                    "name": scheme["name"],
+                }
+            }
         elif scheme_type == "http":
             if not isinstance(scheme.get("scheme"), str) or not scheme["scheme"].strip():
                 raise AgentRegistrationError(
                     f"http security scheme '{name}' requires a non-empty scheme"
                 )
+            validated[name] = {
+                "httpAuthSecurityScheme": {
+                    "description": scheme.get("description", ""),
+                    "scheme": scheme["scheme"],
+                    "bearerFormat": scheme.get("bearerFormat", ""),
+                }
+            }
         elif scheme_type == "oauth2":
             _validate_oauth2_scheme(name, scheme)
+            validated[name] = {"oauth2SecurityScheme": _convert_oauth2_scheme(scheme)}
         elif scheme_type == "openIdConnect":
             if not is_absolute_http_url(scheme.get("openIdConnectUrl")):
                 raise AgentRegistrationError(
                     f"openIdConnect security scheme '{name}' requires an absolute URL"
                 )
+            validated[name] = {
+                "openIdConnectSecurityScheme": {
+                    "description": scheme.get("description", ""),
+                    "openIdConnectUrl": scheme["openIdConnectUrl"],
+                }
+            }
         else:
             raise AgentRegistrationError(
                 f"security scheme '{name}' has unsupported type {scheme_type!r}"
             )
-        validated[name] = dict(scheme)
     return validated
+
+
+def _convert_oauth2_scheme(scheme: Mapping[str, Any]) -> dict[str, Any]:
+    flows = scheme["flows"]
+    converted_flows: dict[str, Any] = {}
+    for flow_name, flow in flows.items():
+        flow_dict: dict[str, Any] = {
+            "scopes": dict(flow["scopes"]),
+        }
+        if "authorizationUrl" in flow:
+            flow_dict["authorizationUrl"] = flow["authorizationUrl"]
+        if "tokenUrl" in flow:
+            flow_dict["tokenUrl"] = flow["tokenUrl"]
+        if "refreshUrl" in flow:
+            flow_dict["refreshUrl"] = flow["refreshUrl"]
+        converted_flows[flow_name] = flow_dict
+    converted: dict[str, Any] = {
+        "description": scheme.get("description", ""),
+        "flows": converted_flows,
+    }
+    if "oauth2MetadataUrl" in scheme:
+        converted["oauth2MetadataUrl"] = scheme["oauth2MetadataUrl"]
+    return converted
 
 
 def _validate_oauth2_scheme(name: str, scheme: Mapping[str, Any]) -> None:
@@ -314,7 +397,7 @@ def _validate_oauth2_scheme(name: str, scheme: Mapping[str, Any]) -> None:
 
 def validate_security_requirements(
     security_requirements: Sequence[Mapping[str, Sequence[str]]] | None,
-) -> list[dict[str, list[str]]]:
+) -> list[dict[str, Any]]:
     """Validate and normalize security requirement sets for a card.
 
     Args:
@@ -333,11 +416,11 @@ def validate_security_requirements(
     ):
         raise AgentRegistrationError("security_requirements must be a sequence")
 
-    validated: list[dict[str, list[str]]] = []
+    validated: list[dict[str, Any]] = []
     for index, requirement in enumerate(security_requirements):
         if not isinstance(requirement, Mapping) or not requirement:
             raise AgentRegistrationError(f"security requirement {index} must be a non-empty object")
-        normalized: dict[str, list[str]] = {}
+        normalized: dict[str, Any] = {"schemes": {}}
         for scheme_name, scopes in requirement.items():
             if not isinstance(scheme_name, str) or not scheme_name.strip():
                 raise AgentRegistrationError(
@@ -351,6 +434,6 @@ def validate_security_requirements(
                 raise AgentRegistrationError(
                     f"security requirement '{scheme_name}' scopes must be strings"
                 )
-            normalized[scheme_name] = list(scopes)
+            normalized["schemes"][scheme_name] = {"list": list(scopes)}
         validated.append(normalized)
     return validated
