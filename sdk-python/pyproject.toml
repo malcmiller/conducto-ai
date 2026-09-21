@@ -10,8 +10,9 @@ name = "conducto-ai"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
-    "a2a-sdk==1.1.5",
+    "a2a-sdk==1.0.3",
     "cryptography>=44.0.0",
+    "packaging>=24.0",
     "pydantic>=2.13.5",
 ]
 

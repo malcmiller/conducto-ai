@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from importlib.metadata import EntryPoint, PackageNotFoundError, entry_points, version
+from importlib import metadata
 from typing import Any
+
+from packaging.specifiers import SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,12 +19,14 @@ class AdapterSpec:
         name: Stable adapter family identifier.
         extra: Conducto package extra that installs its provider SDK.
         distribution: Provider SDK distribution name checked at selection.
+        version_specifier: Compatible provider SDK version range.
         protocol_version: Provider protocol/API profile supported by the adapter.
     """
 
     name: str
     extra: str
     distribution: str
+    version_specifier: str
     protocol_version: str
 
 
@@ -29,9 +34,9 @@ class AdapterDependencyError(RuntimeError):
     """An explicitly selected adapter is unavailable in this environment."""
 
     def __init__(self, spec: AdapterSpec) -> None:
-        """Describe the single extra needed without exposing environment details."""
+        """Describe the compatible extra without exposing environment details."""
         super().__init__(
-            f"Adapter '{spec.name}' requires its optional dependency; "
+            f"Adapter '{spec.name}' requires {spec.distribution}{spec.version_specifier}; "
             f"install conducto-ai[{spec.extra}]"
         )
         self.adapter = spec.name
@@ -58,13 +63,19 @@ class DiscoveredExternalAdapter:
     """Metadata for an allowlisted external adapter that has not been loaded."""
 
     spec: ExternalAdapterSpec
-    entry_point: EntryPoint
+    entry_point: metadata.EntryPoint
 
 
 _ADAPTER_SPECS = (
-    AdapterSpec("microsoft-foundry", "microsoft-foundry", "azure-ai-projects", "foundry-v1"),
-    AdapterSpec("ollama", "ollama", "ollama", "ollama-v1"),
-    AdapterSpec("openai", "openai", "openai", "openai-compatible-v1"),
+    AdapterSpec(
+        "microsoft-foundry",
+        "microsoft-foundry",
+        "azure-ai-projects",
+        ">=1.0.0b11",
+        "foundry-v1",
+    ),
+    AdapterSpec("ollama", "ollama", "ollama", ">=0.5", "ollama-v1"),
+    AdapterSpec("openai", "openai", "openai", ">=1.0", "openai-compatible-v1"),
 )
 
 
@@ -86,15 +97,18 @@ def require_adapter(name: str) -> AdapterSpec:
 
     Raises:
         KeyError: If ``name`` is not a supported first-party adapter.
-        AdapterDependencyError: If the selected adapter's SDK is absent.
+        AdapterDependencyError: If the selected adapter's SDK is absent or
+            outside its declared compatibility range.
     """
     spec = next((item for item in _ADAPTER_SPECS if item.name == name), None)
     if spec is None:
         raise KeyError(f"Unknown first-party adapter '{name}'")
     try:
-        version(spec.distribution)
-    except PackageNotFoundError as error:
+        installed_version = Version(metadata.version(spec.distribution))
+    except (metadata.PackageNotFoundError, InvalidVersion) as error:
         raise AdapterDependencyError(spec) from error
+    if installed_version not in SpecifierSet(spec.version_specifier):
+        raise AdapterDependencyError(spec)
     return spec
 
 
@@ -115,7 +129,7 @@ def discover_external_adapters(
     Returns:
         Compatible adapter metadata in deterministic name order.
     """
-    candidates = entry_points(group="conducto.providers")
+    candidates = metadata.entry_points(group="conducto.providers")
     discovered: list[DiscoveredExternalAdapter] = []
     for candidate in sorted(candidates, key=lambda item: item.name):
         expected = allowlist.get(candidate.name)

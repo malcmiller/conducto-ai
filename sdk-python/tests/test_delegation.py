@@ -93,7 +93,7 @@ def _runtime(
     registry: AgentRegistry | None = None,
 ) -> tuple[Runtime, FakeModel]:
     providers = ProviderRegistry()
-    providers.register(
+    providers.register_client(
         "model",
         model,
         ModelConfiguration(provider="fake", model="model"),

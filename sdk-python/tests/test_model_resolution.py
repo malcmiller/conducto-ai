@@ -22,7 +22,7 @@ from conducto.core.runtime_errors import (
 def _resolver(*references: str) -> ModelResolver:
     registry = ProviderRegistry()
     for reference in references:
-        registry.register(
+        registry.register_client(
             reference,
             FakeModel({}),
             ModelConfiguration(provider=f"provider-{reference}", model=reference),
@@ -60,7 +60,7 @@ def test_model_resolver_denies_policy_and_incompatible_capabilities() -> None:
     registry = ProviderRegistry()
     provider = FakeModel({})
     provider.capabilities = ProviderCapabilities()
-    registry.register(
+    registry.register_client(
         "model",
         provider,
         ModelConfiguration(provider="fake", model="model"),

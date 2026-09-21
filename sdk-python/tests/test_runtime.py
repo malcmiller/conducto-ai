@@ -38,7 +38,7 @@ def _runtime(*references: str, default: str | None = None) -> tuple[Runtime, dic
     for reference in references:
         provider = FakeModel({"agent_id": "unused", "capability_id": "unused"})
         providers[reference] = provider
-        registry.register(
+        registry.register_client(
             reference,
             provider,
             ModelConfiguration(provider=f"provider-{reference}", model=f"model-{reference}"),
@@ -153,7 +153,7 @@ def test_call_override_does_not_mutate_enclosing_run_context() -> None:
 def test_orchestrator_and_selected_agent_use_different_models() -> None:
     runtime, _ = _runtime("orchestrator", "worker")
     routing_provider = FakeModel({"agent_id": "Worker", "capability_id": "work"})
-    runtime.provider_registry.register(
+    runtime.provider_registry.register_client(
         "orchestrator",
         routing_provider,
         ModelConfiguration(provider="router", model="router-model"),
@@ -215,13 +215,13 @@ def test_resolution_failures_happen_before_capability_or_provider_calls() -> Non
     registry = ProviderRegistry()
     incompatible = FakeModel({})
     incompatible.capabilities = ProviderCapabilities()
-    registry.register(
+    registry.register_client(
         "incompatible",
         incompatible,
         ModelConfiguration(provider="fake", model="incompatible"),
     )
     unavailable = FakeModel({})
-    registry.register(
+    registry.register_client(
         "unavailable",
         unavailable,
         ModelConfiguration(provider="fake", model="unavailable"),
@@ -231,7 +231,7 @@ def test_resolution_failures_happen_before_capability_or_provider_calls() -> Non
         provider_registry=registry,
         policy=lambda context: context.model_reference.value != "denied",
     )
-    registry.register(
+    registry.register_client(
         "denied",
         FakeModel({}),
         ModelConfiguration(provider="fake", model="denied"),

@@ -49,7 +49,11 @@ class _Documentation(BaseAgent):
 
 def _runtime(model: FakeModel, *, registry: AgentRegistry | None = None) -> Runtime:
     providers = ProviderRegistry()
-    providers.register("test-model", model, ModelConfiguration(provider="fake", model="test-model"))
+    providers.register_client(
+        "test-model",
+        model,
+        ModelConfiguration(provider="fake", model="test-model"),
+    )
     return Runtime(provider_registry=providers, agent_registry=registry or AgentRegistry())
 
 
