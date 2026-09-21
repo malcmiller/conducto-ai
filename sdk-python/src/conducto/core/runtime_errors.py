@@ -1,5 +1,12 @@
 """Stable public errors raised by the Conducto runtime."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .provider_registry import ProviderCleanupReport
+
 
 class ConductoError(RuntimeError):
     """Base error for stable Conducto runtime failures."""
@@ -95,7 +102,7 @@ class ProviderShutdownError(ConductoError):
             and local exception types, never provider exception messages.
     """
 
-    def __init__(self, report: object) -> None:
+    def __init__(self, report: ProviderCleanupReport) -> None:
         """Create a cleanup failure with its safe aggregate report."""
         super().__init__("Provider cleanup did not complete successfully")
         self.report = report

@@ -135,7 +135,7 @@ def test_effective_deadline_is_forwarded_without_tools() -> None:
 def test_model_gateway_records_typed_completion_provenance() -> None:
     async def exercise() -> None:
         registry = ProviderRegistry()
-        registry.register(
+        registry.register_client(
             "model",
             FakeModel(
                 {"value": "ok"},

@@ -91,11 +91,13 @@ endpoint, credential, proxy, TLS, and transport configuration.
   the previous binding keeps it; later `resolve()` calls see the replacement.
 - `registry.deregister_model(reference)` and
   `registry.deregister_provider_type(provider_type)` remove a binding.
-  Deregistration prevents *later* resolution; it never invalidates a binding a
-  call already received from `resolve()`. Runtime-mediated model calls acquire
-  a private lease before dispatch, so a retired runtime-owned client closes only
-  after its final accepted call releases that lease. A client deliberately
-  shared by several references has one ownership declaration and closes once.
+  Deregistration prevents *later* resolution. Runtime-mediated model calls
+  acquire a private lease before dispatch. An accepted lease remains valid
+  through retirement, and the retired runtime-owned client closes only after
+  its final lease releases. A resolved binding that has not acquired a lease is
+  rejected once cleanup starts. Unleased clients close as soon as replacement
+  or deregistration retires their final reference. A client deliberately shared
+  by several references has one ownership declaration and closes once.
 
 ## Runtime shutdown
 
@@ -124,10 +126,12 @@ uv add "conducto-ai[openai]"
 uv add "conducto-ai[microsoft-foundry]"
 ```
 
-`conducto.adapters.require_adapter("openai")` checks only the selected SDK and
-raises `AdapterDependencyError` with the relevant extra when unavailable. It
-does not import the SDK, resolve credentials, construct clients, or contact a
-network. Applications should register custom adapters directly through
+`conducto.adapters.require_adapter("openai")` checks only the selected SDK's
+installed distribution metadata and validates its version against the
+adapter's declared compatibility range. It raises `AdapterDependencyError`
+with the relevant extra when absent or incompatible. It does not import the
+SDK, resolve credentials, construct clients, or contact a network.
+Applications should register custom adapters directly through
 `ProviderRegistry`; do not load arbitrary module names from configuration.
 
 For application-enabled third-party adapters, use
