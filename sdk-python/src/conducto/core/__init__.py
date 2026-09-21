@@ -1,6 +1,23 @@
 # noinspection DuplicatedCode
 """Core public API for the Conducto Python SDK."""
 
+from .a2a_profile import (
+    A2A_JSONRPC_BINDING,
+    A2A_NORMATIVE_COMMIT,
+    A2A_NORMATIVE_PROTO_SHA256,
+    A2A_NORMATIVE_SOURCE,
+    A2A_NORMATIVE_TAG,
+    A2A_PROTOCOL_RELEASE,
+    A2A_PROTOCOL_VERSION,
+    A2A_PYTHON_SDK_PACKAGE,
+    A2A_PYTHON_SDK_VERSION,
+    A2AProtocolError,
+    parse_agent_card,
+    parse_message,
+    parse_task,
+    validate_jsonrpc_method,
+    validate_task_transition,
+)
 from .agent import A2A_AGENT_CARD_SPEC_VERSION, BaseAgent
 from .decorators import a2a_agent, a2a_capability, tool
 from .delegation import (
@@ -166,6 +183,16 @@ from .runtime import (
 
 __all__ = [
     "A2A_AGENT_CARD_SPEC_VERSION",
+    "A2A_JSONRPC_BINDING",
+    "A2A_NORMATIVE_COMMIT",
+    "A2A_NORMATIVE_PROTO_SHA256",
+    "A2A_NORMATIVE_SOURCE",
+    "A2A_NORMATIVE_TAG",
+    "A2A_PROTOCOL_RELEASE",
+    "A2A_PROTOCOL_VERSION",
+    "A2A_PYTHON_SDK_PACKAGE",
+    "A2A_PYTHON_SDK_VERSION",
+    "A2AProtocolError",
     "BaseAgent",
     "AgentDescriptor",
     "AgentGateway",
@@ -269,6 +296,11 @@ __all__ = [
     "validate_structured_output",
     "parse_model_decision",
     "parse_routing_selection",
+    "parse_agent_card",
+    "parse_message",
+    "parse_task",
+    "validate_jsonrpc_method",
+    "validate_task_transition",
     "AgentModelConfig",
     "CancellationState",
     "ContradictoryProviderConfigurationError",

@@ -5,8 +5,8 @@ decorated Python agents, deterministic Agent Card generation, model-mediated
 local routing, validated capability invocation, typed result envelopes, runtime
 model provenance, and structured correlation-safe logs.
 
-Agent Cards are generated against pinned A2A Agent Card specification
-`0.3.0` (`A2A_AGENT_CARD_SPEC_VERSION`). Use
+Agent Cards are generated against the pinned Conducto A2A `1.0` JSON-RPC
+profile (`A2A_AGENT_CARD_SPEC_VERSION`). Use
 `BaseAgent.get_agent_card("https://agent.example/a2a")` for the card
 dictionary or `get_agent_card_json()` for canonical JSON.
 

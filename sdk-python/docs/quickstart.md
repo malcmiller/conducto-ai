@@ -118,5 +118,5 @@ depend on test-only packages.
 | `uv: command not found`                                  | Install `uv` from <https://docs.astral.sh/uv/> and reopen the shell.                                                |
 | `ModuleNotFoundError: conducto`                          | Build the wheel first, then run with `uv run --no-project --with "$wheel" ...`.                                     |
 | Smoke test says `conducto imported from source checkout` | Run the documented `uv run --no-project --with "$wheel"` command instead of activating the development environment. |
-| Acceptance tests fail after Agent Card changes           | Review the generated card diff; Agent Cards are a public wire contract pinned to A2A `0.3.0`.                       |
+| Acceptance tests fail after Agent Card changes           | Review the generated card diff; Agent Cards are a public wire contract pinned to the Conducto A2A `1.0` profile.    |
 | PowerShell does not understand `wheel=$(ls dist/*.whl)`  | Use the PowerShell commands shown above.                                                                            |
