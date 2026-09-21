@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any
 
 from a2a.types import AgentCard, Message, Task
 from google.protobuf.json_format import MessageToDict, ParseDict, ParseError
+from google.protobuf.message import Message as ProtobufMessage
 
 A2A_PROTOCOL_VERSION = "1.0"
 A2A_PROTOCOL_RELEASE = "1.0.0"
@@ -41,7 +42,7 @@ class A2AProtocolError(ValueError):
     """Raised when an A2A payload is incompatible with Conducto's profile."""
 
 
-def proto_json_dict(message: object) -> dict[str, Any]:
+def proto_json_dict(message: ProtobufMessage) -> dict[str, Any]:
     """Return canonical protobuf JSON field names for an official A2A SDK message.
 
     Args:
@@ -50,13 +51,10 @@ def proto_json_dict(message: object) -> dict[str, Any]:
     Returns:
         A JSON-compatible dictionary using A2A 1.0 lowerCamel field names.
     """
-    return cast(
-        dict[str, Any],
-        MessageToDict(
-            message,
-            preserving_proto_field_name=False,
-            always_print_fields_with_no_presence=True,
-        ),
+    return MessageToDict(
+        message,
+        preserving_proto_field_name=False,
+        always_print_fields_with_no_presence=True,
     )
 
 
@@ -81,15 +79,14 @@ def parse_agent_card(payload: Mapping[str, Any]) -> AgentCard:
         card = ParseDict(dict(payload), AgentCard())
     except ParseError as exc:
         raise A2AProtocolError(f"Invalid A2A 1.0 Agent Card: {exc}") from exc
-    parsed = cast(AgentCard, card)
     if not any(
         interface.protocol_binding == A2A_JSONRPC_BINDING
         and interface.protocol_version == A2A_PROTOCOL_VERSION
-        for interface in parsed.supported_interfaces
+        for interface in card.supported_interfaces
     ):
         raise A2AProtocolError("Agent Card must advertise JSON-RPC A2A protocol version 1.0")
-    validate_required_extensions(proto_json_dict(parsed))
-    return parsed
+    validate_required_extensions(proto_json_dict(card))
+    return card
 
 
 def parse_message(payload: Mapping[str, Any]) -> Message:
@@ -108,16 +105,15 @@ def parse_message(payload: Mapping[str, Any]) -> Message:
         message = ParseDict(dict(payload), Message())
     except ParseError as exc:
         raise A2AProtocolError(f"Invalid A2A 1.0 Message: {exc}") from exc
-    parsed = cast(Message, message)
-    if len(parsed.parts) > MAX_MESSAGE_PARTS:
+    if len(message.parts) > MAX_MESSAGE_PARTS:
         raise A2AProtocolError(f"Message parts exceed limit {MAX_MESSAGE_PARTS}")
     _validate_metadata_size(payload.get("metadata"))
-    for part in proto_json_dict(parsed).get("parts", []):
+    for part in proto_json_dict(message).get("parts", []):
         if isinstance(part, Mapping):
             media_type = part.get("mediaType")
             if media_type is not None and media_type not in SUPPORTED_MEDIA_TYPES:
                 raise A2AProtocolError(f"Unsupported media type: {media_type}")
-    return parsed
+    return message
 
 
 def parse_task(payload: Mapping[str, Any]) -> Task:
@@ -136,16 +132,15 @@ def parse_task(payload: Mapping[str, Any]) -> Task:
         task = ParseDict(dict(payload), Task())
     except ParseError as exc:
         raise A2AProtocolError(f"Invalid A2A 1.0 Task: {exc}") from exc
-    parsed = cast(Task, task)
-    if len(parsed.history) > MAX_HISTORY_MESSAGES:
+    if len(task.history) > MAX_HISTORY_MESSAGES:
         raise A2AProtocolError(f"Task history exceeds limit {MAX_HISTORY_MESSAGES}")
-    if len(parsed.artifacts) > MAX_ARTIFACT_PARTS:
+    if len(task.artifacts) > MAX_ARTIFACT_PARTS:
         raise A2AProtocolError(f"Task artifacts exceed limit {MAX_ARTIFACT_PARTS}")
     _validate_metadata_size(payload.get("metadata"))
-    for artifact in parsed.artifacts:
+    for artifact in task.artifacts:
         if len(artifact.parts) > MAX_ARTIFACT_PARTS:
             raise A2AProtocolError(f"Artifact parts exceed limit {MAX_ARTIFACT_PARTS}")
-    return parsed
+    return task
 
 
 def validate_jsonrpc_method(method: str) -> None:

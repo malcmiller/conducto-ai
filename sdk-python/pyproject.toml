@@ -25,6 +25,7 @@ dev = [
     "conducto-ai[test]",
     "mypy>=1.14",
     "ruff>=0.9",
+    "types-protobuf==7.35.1.20260906",
 ]
 
 [tool.ruff]
