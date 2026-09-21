@@ -33,6 +33,7 @@ ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
 JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt"
 MAX_TOKEN_SIZE = 16_384
 MAX_HEADER_SIZE = 4_096
+MAX_ACTOR_CHAIN_DEPTH = 16  # bounded to prevent unbounded delegation-chain parsing
 _JWS_ALGORITHMS = frozenset({"RS256", "ES256"})
 
 
@@ -427,7 +428,7 @@ class JWTBearerTokenValidator:
         seen = 0
         while actor is not None:
             seen += 1
-            if seen > 16 or not isinstance(actor, Mapping):
+            if seen > MAX_ACTOR_CHAIN_DEPTH or not isinstance(actor, Mapping):
                 raise InvalidActorChainError("token actor chain is malformed")
             sub = actor.get("sub")
             if not isinstance(sub, str) or not sub:

@@ -28,8 +28,8 @@ from .tls import (
 __all__ = [
     "A2AClient",
     "AuthenticationError",
-    "CompatibilityError",
     "ClientCertificate",
+    "CompatibilityError",
     "DiscoveryError",
     "DiscoveryPolicy",
     "InMemoryTaskRepository",
