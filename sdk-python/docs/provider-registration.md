@@ -1,4 +1,4 @@
-# Provider type and model registration (Story 6.2)
+# Provider type, lifecycle, and model registration
 
 `ProviderRegistry` maps two distinct, credential-free registration operations
 onto immutable, published bindings. Applications register **how** to build a
@@ -82,8 +82,9 @@ endpoint, credential, proxy, TLS, and transport configuration.
 ## Ownership, replacement, and deregistration
 
 - `ownership` (`ProviderOwnership.RUNTIME_OWNED` or `CALLER_OWNED`) is carried
-  on every binding for Story 6.3 shutdown orchestration. This story only
-  records the declaration; it does not close clients.
+  on every binding. Factory-created clients are runtime-owned; preconstructed
+  clients are caller-owned unless `RUNTIME_OWNED` explicitly transfers
+  responsibility to the runtime.
 - Duplicate registration for the same model reference or provider type fails
   with `DuplicateModelReferenceError` / `DuplicateProviderTypeError` unless
   `replace=True` is passed. Replacement is atomic: a run that already resolved
@@ -91,7 +92,51 @@ endpoint, credential, proxy, TLS, and transport configuration.
 - `registry.deregister_model(reference)` and
   `registry.deregister_provider_type(provider_type)` remove a binding.
   Deregistration prevents *later* resolution; it never invalidates a binding a
-  call already received from `resolve()`.
+  call already received from `resolve()`. Runtime-mediated model calls acquire
+  a private lease before dispatch, so a retired runtime-owned client closes only
+  after its final accepted call releases that lease. A client deliberately
+  shared by several references has one ownership declaration and closes once.
+
+## Runtime shutdown
+
+Use `await runtime.aclose()` (or `async with Runtime(...)`) to stop new model
+resolution and registration, wait for accepted model-call leases up to the
+configured grace timeout, and close runtime-owned clients. Clients may expose
+either `close()` or `async aclose()`; clients with neither method are valid and
+require no cleanup. Caller-owned clients stay open and appear in
+`ProviderCleanupReport.skipped_caller_owned`.
+
+Cleanup always attempts every eligible owned client. A `ProviderShutdownError`
+contains a safe aggregate report when any close fails or outlives the deadline;
+reports include references, provider identities, and local exception class
+names but never provider exception text. Shutdown is idempotent, and concurrent
+callers await the same completion outcome. After shutdown starts, runtime use,
+registration, and resolution raise `RuntimeClosedError`.
+
+## Optional adapter packages
+
+Core imports do not require any provider SDK. Install exactly the integration
+your application selects:
+
+```bash
+uv add "conducto-ai[ollama]"
+uv add "conducto-ai[openai]"
+uv add "conducto-ai[microsoft-foundry]"
+```
+
+`conducto.adapters.require_adapter("openai")` checks only the selected SDK and
+raises `AdapterDependencyError` with the relevant extra when unavailable. It
+does not import the SDK, resolve credentials, construct clients, or contact a
+network. Applications should register custom adapters directly through
+`ProviderRegistry`; do not load arbitrary module names from configuration.
+
+For application-enabled third-party adapters, use
+`discover_external_adapters()` with a trusted `ExternalAdapterSpec` allowlist.
+It reads only the standard-library `importlib.metadata` entry-point metadata
+from the `conducto.providers` group and requires the configured distribution
+name and exact compatible version. Call `load_external_adapter()` only after
+the application selects one discovered result; this is the sole point at which
+the allowlisted entry point is imported.
 - `register_provider()` rejects a duplicate reference before invoking the
   factory, and tracks each reference's mutation generation. If another thread
   replaces or deregisters the same reference while a factory-constructed

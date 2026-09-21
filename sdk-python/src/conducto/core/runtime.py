@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# noinspection PyPackageRequirements
+import asyncio
 import contextvars
 import os
 import threading
@@ -59,6 +59,8 @@ from .provider import (
 from .provider_registry import (
     DEFAULT_AVAILABILITY_TIMEOUT_SECONDS,
     ModelBindingSnapshot,
+    ProviderCleanupFailure,
+    ProviderCleanupReport,
     ProviderClientConfig,
     ProviderFactory,
     ProviderOwnership,
@@ -96,9 +98,12 @@ from .runtime_errors import (
     ProviderClientValidationError,
     ProviderConstructionError,
     ProviderFactoryValidationError,
+    ProviderOwnershipError,
     ProviderRegistrationError,
+    ProviderShutdownError,
     ProviderTypeMismatchError,
     ProviderUnavailableError,
+    RuntimeClosedError,
     StaleProviderConstructionError,
     UnknownModelReferenceError,
     UnknownProviderTypeError,
@@ -145,13 +150,18 @@ __all__ = [
     "NoActiveRunContextError",
     "ProviderCapabilities",
     "ProviderClientConfig",
+    "ProviderCleanupReport",
+    "ProviderCleanupFailure",
     "ProviderClientValidationError",
     "ProviderConstructionError",
     "ProviderFactory",
     "ProviderFactoryValidationError",
     "ProviderOwnership",
+    "ProviderOwnershipError",
     "ProviderRegistration",
     "ProviderRegistrationError",
+    "ProviderShutdownError",
+    "RuntimeClosedError",
     "ProviderRegistry",
     "ProviderRegistrySnapshot",
     "ProviderResult",
@@ -216,6 +226,43 @@ class Runtime:
         self._gateway_secret = os.urandom(32)
         self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._execution_locks_guard = threading.Lock()
+        self._shutdown_task: asyncio.Task[ProviderCleanupReport] | None = None
+
+    def _ensure_open(self) -> None:
+        """Raise when a caller attempts to begin work after shutdown."""
+        if self._provider_registry.closed:
+            raise RuntimeClosedError("Runtime is shut down")
+
+    async def aclose(
+        self,
+        *,
+        timeout: float | None = 30.0,
+        per_client_timeout: float | None = 10.0,
+        max_concurrency: int = 4,
+    ) -> ProviderCleanupReport:
+        """Shut down provider resolution and release runtime-owned clients.
+
+        Concurrent callers observe the same completion report. Cancelling one
+        caller does not cancel the shared cleanup operation.
+        """
+        if self._shutdown_task is None:
+            self._shutdown_task = asyncio.create_task(
+                self._provider_registry.aclose(
+                    timeout=timeout,
+                    per_client_timeout=per_client_timeout,
+                    max_concurrency=max_concurrency,
+                )
+            )
+        return await asyncio.shield(self._shutdown_task)
+
+    async def __aenter__(self) -> Runtime:
+        """Enter an async runtime scope."""
+        self._ensure_open()
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        """Close owned provider clients when leaving an async runtime scope."""
+        await self.aclose()
 
     @property
     def provider_registry(self) -> ProviderRegistry:
@@ -230,6 +277,7 @@ class Runtime:
             value: New registry instance used for model resolution and provider
                 lookup.
         """
+        self._ensure_open()
         self._provider_registry = value
         self._model_resolver = ModelResolver(value)
 
@@ -283,6 +331,7 @@ class Runtime:
         Returns:
             A normalized invocation result envelope.
         """
+        self._ensure_open()
         from .invocation import invoke_agent
 
         active_context = get_run_context()
@@ -467,6 +516,7 @@ class Runtime:
         Returns:
             A task-local run context associated with this runtime.
         """
+        self._ensure_open()
         agent = agent_config or AgentModelConfig()
         run = run_config or RunConfig()
         binding = self._resolve_model_binding(
@@ -570,6 +620,7 @@ class Runtime:
         Returns:
             The selected model descriptor, if any.
         """
+        self._ensure_open()
         binding = self._resolve_model_binding(
             agent_id=agent_id,
             agent_config=agent_config,
@@ -606,6 +657,7 @@ class Runtime:
         required_capabilities: frozenset[str] = frozenset(),
     ) -> ResolvedModel | None:
         """Resolve a model for the current call using the active run context."""
+        self._ensure_open()
         binding = self._resolve_for_call_binding(
             context,
             override,
@@ -663,6 +715,7 @@ class Runtime:
         """
         if not context.belongs_to(self):
             raise ValueError("Run context belongs to a different runtime")
+        self._ensure_open()
         required = frozenset(
             {
                 "structured_output",
@@ -677,17 +730,21 @@ class Runtime:
         )
         if binding is None:
             raise MissingModelDefaultError(f"Agent '{context.agent_id}' requires a model")
-        return await complete_model_call(
-            context,
-            binding,
-            messages,
-            structured_output=structured_output,
-            tools=tools,
-            tool_results=tool_results,
-            effective_deadline=effective_deadline,
-            purpose=purpose,
-            clock=clock,
-        )
+        lease = self._provider_registry.acquire(binding.registration)
+        try:
+            return await complete_model_call(
+                context,
+                binding,
+                messages,
+                structured_output=structured_output,
+                tools=tools,
+                tool_results=tool_results,
+                effective_deadline=effective_deadline,
+                purpose=purpose,
+                clock=clock,
+            )
+        finally:
+            await lease.release()
 
     @staticmethod
     def _validate_capabilities(

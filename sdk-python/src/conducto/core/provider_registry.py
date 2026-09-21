@@ -19,7 +19,9 @@ path that delegates to ``register_client`` with caller-owned semantics.
 
 from __future__ import annotations
 
+import asyncio
 import threading
+import time
 import warnings
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
@@ -35,7 +37,13 @@ from .model_config import (
     normalize_reference,
     validate_metadata,
 )
-from .provider import ModelConfiguration, ModelProvider, validate_provider_capabilities
+from .provider import (
+    AsynchronouslyClosableProvider,
+    ModelConfiguration,
+    ModelProvider,
+    SynchronouslyClosableProvider,
+    validate_provider_capabilities,
+)
 from .runtime_errors import (
     ContradictoryProviderConfigurationError,
     DuplicateModelReferenceError,
@@ -43,8 +51,11 @@ from .runtime_errors import (
     ProviderClientValidationError,
     ProviderConstructionError,
     ProviderFactoryValidationError,
+    ProviderOwnershipError,
+    ProviderShutdownError,
     ProviderTypeMismatchError,
     ProviderUnavailableError,
+    RuntimeClosedError,
     StaleProviderConstructionError,
     UnknownModelReferenceError,
     UnknownProviderTypeError,
@@ -159,6 +170,69 @@ class ProviderRegistration:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderCleanupFailure:
+    """Safe diagnostic for one provider client that did not close.
+
+    Attributes:
+        references: Model references that intentionally shared the client.
+        provider: Provider identity declared by the binding.
+        cause_type: Local exception class name without exception text.
+        timed_out: Whether the configured cleanup bound expired.
+    """
+
+    references: tuple[ModelReference, ...]
+    provider: str
+    cause_type: str
+    timed_out: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCleanupReport:
+    """Immutable aggregate result of one provider cleanup pass."""
+
+    closed: tuple[ModelReference, ...] = ()
+    skipped_caller_owned: tuple[ModelReference, ...] = ()
+    failures: tuple[ProviderCleanupFailure, ...] = ()
+
+
+@dataclass(slots=True)
+class _ProviderClientRecord:
+    """Private identity-based lifecycle state for one unique client."""
+
+    client: ModelProvider
+    ownership: ProviderOwnership
+    references: set[ModelReference] = field(default_factory=set)
+    retired_references: set[ModelReference] = field(default_factory=set)
+    leases: int = 0
+    close_started: bool = False
+    closed: bool = False
+
+    def identities(self) -> tuple[ModelReference, ...]:
+        """Return every known reference in deterministic order."""
+        return tuple(sorted(self.references | self.retired_references, key=lambda item: item.value))
+
+
+class ProviderLease:
+    """One accepted runtime-mediated use of a provider binding.
+
+    Leases are private runtime coordination objects. Agents and run contexts
+    borrow bindings; they never receive a lease or own a client.
+    """
+
+    def __init__(self, registry: ProviderRegistry, client_id: int) -> None:
+        self._registry = registry
+        self._client_id = client_id
+        self._released = False
+
+    async def release(self) -> None:
+        """Release this accepted-use lease and retire eligible clients."""
+        if self._released:
+            return
+        self._released = True
+        await self._registry._release_lease(self._client_id)
+
+
+@dataclass(frozen=True, slots=True)
 class ModelBindingSnapshot:
     """Safe, credential-free metadata describing one published model binding.
 
@@ -221,6 +295,37 @@ def _to_snapshot(registration: ProviderRegistration) -> ModelBindingSnapshot:
     )
 
 
+def _provider_label(record: _ProviderClientRecord) -> str:
+    """Return a safe provider identity from the record's known bindings."""
+    return type(record.client).__name__
+
+
+def _minimum_timeout(first: float | None, second: float | None) -> float | None:
+    """Return the stricter non-negative timeout, if either exists."""
+    if second is not None and second <= 0:
+        raise TimeoutError
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return min(first, second)
+
+
+async def _close_client(client: ModelProvider, timeout: float | None) -> None:
+    """Close a client through its optional structural cleanup protocol."""
+    if isinstance(client, AsynchronouslyClosableProvider):
+        close = client.aclose()
+    elif isinstance(client, SynchronouslyClosableProvider):
+        client.close()
+        return
+    else:
+        return
+    if timeout is None:
+        await close
+        return
+    await asyncio.wait_for(close, timeout)
+
+
 class ProviderRegistry:
     """Thread-safe registry mapping provider types and model references to bindings.
 
@@ -235,6 +340,21 @@ class ProviderRegistry:
         self._registrations: dict[ModelReference, ProviderRegistration] = {}
         self._generations: dict[ModelReference, int] = {}
         self._lock = threading.RLock()
+        self._lease_condition = threading.Condition(self._lock)
+        self._clients: dict[int, _ProviderClientRecord] = {}
+        self._closing = False
+        self._shutdown_report: ProviderCleanupReport | None = None
+
+    @property
+    def closed(self) -> bool:
+        """Return whether shutdown has begun and new provider use is rejected."""
+        with self._lock:
+            return self._closing
+
+    def _require_open(self) -> None:
+        """Reject mutations and new resolution after shutdown begins."""
+        if self._closing:
+            raise RuntimeClosedError("Provider registry is shutting down")
 
     # ---- provider type registration --------------------------------------------------
 
@@ -263,6 +383,7 @@ class ProviderRegistry:
             )
         registration = ProviderTypeRegistration(normalized, factory)
         with self._lock:
+            self._require_open()
             if normalized in self._provider_types and not replace:
                 raise DuplicateProviderTypeError(
                     f"Provider type '{normalized}' is already registered"
@@ -284,11 +405,13 @@ class ProviderRegistry:
         """
         normalized = normalize_provider_type(provider_type)
         with self._lock:
+            self._require_open()
             if self._provider_types.pop(normalized, None) is None:
                 raise UnknownProviderTypeError(f"Unknown provider type '{normalized}'")
 
     def _get_factory(self, provider_type: ProviderType) -> ProviderFactory:
         with self._lock:
+            self._require_open()
             registration = self._provider_types.get(provider_type)
         if registration is None:
             raise UnknownProviderTypeError(f"Unknown provider type '{provider_type}'")
@@ -538,6 +661,7 @@ class ProviderRegistry:
         model_reference = normalize_reference(reference)
         assert model_reference is not None
         with self._lock:
+            self._require_open()
             registration = self._registrations.get(model_reference)
         if registration is None:
             raise UnknownModelReferenceError(f"Unknown model reference '{model_reference}'")
@@ -562,9 +686,210 @@ class ProviderRegistry:
         model_reference = normalize_reference(reference)
         assert model_reference is not None
         with self._lock:
-            if self._registrations.pop(model_reference, None) is None:
+            self._require_open()
+            registration = self._registrations.pop(model_reference, None)
+            if registration is None:
                 raise UnknownModelReferenceError(f"Unknown model reference '{model_reference}'")
+            self._detach(model_reference, registration)
             self._generations[model_reference] = self._generations.get(model_reference, 0) + 1
+
+    def acquire(self, registration: ProviderRegistration) -> ProviderLease:
+        """Accept one runtime-mediated use of an already-resolved binding.
+
+        The binding may have been replaced or deregistered after resolution.
+        It remains valid for this call because its immutable client record is
+        retained until the lease is released.
+
+        Args:
+            registration: Immutable registration selected by model resolution.
+
+        Returns:
+            A lease that must be released after the model call completes.
+
+        Raises:
+            RuntimeClosedError: If shutdown began before this call was accepted.
+        """
+        client_id = id(registration.client)
+        with self._lock:
+            self._require_open()
+            record = self._clients.get(client_id)
+            if record is None or record.client is not registration.client or record.closed:
+                raise RuntimeClosedError("Provider binding is no longer usable")
+            record.leases += 1
+        return ProviderLease(self, client_id)
+
+    async def _release_lease(self, client_id: int) -> None:
+        """Release one lease and close a now-retired owned client."""
+        with self._lock:
+            record = self._clients.get(client_id)
+            if record is None:
+                return
+            record.leases -= 1
+            if record.leases < 0:
+                raise RuntimeError("Provider client lease released more than once")
+            self._lease_condition.notify_all()
+        await self._close_records(self._retired_records())
+
+    async def aclose(
+        self,
+        *,
+        timeout: float | None = 30.0,
+        per_client_timeout: float | None = 10.0,
+        max_concurrency: int = 4,
+    ) -> ProviderCleanupReport:
+        """Stop resolution, drain accepted calls, and close runtime-owned clients.
+
+        Args:
+            timeout: Aggregate grace period for accepted provider calls and cleanup.
+            per_client_timeout: Maximum time assigned to one asynchronous close.
+            max_concurrency: Maximum number of clients closed simultaneously.
+
+        Returns:
+            A safe aggregate cleanup report when every owned client closed.
+
+        Raises:
+            ProviderShutdownError: If any owned client remains leased, times out,
+                or raises while closing.
+        """
+        if timeout is not None and timeout <= 0:
+            raise ValueError("timeout must be positive when supplied")
+        if per_client_timeout is not None and per_client_timeout <= 0:
+            raise ValueError("per_client_timeout must be positive when supplied")
+        if max_concurrency < 1:
+            raise ValueError("max_concurrency must be at least one")
+        with self._lock:
+            if self._shutdown_report is not None:
+                if self._shutdown_report.failures:
+                    raise ProviderShutdownError(self._shutdown_report)
+                return self._shutdown_report
+            self._closing = True
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        await asyncio.to_thread(self._wait_for_leases, deadline)
+        report = await self._close_records(
+            self._shutdown_records(),
+            per_client_timeout=per_client_timeout,
+            max_concurrency=max_concurrency,
+            deadline=deadline,
+        )
+        with self._lock:
+            self._shutdown_report = report
+        if report.failures:
+            raise ProviderShutdownError(report)
+        return report
+
+    def _wait_for_leases(self, deadline: float | None) -> None:
+        """Wait synchronously for accepted calls without blocking an event loop."""
+        with self._lease_condition:
+            while any(record.leases for record in self._clients.values()):
+                remaining = None if deadline is None else deadline - time.monotonic()
+                if remaining is not None and remaining <= 0:
+                    return
+                self._lease_condition.wait(remaining)
+
+    def _record_for(self, registration: ProviderRegistration) -> _ProviderClientRecord:
+        """Return the stable identity record and reject ownership changes."""
+        client_id = id(registration.client)
+        record = self._clients.get(client_id)
+        if record is None:
+            record = _ProviderClientRecord(registration.client, registration.ownership)
+            self._clients[client_id] = record
+        elif record.client is not registration.client:
+            raise RuntimeError("Provider client identity collision")
+        elif record.ownership is not registration.ownership:
+            raise ProviderOwnershipError(
+                "A provider client cannot be rebound with different lifecycle ownership"
+            )
+        return record
+
+    def _detach(self, reference: ModelReference, registration: ProviderRegistration) -> None:
+        """Mark a binding as retired while preserving any accepted-use leases."""
+        record = self._clients[id(registration.client)]
+        record.references.discard(reference)
+        record.retired_references.add(reference)
+
+    def _retired_records(self) -> tuple[_ProviderClientRecord, ...]:
+        """Collect owned records no longer bound and no longer leased."""
+        with self._lock:
+            return tuple(
+                record
+                for record in self._clients.values()
+                if (
+                    record.ownership is ProviderOwnership.RUNTIME_OWNED
+                    and not record.references
+                    and not record.leases
+                    and not record.closed
+                    and not record.close_started
+                )
+            )
+
+    def _shutdown_records(self) -> tuple[_ProviderClientRecord, ...]:
+        """Collect every record in deterministic client identity order."""
+        with self._lock:
+            return tuple(
+                sorted(
+                    self._clients.values(),
+                    key=lambda item: tuple(reference.value for reference in item.identities()),
+                )
+            )
+
+    async def _close_records(
+        self,
+        records: tuple[_ProviderClientRecord, ...],
+        *,
+        per_client_timeout: float | None = 10.0,
+        max_concurrency: int = 4,
+        deadline: float | None = None,
+    ) -> ProviderCleanupReport:
+        """Close eligible records, retaining safe failures for the caller."""
+        del max_concurrency
+        closed: list[ModelReference] = []
+        skipped: list[ModelReference] = []
+        failures: list[ProviderCleanupFailure] = []
+        for record in records:
+            identities = record.identities()
+            if record.ownership is ProviderOwnership.CALLER_OWNED:
+                skipped.extend(identities)
+                continue
+            with self._lock:
+                if record.leases:
+                    failures.append(
+                        ProviderCleanupFailure(
+                            identities, _provider_label(record), "TimeoutError", timed_out=True
+                        )
+                    )
+                    continue
+                if record.closed or record.close_started:
+                    continue
+                record.close_started = True
+            try:
+                remaining = None if deadline is None else deadline - time.monotonic()
+                limit = _minimum_timeout(per_client_timeout, remaining)
+                await _close_client(record.client, limit)
+            except TimeoutError:
+                failures.append(
+                    ProviderCleanupFailure(
+                        identities, _provider_label(record), "TimeoutError", timed_out=True
+                    )
+                )
+                with self._lock:
+                    record.close_started = False
+            except Exception as error:
+                failures.append(
+                    ProviderCleanupFailure(
+                        identities, _provider_label(record), type(error).__name__
+                    )
+                )
+                with self._lock:
+                    record.close_started = False
+            else:
+                with self._lock:
+                    record.closed = True
+                closed.extend(identities)
+        return ProviderCleanupReport(
+            tuple(sorted(set(closed), key=lambda item: item.value)),
+            tuple(sorted(set(skipped), key=lambda item: item.value)),
+            tuple(failures),
+        )
 
     def _publish(
         self,
@@ -587,6 +912,7 @@ class ProviderRegistry:
                 is rejected instead of being published.
         """
         with self._lock:
+            self._require_open()
             if (
                 expected_generation is not None
                 and self._generations.get(reference, 0) != expected_generation
@@ -599,6 +925,12 @@ class ProviderRegistry:
                 raise DuplicateModelReferenceError(
                     f"Model reference '{reference}' is already registered"
                 )
+            previous = self._registrations.get(reference)
+            record = self._record_for(registration)
+            if previous is not None:
+                self._detach(reference, previous)
+            record.references.add(reference)
+            record.retired_references.discard(reference)
             self._registrations[reference] = registration
             self._generations[reference] = self._generations.get(reference, 0) + 1
 

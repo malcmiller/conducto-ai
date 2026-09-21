@@ -1,7 +1,7 @@
 """Deterministic, provider-neutral conformance helpers.
 
-Application providers can use :func:`assert_provider_conformance` with a
-credential-free scripted transport. The helper intentionally uses only public
+Application providers can use: func:`assert_provider_conformance`
+with credential-free scripted transport. The helper intentionally uses only public
 Conducto contracts and never inspects provider internals.
 """
 

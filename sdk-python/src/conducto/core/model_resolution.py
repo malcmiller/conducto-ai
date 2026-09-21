@@ -19,7 +19,7 @@ from .provider import (
     ProviderCapabilities,
     validate_provider_capabilities,
 )
-from .provider_registry import ProviderRegistry
+from .provider_registry import ProviderRegistration, ProviderRegistry
 from .run_context import ModelPolicy, ModelPolicyContext, RunContext
 from .runtime_errors import (
     MissingModelDefaultError,
@@ -43,6 +43,7 @@ class _ResolvedModelBinding:
     model: ResolvedModel
     client: ModelProvider = field(repr=False, compare=False)
     configuration: ModelConfiguration = field(repr=False, compare=False)
+    registration: ProviderRegistration = field(repr=False, compare=False)
 
 
 class ModelResolver:
@@ -123,6 +124,7 @@ class ModelResolver:
             ResolvedModel(reference, registration.provider, source),
             registration.client,
             registration.configuration,
+            registration,
         )
 
     def resolve_for_call_binding(

@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast, runtime_checkable
 
 from pydantic import (
     BaseModel,
@@ -582,6 +582,22 @@ class ProviderCancellationError(ProviderError):
 
     def __init__(self, message: str = "Provider request cancelled") -> None:
         super().__init__(message, category=ProviderFailureCategory.CANCELLATION)
+
+
+@runtime_checkable
+class SynchronouslyClosableProvider(Protocol):
+    """Optional structural protocol for clients that close synchronously."""
+
+    def close(self) -> None:
+        """Release the client's local resources."""
+
+
+@runtime_checkable
+class AsynchronouslyClosableProvider(Protocol):
+    """Optional structural protocol for clients that close asynchronously."""
+
+    async def aclose(self) -> None:
+        """Release the client's local resources."""
 
 
 class ModelProvider(Protocol):
