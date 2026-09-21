@@ -181,7 +181,7 @@ def build_application() -> tuple[OrchestratorAgent, ChainingModel]:
     """Build the local registry, one runtime, and the three public agents."""
     model = ChainingModel()
     providers = ProviderRegistry()
-    providers.register(
+    providers.register_client(
         "local-model",
         model,
         ModelConfiguration(provider="fake", model="local-model"),

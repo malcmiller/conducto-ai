@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -24,6 +25,47 @@ class ModelReference:
 
     def __str__(self) -> str:
         return self.value
+
+
+_PROVIDER_TYPE_SEGMENT = r"[a-z0-9]+(?:[._-][a-z0-9]+)*"
+_PROVIDER_TYPE_PATTERN = re.compile(f"^{_PROVIDER_TYPE_SEGMENT}(?:/{_PROVIDER_TYPE_SEGMENT})?$")
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderType:
+    """Normalized, versionable identifier for a registered provider factory family.
+
+    Accepted values are lowercase, dot/dash/underscore separated segments with
+    an optional ``/version`` suffix, for example, ``"ollama"`` or
+    ``"azure-foundry/v2"``.
+    """
+
+    value: str
+
+    def __post_init__(self) -> None:
+        normalized = self.value.strip().lower()
+        if not normalized or not _PROVIDER_TYPE_PATTERN.match(normalized):
+            raise ValueError(
+                "Provider type must be a lowercase identifier such as 'ollama' or 'ollama/v2'"
+            )
+        object.__setattr__(self, "value", normalized)
+
+    def __str__(self) -> str:
+        return self.value
+
+
+def normalize_provider_type(value: ProviderType | str) -> ProviderType:
+    """Normalize a string or existing provider type into a canonical ``ProviderType``.
+
+    Args:
+        value: A raw provider type string or an already-normalized instance.
+
+    Returns:
+        The canonical, normalized provider type.
+    """
+    if isinstance(value, ProviderType):
+        return value
+    return ProviderType(value)
 
 
 class ModelResolutionSource(StrEnum):

@@ -1,13 +1,31 @@
 """Focused contracts for runtime-owned provider registration."""
 
+import threading
+import time
+
 import pytest
 
 from conducto import FakeModel, ModelConfiguration
+from conducto.core.provider_registry import (
+    ProviderClientConfig,
+    ProviderOwnership,
+)
 from conducto.core.provider_registry import ProviderRegistry as RegistryProviderRegistry
 from conducto.core.runtime import (
+    ContradictoryProviderConfigurationError,
+    DuplicateModelReferenceError,
+    DuplicateProviderTypeError,
+    IncompatibleProviderCapabilitiesError,
+    ProviderClientValidationError,
+    ProviderConstructionError,
+    ProviderFactoryValidationError,
     ProviderRegistration,
     ProviderRegistry,
+    ProviderTypeMismatchError,
     ProviderUnavailableError,
+    StaleProviderConstructionError,
+    UnknownModelReferenceError,
+    UnknownProviderTypeError,
 )
 
 
@@ -18,21 +36,22 @@ def test_provider_registry_replaces_only_when_requested() -> None:
     configuration = ModelConfiguration(provider="fake", model="test")
 
     assert ProviderRegistry is RegistryProviderRegistry
-    registry.register("model", first, configuration)
+    registry.register_client("model", first, configuration)
     registration = registry.resolve("model")
     assert isinstance(registration, ProviderRegistration)
     assert registration.client is first
-    with pytest.raises(ValueError, match="already registered"):
-        registry.register("model", second, configuration)
+    assert registration.ownership is ProviderOwnership.CALLER_OWNED
+    with pytest.raises(DuplicateModelReferenceError, match="already registered"):
+        registry.register_client("model", second, configuration)
 
-    registry.register("model", second, configuration, replace=True)
+    registry.register_client("model", second, configuration, replace=True)
     assert registry.resolve("model").client is second
 
 
 def test_provider_registry_evaluates_availability_on_each_lookup() -> None:
     available = True
     registry = ProviderRegistry()
-    registry.register(
+    registry.register_client(
         "model",
         FakeModel({}),
         ModelConfiguration(provider="fake", model="test"),
@@ -42,4 +61,321 @@ def test_provider_registry_evaluates_availability_on_each_lookup() -> None:
     assert registry.resolve("model").reference.value == "model"
     available = False
     with pytest.raises(ProviderUnavailableError):
+        registry.resolve("model")
+
+
+def test_legacy_register_delegates_to_register_client_and_warns() -> None:
+    registry = ProviderRegistry()
+    client = FakeModel({})
+    configuration = ModelConfiguration(provider="fake", model="test")
+
+    with pytest.deprecated_call():
+        registry.register("model", client, configuration)
+
+    registration = registry.resolve("model")
+    assert registration.client is client
+    assert registration.ownership is ProviderOwnership.CALLER_OWNED
+
+
+def test_deregister_model_prevents_later_resolution_only() -> None:
+    registry = ProviderRegistry()
+    configuration = ModelConfiguration(provider="fake", model="test")
+    registry.register_client("model", FakeModel({}), configuration)
+
+    accepted = registry.resolve("model")
+    registry.deregister_model("model")
+    assert accepted.client is not None
+
+    with pytest.raises(UnknownModelReferenceError):
+        registry.resolve("model")
+    with pytest.raises(UnknownModelReferenceError):
+        registry.deregister_model("model")
+
+
+class _RecordingFactory:
+    """A trusted provider-type factory used only for tests."""
+
+    def __init__(self) -> None:
+        self.calls: list[ProviderClientConfig] = []
+
+    def create(self, configuration: ProviderClientConfig) -> FakeModel:
+        self.calls.append(configuration)
+        return FakeModel({})
+
+
+class _FailingFactory:
+    def create(self, configuration: ProviderClientConfig) -> FakeModel:
+        raise RuntimeError("boom")
+
+
+def test_register_provider_constructs_once_from_typed_configuration() -> None:
+    registry = ProviderRegistry()
+    factory = _RecordingFactory()
+    registry.register_provider_type("fake", factory)
+
+    registration = registry.register_provider(
+        "model",
+        provider_type="fake",
+        configuration=ProviderClientConfig(endpoint="https://example.test"),
+        model_configuration=ModelConfiguration(provider="fake", model="test"),
+    )
+
+    assert len(factory.calls) == 1
+    assert registration.ownership is ProviderOwnership.RUNTIME_OWNED
+    assert registration.provider_type is not None
+    assert str(registration.provider_type) == "fake"
+    assert registry.resolve("model").client is registration.client
+
+
+def test_register_provider_type_duplicate_requires_replace() -> None:
+    registry = ProviderRegistry()
+    registry.register_provider_type("fake", _RecordingFactory())
+    with pytest.raises(DuplicateProviderTypeError):
+        registry.register_provider_type("fake", _RecordingFactory())
+    registry.register_provider_type("fake", _RecordingFactory(), replace=True)
+
+
+def test_register_provider_type_rejects_non_structural_factory() -> None:
+    registry = ProviderRegistry()
+    with pytest.raises(ProviderFactoryValidationError):
+        registry.register_provider_type("fake", object())  # type: ignore[arg-type]
+
+
+def test_register_provider_unknown_provider_type_fails() -> None:
+    registry = ProviderRegistry()
+    with pytest.raises(UnknownProviderTypeError):
+        registry.register_provider(
+            "model",
+            provider_type="missing",
+            configuration=ProviderClientConfig(),
+            model_configuration=ModelConfiguration(provider="missing", model="test"),
+        )
+
+
+def test_register_provider_mismatched_provider_identifier_fails() -> None:
+    registry = ProviderRegistry()
+    registry.register_provider_type("fake", _RecordingFactory())
+    with pytest.raises(ProviderTypeMismatchError):
+        registry.register_provider(
+            "model",
+            provider_type="fake",
+            configuration=ProviderClientConfig(),
+            model_configuration=ModelConfiguration(provider="other", model="test"),
+        )
+
+
+def test_register_provider_construction_failure_is_typed_and_does_not_publish() -> None:
+    registry = ProviderRegistry()
+    registry.register_provider_type("fake", _FailingFactory())
+    with pytest.raises(ProviderConstructionError):
+        registry.register_provider(
+            "model",
+            provider_type="fake",
+            configuration=ProviderClientConfig(),
+            model_configuration=ModelConfiguration(provider="fake", model="test"),
+        )
+    with pytest.raises(UnknownModelReferenceError):
+        registry.resolve("model")
+
+
+def test_register_provider_validates_required_capabilities() -> None:
+    registry = ProviderRegistry()
+    registry.register_provider_type("fake", _RecordingFactory())
+    with pytest.raises(IncompatibleProviderCapabilitiesError):
+        registry.register_provider(
+            "model",
+            provider_type="fake",
+            configuration=ProviderClientConfig(),
+            model_configuration=ModelConfiguration(provider="fake", model="test"),
+            required_capabilities=frozenset({"cancellation"}),
+        )
+
+
+def test_register_client_rejects_contradictory_connection_config() -> None:
+    registry = ProviderRegistry()
+    with pytest.raises(ContradictoryProviderConfigurationError):
+        registry.register_client(
+            "model",
+            FakeModel({}),
+            ModelConfiguration(provider="fake", model="test"),
+            connection_config=ProviderClientConfig(endpoint="https://example.test"),
+        )
+    with pytest.raises(UnknownModelReferenceError):
+        registry.resolve("model")
+
+
+def test_register_client_rejects_structurally_invalid_client() -> None:
+    registry = ProviderRegistry()
+    with pytest.raises(ProviderClientValidationError):
+        registry.register_client(
+            "model",
+            object(),  # type: ignore[arg-type]
+            ModelConfiguration(provider="fake", model="test"),
+        )
+
+
+def test_snapshot_is_immutable_deterministic_and_safe() -> None:
+    registry = ProviderRegistry()
+    registry.register_provider_type("fake", _RecordingFactory())
+    registry.register_client(
+        "b-model", FakeModel({}), ModelConfiguration(provider="fake", model="b")
+    )
+    registry.register_client(
+        "a-model", FakeModel({}), ModelConfiguration(provider="fake", model="a")
+    )
+
+    snapshot = registry.snapshot()
+    assert [item.reference.value for item in snapshot.models] == ["a-model", "b-model"]
+    assert [str(item) for item in snapshot.provider_types] == ["fake"]
+    for item in snapshot.models:
+        assert not hasattr(item, "client")
+        assert not hasattr(item, "configuration")
+
+    with pytest.raises(AttributeError):
+        field_name = "models"
+        setattr(snapshot, field_name, ())
+
+
+def test_concurrent_register_resolve_replace_deregister_stay_isolated() -> None:
+    registry = ProviderRegistry()
+    configuration = ModelConfiguration(provider="fake", model="test")
+    errors: list[Exception] = []
+
+    def worker(index: int) -> None:
+        reference = f"model-{index % 4}"
+        try:
+            registry.register_client(reference, FakeModel({}), configuration, replace=True)
+            registry.resolve(reference)
+            if index % 7 == 0:
+                registry.deregister_model(reference)
+        except UnknownModelReferenceError:
+            pass
+        except Exception as exc:  # pragma: no cover - failure path surfaces in assertion
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(64)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert errors == []
+    remaining = registry.snapshot().models
+    assert all(item.reference.value.startswith("model-") for item in remaining)
+
+
+def test_register_client_rejects_contradictory_model_configuration_endpoint() -> None:
+    registry = ProviderRegistry()
+    with pytest.raises(ContradictoryProviderConfigurationError):
+        registry.register_client(
+            "model",
+            FakeModel({}),
+            ModelConfiguration(provider="fake", model="test", endpoint="https://example.test"),
+        )
+    with pytest.raises(UnknownModelReferenceError):
+        registry.resolve("model")
+
+
+def test_register_provider_duplicate_rejected_before_factory_runs() -> None:
+    registry = ProviderRegistry()
+    factory = _RecordingFactory()
+    registry.register_provider_type("fake", factory)
+    registry.register_provider(
+        "model",
+        provider_type="fake",
+        configuration=ProviderClientConfig(),
+        model_configuration=ModelConfiguration(provider="fake", model="test"),
+    )
+    assert len(factory.calls) == 1
+
+    with pytest.raises(DuplicateModelReferenceError):
+        registry.register_provider(
+            "model",
+            provider_type="fake",
+            configuration=ProviderClientConfig(),
+            model_configuration=ModelConfiguration(provider="fake", model="test"),
+        )
+
+    # The factory must never be invoked for a registration that cannot be published.
+    assert len(factory.calls) == 1
+
+
+def test_available_predicate_that_hangs_is_bounded_and_treated_as_unavailable() -> None:
+    registry = ProviderRegistry()
+
+    def hangs_forever() -> bool:
+        time.sleep(5)
+        return True
+
+    registry.register_client(
+        "model",
+        FakeModel({}),
+        ModelConfiguration(provider="fake", model="test"),
+        available=hangs_forever,
+        available_timeout=0.05,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(ProviderUnavailableError):
+        registry.resolve("model")
+    assert time.monotonic() - started < 2.0
+
+
+def test_available_predicate_that_raises_is_treated_as_unavailable() -> None:
+    registry = ProviderRegistry()
+
+    def explodes() -> bool:
+        raise RuntimeError("boom")
+
+    registry.register_client(
+        "model",
+        FakeModel({}),
+        ModelConfiguration(provider="fake", model="test"),
+        available=explodes,
+    )
+
+    with pytest.raises(ProviderUnavailableError):
+        registry.resolve("model")
+
+
+def test_replace_during_slow_factory_construction_discards_stale_result() -> None:
+    registry = ProviderRegistry()
+    started = threading.Event()
+    release = threading.Event()
+
+    class _SlowFactory:
+        def create(self, configuration: ProviderClientConfig) -> FakeModel:
+            started.set()
+            release.wait(timeout=5)
+            return FakeModel({})
+
+    registry.register_provider_type("fake", _SlowFactory())
+    registry.register_client(
+        "model", FakeModel({}), ModelConfiguration(provider="fake", model="test")
+    )
+
+    outcome: list[BaseException] = []
+
+    def slow_register() -> None:
+        try:
+            registry.register_provider(
+                "model",
+                provider_type="fake",
+                configuration=ProviderClientConfig(),
+                model_configuration=ModelConfiguration(provider="fake", model="test"),
+                replace=True,
+            )
+        except BaseException as exc:  # noqa: BLE001 - captured for assertion below
+            outcome.append(exc)
+
+    thread = threading.Thread(target=slow_register)
+    thread.start()
+    started.wait(timeout=5)
+    registry.deregister_model("model")
+    release.set()
+    thread.join(timeout=5)
+
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], StaleProviderConstructionError)
+    with pytest.raises(UnknownModelReferenceError):
         registry.resolve("model")

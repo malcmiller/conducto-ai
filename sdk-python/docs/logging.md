@@ -76,27 +76,27 @@ timestamps with millisecond precision.
 
 The fields below are emitted when applicable:
 
-| Field               | Description                                                                    |
-|---------------------|--------------------------------------------------------------------------------|
-| `schema_version`    | Structured event schema version, currently `"1"`.                              |
-| `event`             | Stable, versioned event name.                                                  |
-| `outcome`           | One of `success`, `failure`, `timeout`, or `cancelled`.                        |
-| `correlation_id`    | Caller-provided invocation/route ID. If omitted, Conducto creates a UUID.      |
-| `agent_id`          | Published local agent name.                                                    |
-| `capability_id`     | Published capability name.                                                     |
-| `duration_ms`       | Capability execution duration in milliseconds.                                 |
-| `error_category`    | Stable category, not exception text.                                           |
-| `provider`          | Selected model provider identifier.                                            |
-| `model_reference`   | Effective model reference.                                                     |
-| `resolution_source` | One of `call_override`, `run_override`, `agent_default`, or `runtime_default`. |
-| `agent_count`       | Number of registered or discovered local agents.                               |
-| `input_tokens`      | Prompt/input tokens reported by the provider, when available.                  |
-| `output_tokens`     | Completion/output tokens reported by the provider, when available.             |
-| `total_tokens`      | Total tokens reported by the provider, when available.                         |
-| `loop_id`           | Runtime-generated identifier for one isolated delegation loop.                  |
+| Field               | Description                                                                                     |
+|---------------------|-------------------------------------------------------------------------------------------------|
+| `schema_version`    | Structured event schema version, currently `"1"`.                                               |
+| `event`             | Stable, versioned event name.                                                                   |
+| `outcome`           | One of `success`, `failure`, `timeout`, or `cancelled`.                                         |
+| `correlation_id`    | Caller-provided invocation/route ID. If omitted, Conducto creates a UUID.                       |
+| `agent_id`          | Published local agent name.                                                                     |
+| `capability_id`     | Published capability name.                                                                      |
+| `duration_ms`       | Capability execution duration in milliseconds.                                                  |
+| `error_category`    | Stable category, not exception text.                                                            |
+| `provider`          | Selected model provider identifier.                                                             |
+| `model_reference`   | Effective model reference.                                                                      |
+| `resolution_source` | One of `call_override`, `run_override`, `agent_default`, or `runtime_default`.                  |
+| `agent_count`       | Number of registered or discovered local agents.                                                |
+| `input_tokens`      | Prompt/input tokens reported by the provider, when available.                                   |
+| `output_tokens`     | Completion/output tokens reported by the provider, when available.                              |
+| `total_tokens`      | Total tokens reported by the provider, when available.                                          |
+| `loop_id`           | Runtime-generated identifier for one isolated delegation loop.                                  |
 | `turn`              | Completed model turns; `0` when the loop ends before its first model call, otherwise one-based. |
-| `tool_call_id`       | Model-supplied stable call identifier after validation.                         |
-| `snapshot_revision`  | Registry revision captured for the decision's immutable toolbox.                |
+| `tool_call_id`      | Model-supplied stable call identifier after validation.                                         |
+| `snapshot_revision` | Registry revision captured for the decision's immutable toolbox.                                |
 
 Stable error categories currently include `target_not_found`,
 `argument_validation`, `timeout`, `capability_exception`,
