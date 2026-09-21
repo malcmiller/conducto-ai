@@ -192,6 +192,7 @@ def aggregate_usage(calls: Sequence[ModelCallProvenance]) -> Usage:
         input_tokens=sum(call.usage.input_tokens for call in calls),
         output_tokens=sum(call.usage.output_tokens for call in calls),
         total_tokens=sum(call.usage.total_tokens for call in calls),
+        cost=sum(call.usage.cost for call in calls),
     )
 
 

@@ -64,6 +64,9 @@ timestamps with millisecond precision.
 | `conducto.agent.registered.v1`                |                        `INFO` | A local agent entered the registry.                                                              |
 | `conducto.agent.discovered.v1`                |                       `DEBUG` | Local-agent discovery metadata was read.                                                         |
 | `conducto.model.selected.v1`                  |                        `INFO` | A model configuration was selected for routing.                                                  |
+| `conducto.delegation.turn_started.v1`         |                        `INFO` | A bounded model decision turn began against one toolbox snapshot.                                |
+| `conducto.delegation.tool_completed.v1`       |                        `INFO` | A gateway-mediated tool call produced a safe outcome category.                                   |
+| `conducto.delegation.completed.v1`            |                        `INFO` | A delegation loop reached a typed terminal outcome.                                              |
 | `conducto.capability.arguments_validated.v1`  |                        `INFO` | Capability arguments passed or failed validation.                                                |
 | `conducto.capability.invocation_started.v1`   |                        `INFO` | Local capability execution began.                                                                |
 | `conducto.capability.invocation_completed.v1` |                        `INFO` | Local capability execution completed.                                                            |
@@ -90,6 +93,10 @@ The fields below are emitted when applicable:
 | `input_tokens`      | Prompt/input tokens reported by the provider, when available.                  |
 | `output_tokens`     | Completion/output tokens reported by the provider, when available.             |
 | `total_tokens`      | Total tokens reported by the provider, when available.                         |
+| `loop_id`           | Runtime-generated identifier for one isolated delegation loop.                  |
+| `turn`              | Completed model turns; `0` when the loop ends before its first model call, otherwise one-based. |
+| `tool_call_id`       | Model-supplied stable call identifier after validation.                         |
+| `snapshot_revision`  | Registry revision captured for the decision's immutable toolbox.                |
 
 Stable error categories currently include `target_not_found`,
 `argument_validation`, `timeout`, `capability_exception`,
@@ -125,7 +132,9 @@ Lifecycle events do **not** log prompts, model responses, capability
 arguments, result bodies, credentials, tokens, approval data, provider
 configuration secrets, exception text, or tracebacks. Provider/model events
 only include the provider identifier, effective model reference, and
-resolution source.
+resolution source. Delegation events add only stable IDs, turn/revision
+counters, and safe outcome categories; they do not add tool arguments or
+results.
 
 The low-level `emit_event()` API supports a payload only when both safeguards
 are explicitly enabled:

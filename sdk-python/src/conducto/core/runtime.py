@@ -51,6 +51,7 @@ from .provider import (
     ProviderCapabilities,
     ProviderResult,
     StructuredOutputRequest,
+    ToolResultMessage,
     Usage,
     complete_with_retries,
 )
@@ -595,7 +596,12 @@ class Runtime:
         *,
         structured_output: StructuredOutputRequest,
         model: ModelReference | str | None = None,
+        tools: Sequence[Mapping[str, Any]] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
+        required_capabilities: frozenset[str] = frozenset(),
+        effective_deadline: float | None = None,
         purpose: str = "model_call",
+        clock: Callable[[], float] = time.monotonic,
     ) -> ModelCallResult:
         """Execute a provider completion from the current run context.
 
@@ -604,6 +610,10 @@ class Runtime:
             messages: Conversation history for the provider request.
             structured_output: Native structured-output contract.
             model: Optional model override for this request.
+            tools: Provider-neutral tool definitions for this turn.
+            tool_results: Bounded results from prior tool calls.
+            required_capabilities: Additional provider capabilities required by this call.
+            effective_deadline: Optional monotonic deadline, capped by the run deadline.
             purpose: Logical purpose name recorded on the call provenance.
 
         Returns:
@@ -614,8 +624,12 @@ class Runtime:
         """
         if not context.belongs_to(self):
             raise ValueError("Run context belongs to a different runtime")
-        required = (
-            frozenset({"structured_output"}) if structured_output.json_schema else frozenset()
+        required = frozenset(
+            {
+                "structured_output",
+                *(("tool_calling",) if tools or tool_results else ()),
+                *required_capabilities,
+            }
         )
         binding = self._resolve_for_call_binding(
             context,
@@ -629,7 +643,11 @@ class Runtime:
             binding,
             messages,
             structured_output=structured_output,
+            tools=tools,
+            tool_results=tool_results,
+            effective_deadline=effective_deadline,
             purpose=purpose,
+            clock=clock,
         )
 
     @staticmethod
