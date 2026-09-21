@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Annotated, Any, Literal, Protocol, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 
 
 class ChatMessage(BaseModel):
@@ -83,6 +91,63 @@ class Usage(BaseModel):
     input_tokens: int = Field(default=0, ge=0)
     output_tokens: int = Field(default=0, ge=0)
     total_tokens: int = Field(default=0, ge=0)
+    cost: float = Field(default=0.0, ge=0)
+
+    @field_validator("cost")
+    @classmethod
+    def validate_cost(cls, value: float) -> float:
+        """Reject non-finite provider cost values."""
+        if not math.isfinite(value):
+            raise ValueError("cost must be finite")
+        return value
+
+
+class TerminalModelDecision(BaseModel):
+    """The sole terminal response permitted for one model decision turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["terminal"]
+    response: dict[str, Any]
+
+
+class ToolCallModelDecision(BaseModel):
+    """The sole tool call permitted for one model decision turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tool_call"]
+    call_id: str = Field(min_length=1)
+    tool_id: str = Field(min_length=1)
+    arguments: dict[str, Any]
+
+
+ModelDecision: TypeAlias = Annotated[
+    TerminalModelDecision | ToolCallModelDecision,
+    Field(discriminator="type"),
+]
+_MODEL_DECISION_ADAPTER: TypeAdapter[ModelDecision] = TypeAdapter(ModelDecision)
+
+
+@dataclass(frozen=True, slots=True)
+class ToolResultMessage:
+    """One bounded result from a prior tool call supplied to the next turn."""
+
+    call_id: str
+    status: str
+    result: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class FakeModelRequest:
+    """Safe observation of one request issued to :class:`FakeModel`."""
+
+    message_roles: tuple[str, ...]
+    options: GenerationOptions
+    structured_output: StructuredOutputRequest
+    tools: tuple[Mapping[str, Any], ...] = ()
+    tool_results: tuple[ToolResultMessage, ...] = ()
+    effective_deadline: float | None = None
 
 
 class ProviderResult(BaseModel):
@@ -192,6 +257,9 @@ class ModelProvider(Protocol):
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
+        tools: Sequence[Mapping[str, Any]] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
+        effective_deadline: float | None = None,
     ) -> ProviderResult:
         """Generate a completion for a provider-neutral chat request.
 
@@ -200,6 +268,9 @@ class ModelProvider(Protocol):
             options: Generation controls for model temperature, token caps, and
                 retries.
             structured_output: Native JSON schema required for structured output.
+            tools: Provider-neutral tools available for this turn.
+            tool_results: Bounded results from prior provider-issued tool calls.
+            effective_deadline: Optional monotonic deadline that bounds this call.
 
         Returns:
             Normalized provider response content, metadata, and usage counters.
@@ -283,22 +354,36 @@ class FakeModel:
 
     capabilities = ProviderCapabilities(
         structured_output=True,
-        tool_calling=False,
+        tool_calling=True,
         context_limit=128_000,
         usage_reporting=True,
     )
 
     def __init__(
         self,
-        selection: RoutingSelection | dict[str, Any] | str,
+        selection: RoutingSelection | dict[str, Any] | str | Sequence[object] | None = None,
         *,
         usage: Usage | None = None,
         accepted: bool = True,
+        script: Sequence[object] | None = None,
     ) -> None:
+        if script is not None and selection is not None:
+            raise ValueError("FakeModel accepts either selection or script, not both")
+        selected_script = script
+        if (
+            selected_script is None
+            and isinstance(selection, Sequence)
+            and not isinstance(selection, str)
+        ):
+            selected_script = selection
+        if selection is None and selected_script is None:
+            raise ValueError("FakeModel requires a selection or script")
         self.selection = selection
+        self._script = tuple(selected_script) if selected_script is not None else None
         self.usage = usage or Usage()
         self.accepted = accepted
         self.calls = 0
+        self.requests: list[FakeModelRequest] = []
 
     async def complete(
         self,
@@ -306,37 +391,113 @@ class FakeModel:
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
+        tools: Sequence[Mapping[str, Any]] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
+        effective_deadline: float | None = None,
     ) -> ProviderResult:
         """Return the configured fake completion payload.
 
         Args:
             messages: Conversation history supplied to the fake provider.
-            options: Unused generation settings for the request.
+            options: Generation settings observed for the request.
             structured_output: Requested structured output contract.
+            tools: Provider-neutral tool definitions for this turn.
+            tool_results: Prior tool results for this turn.
+            effective_deadline: Effective monotonic deadline for this turn.
 
         Returns:
             The synthetic provider result configured when the fake provider was created.
         """
-        _ = (messages, options, structured_output)
         self.calls += 1
-        if isinstance(self.selection, str):
-            return ProviderResult(content=self.selection, usage=self.usage, accepted=self.accepted)
-        selection = (
-            self.selection.model_dump()
-            if isinstance(self.selection, RoutingSelection)
-            else self.selection
+        self.requests.append(
+            FakeModelRequest(
+                message_roles=tuple(message.role for message in messages),
+                options=options,
+                structured_output=structured_output,
+                tools=tuple(dict(tool) for tool in tools),
+                tool_results=tuple(tool_results),
+                effective_deadline=effective_deadline,
+            )
         )
-        return ProviderResult(
-            structured=selection,
-            usage=self.usage,
-            accepted=self.accepted,
-        )
+        selection: object
+        if self._script is None:
+            selection = self.selection
+        elif self.calls <= len(self._script):
+            selection = self._script[self.calls - 1]
+        else:
+            raise ProviderError("FakeModel script exhausted")
+        if isinstance(selection, ProviderError):
+            raise selection
+        if isinstance(selection, ProviderResult):
+            return selection
+        if isinstance(selection, str):
+            return ProviderResult(content=selection, usage=self.usage, accepted=self.accepted)
+        payload = selection.model_dump() if isinstance(selection, BaseModel) else selection
+        if not isinstance(payload, dict):
+            raise TypeError("FakeModel script entries must be model results or dictionaries")
+        return ProviderResult(structured=payload, usage=self.usage, accepted=self.accepted)
+
+
+def build_model_decision_schema(
+    response_type: type[BaseModel],
+) -> StructuredOutputRequest:
+    """Build the strict terminal-or-single-tool-call contract for a turn."""
+    response_schema = response_type.model_json_schema()
+    definitions = response_schema.pop("$defs", None)
+    schema = {
+        "oneOf": [
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "terminal"},
+                    "response": response_schema,
+                },
+                "required": ["type", "response"],
+            },
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "type": {"const": "tool_call"},
+                    "call_id": {"type": "string", "minLength": 1},
+                    "tool_id": {"type": "string", "minLength": 1},
+                    "arguments": {"type": "object"},
+                },
+                "required": ["type", "call_id", "tool_id", "arguments"],
+            },
+        ]
+    }
+    if definitions is not None:
+        schema["$defs"] = definitions
+    return StructuredOutputRequest(name="model_decision", schema=schema)
+
+
+def parse_model_decision(
+    result: ProviderResult,
+    *,
+    response_type: type[BaseModel],
+) -> ModelDecision:
+    """Parse exactly one strict terminal response or one strict tool call."""
+    if not issubclass(response_type, BaseModel):
+        raise TypeError("response_type must be a Pydantic model type")
+    if result.structured is None:
+        raise MalformedStructuredOutputError("Provider returned no structured model decision")
+    try:
+        decision = _MODEL_DECISION_ADAPTER.validate_python(result.structured)
+        return decision
+    except ValidationError as error:
+        raise MalformedStructuredOutputError(
+            "Provider returned malformed structured model decision"
+        ) from error
 
 
 def validate_provider_contract(
     provider: ModelProvider,
     *,
     structured_output: StructuredOutputRequest,
+    tools: Sequence[Mapping[str, Any]] = (),
+    tool_results: Sequence[ToolResultMessage] = (),
 ) -> None:
     """Validate provider support before issuing a structured request.
 
@@ -351,6 +512,10 @@ def validate_provider_contract(
         )
     if not structured_output.json_schema:
         raise ValueError("Structured output schema cannot be empty")
+    if (tools or tool_results) and not provider.capabilities.tool_calling:
+        raise UnsupportedProviderCapabilityError(
+            "Provider does not support required native tool calling"
+        )
 
 
 def parse_routing_selection(result: ProviderResult) -> RoutingSelection:
@@ -377,6 +542,10 @@ async def complete_with_retries(
     options: GenerationOptions,
     structured_output: StructuredOutputRequest,
     deadline: float | None = None,
+    tools: Sequence[Mapping[str, Any]] = (),
+    tool_results: Sequence[ToolResultMessage] = (),
+    effective_deadline: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> ProviderResult:
     """Complete a provider request under timeout and safe-retry rules.
 
@@ -390,6 +559,10 @@ async def complete_with_retries(
         options: Generation, timeout, and retry settings.
         structured_output: Required native structured-output contract.
         deadline: Optional monotonic deadline governing the whole request.
+        tools: Provider-neutral tools available for this request.
+        tool_results: Bounded results from prior tool calls.
+        effective_deadline: Optional tighter monotonic deadline.
+        clock: Monotonic clock used for deterministic deadline enforcement.
 
     Returns:
         The normalized provider result.
@@ -400,13 +573,21 @@ async def complete_with_retries(
         ProviderError: If a provider failure is not safely retryable or retries
             are exhausted.
     """
-    validate_provider_contract(provider, structured_output=structured_output)
+    tool_aware = bool(tools) or bool(tool_results)
+    if effective_deadline is not None:
+        deadline = min(deadline, effective_deadline) if deadline is not None else effective_deadline
+    validate_provider_contract(
+        provider,
+        structured_output=structured_output,
+        tools=tools,
+        tool_results=tool_results,
+    )
     attempts = options.retries + 1
     for attempt in range(attempts):
         try:
             timeout_for_attempt: float | None = None
             if deadline is not None:
-                remaining = deadline - time.monotonic()
+                remaining = deadline - clock()
                 if remaining <= 0:
                     raise TimeoutError("Run deadline exceeded")
                 timeout_for_attempt = remaining
@@ -416,17 +597,21 @@ async def complete_with_retries(
                     if timeout_for_attempt is not None
                     else options.timeout
                 )
-            completion = provider.complete(
-                messages,
-                options=options,
-                structured_output=structured_output,
-            )
+            request_kwargs: dict[str, Any] = {
+                "options": options,
+                "structured_output": structured_output,
+            }
+            if tool_aware:
+                request_kwargs["tools"] = tools
+                request_kwargs["tool_results"] = tool_results
+                request_kwargs["effective_deadline"] = deadline
+            completion = provider.complete(messages, **request_kwargs)
             if timeout_for_attempt is not None:
                 return await asyncio.wait_for(completion, timeout_for_attempt)
             return await completion
         except TimeoutError as error:
             timeout_error = ProviderTimeoutError()
-            if attempt == attempts - 1 or (deadline is not None and deadline <= time.monotonic()):
+            if attempt == attempts - 1 or (deadline is not None and deadline <= clock()):
                 raise timeout_error from error
             await asyncio.sleep(0)
         except ProviderError as error:

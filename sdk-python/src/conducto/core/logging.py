@@ -27,6 +27,9 @@ AGENT_REGISTERED: Final = "conducto.agent.registered.v1"
 AGENT_DISCOVERED: Final = "conducto.agent.discovered.v1"
 MODEL_SELECTED: Final = "conducto.model.selected.v1"
 MODEL_USAGE_RECORDED: Final = "conducto.model.usage_recorded.v1"
+DELEGATION_TURN_STARTED: Final = "conducto.delegation.turn_started.v1"
+DELEGATION_TOOL_COMPLETED: Final = "conducto.delegation.tool_completed.v1"
+DELEGATION_COMPLETED: Final = "conducto.delegation.completed.v1"
 ARGUMENTS_VALIDATED: Final = "conducto.capability.arguments_validated.v1"
 INVOCATION_STARTED: Final = "conducto.capability.invocation_started.v1"
 INVOCATION_COMPLETED: Final = "conducto.capability.invocation_completed.v1"
@@ -71,6 +74,10 @@ _RECORD_FIELDS: Final = (
     "input_tokens",
     "output_tokens",
     "total_tokens",
+    "loop_id",
+    "turn",
+    "tool_call_id",
+    "snapshot_revision",
 )
 _PACKAGE_LOGGER = logging.getLogger(LOGGER_NAME)
 _PACKAGE_LOGGER.addHandler(logging.NullHandler())

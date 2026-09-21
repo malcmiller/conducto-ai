@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -20,6 +20,7 @@ from .provider import (
     ModelProvider,
     ProviderResult,
     StructuredOutputRequest,
+    ToolResultMessage,
     complete_with_retries,
 )
 from .run_context import InvocationMetadata, ModelCallProvenance, RunContext
@@ -93,12 +94,23 @@ class ModelGateway:
         messages: Sequence[ChatMessage],
         *,
         structured_output: StructuredOutputRequest,
+        tools: Sequence[Mapping[str, Any]] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
+        required_capabilities: frozenset[str] = frozenset(),
+        effective_deadline: float | None = None,
+        purpose: str = "capability",
+        clock: Callable[[], float] = time.monotonic,
     ) -> ModelCallResult:
         """Execute a provider call through the active runtime context.
 
         Args:
             messages: Conversation history to send to the model.
             structured_output: Native structured-output contract required by the call.
+            tools: Provider-neutral tool definitions for this turn.
+            tool_results: Bounded results from prior tool calls.
+            required_capabilities: Additional provider capabilities required by this call.
+            effective_deadline: Optional monotonic deadline, capped by the run deadline.
+            purpose: Logical purpose recorded in model-call provenance.
 
         Returns:
             The provider result and associated invocation metadata.
@@ -110,7 +122,12 @@ class ModelGateway:
                 messages,
                 structured_output=structured_output,
                 model=self._reference,
-                purpose="capability",
+                tools=tools,
+                tool_results=tool_results,
+                required_capabilities=required_capabilities,
+                effective_deadline=effective_deadline,
+                purpose=purpose,
+                clock=clock,
             )
         finally:
             self._context.end_model_call(task)
@@ -154,17 +171,24 @@ async def complete_model_call(
     messages: Sequence[ChatMessage],
     *,
     structured_output: StructuredOutputRequest,
+    tools: Sequence[Mapping[str, Any]] = (),
+    tool_results: Sequence[ToolResultMessage] = (),
+    effective_deadline: float | None = None,
     purpose: str = "model_call",
+    clock: Callable[[], float] = time.monotonic,
 ) -> ModelCallResult:
     """Execute one resolved provider call without mutating the run context."""
     if context.cancellation.cancelled:
         raise asyncio.CancelledError
     resolved = binding.model
+    deadline = context.deadline
+    if effective_deadline is not None:
+        deadline = min(deadline, effective_deadline) if deadline is not None else effective_deadline
 
-    if context.deadline is None:
+    if deadline is None:
         timeout = binding.configuration.timeout
     else:
-        remaining = context.deadline - time.monotonic()
+        remaining = deadline - clock()
         if remaining <= 0:
             raise TimeoutError("Run deadline exceeded")
         timeout = min(binding.configuration.timeout, remaining)
@@ -186,13 +210,33 @@ async def complete_model_call(
             resolution_source=resolved.source.value,
             outcome="success",
         )
-        result = await complete_with_retries(
-            binding.client,
-            messages,
-            options=options,
-            structured_output=structured_output,
-            deadline=context.deadline,
+        completion = asyncio.create_task(
+            complete_with_retries(
+                binding.client,
+                messages,
+                options=options,
+                structured_output=structured_output,
+                deadline=deadline,
+                tools=tools,
+                tool_results=tool_results,
+                effective_deadline=deadline,
+                clock=clock,
+            )
         )
+        try:
+            while not completion.done():
+                if context.cancellation.cancelled:
+                    completion.cancel()
+                    raise asyncio.CancelledError
+                await asyncio.wait((completion,), timeout=0.01)
+            result = await completion
+        finally:
+            if not completion.done():
+                completion.cancel()
+                try:
+                    await completion
+                except asyncio.CancelledError:
+                    pass
         emit_event(
             MODEL_USAGE_RECORDED,
             provider=resolved.provider,

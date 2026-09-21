@@ -116,8 +116,54 @@ if result.ok:
 A missing optional capability yields a partial toolbox; a missing required
 capability fails with a typed `ToolboxResult` before any model call. A tool ID
 returned by a model only resolves through `result.snapshot.resolve(tool_id)`
-when it belongs to that exact snapshot. This module does not select a target,
-invoke a capability, or call a model – that loop is delivered separately.
+when it belongs to that exact snapshot.
+
+## Bounded model delegation
+
+Agents opt into the reusable model/tool loop with an immutable
+`DelegationConfig`, then explicitly call `run_delegation()` from an active
+capability. Each model turn receives one immutable toolbox snapshot and must
+return exactly one structured terminal response or one tool call.
+
+```python
+from conducto import CapabilityUse, ChatMessage, DelegationConfig, ToolboxPolicy
+from pydantic import BaseModel
+
+
+class Answer(BaseModel):
+    answer: str
+
+
+class ResearchAgent(BaseAgent):
+    def __init__(self) -> None:
+        super().__init__(
+            delegation_config=DelegationConfig(
+                toolbox=ToolboxPolicy(
+                    uses=(CapabilityUse(capability_ids=frozenset({"search"})),)
+                ),
+                max_model_turns=4,
+                max_tool_calls=2,
+            )
+        )
+
+    async def answer(self, question: str) -> Answer:
+        outcome = await self.run_delegation(
+            (ChatMessage(role="user", content=question),),
+            response_type=Answer,
+        )
+        if not outcome.ok or outcome.value is None:
+            raise RuntimeError(outcome.code.value)
+        return outcome.value
+```
+
+The loop refreshes discovery only at the next model-decision boundary. An
+accepted call always executes against its originating snapshot through
+`AgentGateway`, where authority, binding freshness, lifecycle, cycle/depth, and
+shared budgets are revalidated atomically. Calls are sequential and never
+implicitly retried. Replayed call IDs terminate with a typed failure.
+Child failures terminate unless an explicit fallback policy marks their safe
+category eligible; a later model response is then reported as a distinct
+fallback success with the child failure retained in provenance.
 
 ## Repository layout
 
@@ -137,6 +183,7 @@ sdk-python/
 │           ├── agent.py
 │           ├── agent_card.py
 │           ├── decorators.py
+│           ├── delegation.py
 │           ├── invocation.py
 │           ├── invocation_results.py
 │           ├── logging.py

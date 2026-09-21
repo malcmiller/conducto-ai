@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -27,7 +27,7 @@ from .parameter_schema import (
     build_parameter_model,
     build_parameter_schema,
 )
-from .provider import ModelConfiguration
+from .provider import ChatMessage, ModelConfiguration
 from .registration import (
     AgentRegistrationError,
     RegisteredMethod,
@@ -37,6 +37,10 @@ from .registration import (
     resolve_export_metadata,
     resolved_attributes,
 )
+from .run_context import require_run_context
+
+if TYPE_CHECKING:
+    from .delegation import DelegationConfig, DelegationOutcome
 
 __all__ = [
     "A2A_AGENT_CARD_SPEC_VERSION",
@@ -47,6 +51,7 @@ __all__ = [
 
 _DEFAULT_INPUT_MODES = DEFAULT_INPUT_MODES
 _DEFAULT_OUTPUT_MODES = DEFAULT_OUTPUT_MODES
+ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
 class BaseAgent:
@@ -67,6 +72,7 @@ class BaseAgent:
         model_config: ModelConfiguration | None = None,
         model_reference: ModelReference | str | None = None,
         agent_config: AgentModelConfig | None = None,
+        delegation_config: DelegationConfig | None = None,
     ) -> None:
         self.agent_metadata = self._resolve_agent_metadata()
         declared_reference = model_reference or self.agent_metadata.default_model
@@ -83,6 +89,7 @@ class BaseAgent:
             ),
         )
         self._model_config = model_config
+        self._delegation_config = delegation_config
         self._registered_methods: dict[str, RegisteredMethod] = {}
         self._capabilities: dict[str, RegisteredMethod] = {}
         self._tools: dict[str, RegisteredMethod] = {}
@@ -105,6 +112,31 @@ class BaseAgent:
             The model configuration supplied at construction, if any.
         """
         return self._model_config
+
+    @property
+    def delegation_config(self) -> DelegationConfig | None:
+        """Return this agent's immutable opt-in delegation configuration."""
+        return self._delegation_config
+
+    async def run_delegation(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        response_type: type[ResponseT],
+        config: DelegationConfig | None = None,
+    ) -> DelegationOutcome[ResponseT]:
+        """Run the reusable delegation loop in the active invocation context."""
+        from .delegation import run_delegation
+
+        effective = config or self._delegation_config
+        if effective is None:
+            raise ValueError("Delegation is not configured for this agent")
+        return await run_delegation(
+            require_run_context(),
+            messages,
+            config=effective,
+            response_type=response_type,
+        )
 
     @property
     def registered_methods(self) -> tuple[RegisteredMethod, ...]:
