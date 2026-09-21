@@ -61,6 +61,21 @@ class InvoiceAgent(BaseAgent):
 `examples/quickstart.py` shows the complete two-agent flow using only public
 imports from `conducto` and a deterministic `FakeModel`.
 
+## Agent chaining
+
+The three-agent, installed-package reference demonstrates orchestrator routing,
+bounded model-selected documentation delegation, typed terminal output, and a
+deterministic direct invocation:
+
+```bash
+uv build
+uv run --no-project --with dist/conducto_ai-*.whl python examples/agent_chaining.py
+```
+
+See [`docs/agent-chaining.md`](docs/agent-chaining.md) for configuration,
+provider lifecycle snapshots, limits, security boundaries, failure handling,
+and PowerShell commands.
+
 ## Local capability gateway
 
 Agents get the model-neutral gateway only from their active

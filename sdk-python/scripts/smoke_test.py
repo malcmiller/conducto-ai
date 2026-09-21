@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import runpy
 import sys
 from pathlib import Path
 
@@ -95,7 +96,14 @@ def main() -> int:
 
     asyncio.run(invoke())
 
-    print("Smoke test passed: installed conducto-ai wheel routed a two-agent local flow.")
+    example = Path(__file__).resolve().parents[1] / "examples" / "agent_chaining.py"
+    source = example.read_text(encoding="utf-8")
+    if "from conducto.core" in source:
+        raise AssertionError("agent chaining example imports a non-public conducto.core module")
+    chaining = runpy.run_path(str(example))
+    asyncio.run(chaining["main"]())
+
+    print("Smoke test passed: installed conducto-ai wheel routed local and chained flows.")
     return 0
 
 
