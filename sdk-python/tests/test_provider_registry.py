@@ -230,7 +230,8 @@ def test_snapshot_is_immutable_deterministic_and_safe() -> None:
         assert not hasattr(item, "configuration")
 
     with pytest.raises(AttributeError):
-        snapshot.models = ()  # type: ignore[misc]
+        field_name = "models"
+        setattr(snapshot, field_name, ())
 
 
 def test_concurrent_register_resolve_replace_deregister_stay_isolated() -> None:

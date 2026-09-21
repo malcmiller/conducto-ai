@@ -167,7 +167,7 @@ class ProviderRegistrySnapshot:
     provider_types: tuple[ProviderType, ...]
 
 
-def _validate_client_structure(client: ModelProvider, provider_label: object) -> None:
+def _validate_client_structure(client: ModelProvider, provider_label: ProviderType | str) -> None:
     """Reject clients that do not satisfy the structural provider protocol."""
     if not hasattr(client, "capabilities") or not callable(getattr(client, "complete", None)):
         raise ProviderClientValidationError(
