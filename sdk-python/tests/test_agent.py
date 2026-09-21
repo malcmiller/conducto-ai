@@ -58,9 +58,10 @@ def test_base_agent_generates_deterministic_a2a_agent_card() -> None:
     extension = card["capabilities"]["extensions"][0]
     assert extension["uri"] == "https://conducto.ai/a2a/extensions/parameters/v1"
     assert extension["required"] is False
-    assert extension["params"]["x-conducto"]["parameters"][skill_id]["properties"]["name"][
-        "type"
-    ] == "string"
+    assert (
+        extension["params"]["x-conducto"]["parameters"][skill_id]["properties"]["name"]["type"]
+        == "string"
+    )
     serialized = agent.get_agent_card_json("https://example.test/a2a")
     assert serialized == agent.get_agent_card_json("https://example.test/a2a")
     assert json.loads(serialized) == card

@@ -66,9 +66,9 @@ def main() -> int:
         agents[0].get_agent_card("https://smoke.conducto.test/invoice"),
         agents[1].get_agent_card("https://smoke.conducto.test/incident"),
     ]
-    assert [
-        card["supportedInterfaces"][0]["protocolVersion"] for card in cards
-    ] == [A2A_AGENT_CARD_SPEC_VERSION] * 2
+    assert [card["supportedInterfaces"][0]["protocolVersion"] for card in cards] == [
+        A2A_AGENT_CARD_SPEC_VERSION
+    ] * 2
     assert [card["name"] for card in cards] == ["SmokeInvoiceAgent", "SmokeIncidentAgent"]
 
     async def invoke() -> None:

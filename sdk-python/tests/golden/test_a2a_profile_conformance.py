@@ -66,9 +66,7 @@ def test_positive_a2a_conformance_fixtures_parse_with_official_sdk(
     assert card.name == "GoldenAgent"
     assert len(message.parts) == conformance_fixture["profile"]["limits"]["messageParts"]
     assert len(task.history) == conformance_fixture["profile"]["limits"]["historyMessages"]
-    assert len(task.artifacts[0].parts) == conformance_fixture["profile"]["limits"][
-        "artifactParts"
-    ]
+    assert len(task.artifacts[0].parts) == conformance_fixture["profile"]["limits"]["artifactParts"]
     for method in conformance_fixture["profile"]["supportedMethods"]:
         validate_jsonrpc_method(method)
 
