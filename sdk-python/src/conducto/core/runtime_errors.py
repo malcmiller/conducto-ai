@@ -77,3 +77,25 @@ class StaleProviderConstructionError(ProviderRegistrationError):
     stale result is discarded instead of silently overwriting the newer
     binding or resurrecting a deregistered reference.
     """
+
+
+class ProviderOwnershipError(ProviderRegistrationError, ValueError):
+    """One client was registered with conflicting lifecycle ownership declarations."""
+
+
+class RuntimeClosedError(ConductoError):
+    """The runtime or its provider registry has begun shutdown."""
+
+
+class ProviderShutdownError(ConductoError):
+    """Runtime-owned provider cleanup completed with one or more failures.
+
+    Attributes:
+        report: Safe aggregate cleanup outcome. It contains provider identities
+            and local exception types, never provider exception messages.
+    """
+
+    def __init__(self, report: object) -> None:
+        """Create a cleanup failure with its safe aggregate report."""
+        super().__init__("Provider cleanup did not complete successfully")
+        self.report = report
