@@ -112,7 +112,7 @@ class OrchestratorAgent(BaseAgent):
             authorization_context: Alias for ``authorization``.
             agent_run_config: Optional run configuration forwarded to the matched
                 agent invocation.
-            timeout: Optional per-call timeout override in seconds.
+            timeout: Optional timeout override in seconds for the matched invocation.
             correlation_id: Correlation identifier propagated to logs and metadata.
 
         Returns:
@@ -137,8 +137,6 @@ class OrchestratorAgent(BaseAgent):
             call_override = ModelReference(model_config.model)
 
         effective_run = run_config or RunConfig()
-        if timeout is not None:
-            effective_run = dataclasses.replace(effective_run, timeout=timeout)
         try:
             active_context = get_run_context()
             effective_authorization = delegate_context(

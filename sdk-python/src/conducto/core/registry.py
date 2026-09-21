@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import threading
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, get_type_hints
@@ -326,7 +327,7 @@ class AgentRegistry:
         metadata: list[dict[str, Any]] = []
         for agent in agents:
             card = agent.get_agent_card(card_url_for(agent))
-            parameter_map = card.get("x-conducto", {}).get("parameters", {})
+            parameter_map = _parameter_map_from_card(card)
             skills = [
                 {
                     "id": skill.get("id"),
@@ -343,7 +344,7 @@ class AgentRegistry:
                     "name": card.get("name"),
                     "version": card.get("version"),
                     "description": card.get("description"),
-                    "url": card.get("url"),
+                    "url": _primary_interface_url(card),
                     "capabilities": skills,
                 }
             )
@@ -391,6 +392,47 @@ class AgentRegistry:
         if registration is None:
             raise KeyError(f"Agent '{agent_id}' is not registered")
         return registration
+
+
+def _parameter_map_from_card(card: Mapping[str, Any]) -> Mapping[str, Any]:
+    legacy = card.get("x-conducto")
+    if isinstance(legacy, Mapping):
+        parameters = legacy.get("parameters")
+        if isinstance(parameters, Mapping):
+            return parameters
+
+    capabilities = card.get("capabilities")
+    if not isinstance(capabilities, Mapping):
+        return {}
+    extensions = capabilities.get("extensions", [])
+    if isinstance(extensions, (str, bytes)) or not isinstance(extensions, Sequence):
+        return {}
+    for extension in extensions:
+        if not isinstance(extension, Mapping):
+            continue
+        params = extension.get("params")
+        if not isinstance(params, Mapping):
+            continue
+        conducto = params.get("x-conducto")
+        if not isinstance(conducto, Mapping):
+            continue
+        parameters = conducto.get("parameters")
+        if isinstance(parameters, Mapping):
+            return parameters
+    return {}
+
+
+def _primary_interface_url(card: Mapping[str, Any]) -> Any:
+    legacy_url = card.get("url")
+    if legacy_url is not None:
+        return legacy_url
+    interfaces = card.get("supportedInterfaces", [])
+    if isinstance(interfaces, (str, bytes)) or not isinstance(interfaces, Sequence):
+        return None
+    for interface in interfaces:
+        if isinstance(interface, Mapping):
+            return interface.get("url")
+    return None
 
 
 def _build_agent_descriptor(
