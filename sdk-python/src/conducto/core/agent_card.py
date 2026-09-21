@@ -136,7 +136,9 @@ def build_agent_card(
             "extensions": [
                 {
                     "uri": CONDUCTO_PARAMETER_EXTENSION_URI,
-                    "description": "Conducto reflected JSON parameter schemas keyed by A2A skill id.",
+                    "description": (
+                        "Conducto reflected JSON parameter schemas keyed by A2A skill id."
+                    ),
                     "required": False,
                     "params": {
                         "x-conducto": {
