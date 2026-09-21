@@ -126,7 +126,7 @@ capability. Each model turn receives one immutable toolbox snapshot and must
 return exactly one structured terminal response or one tool call.
 
 ```python
-from conducto import CapabilityUse, ChatMessage, DelegationConfig, ToolboxPolicy
+from conducto import BaseAgent, CapabilityUse, ChatMessage, DelegationConfig, ToolboxPolicy
 from pydantic import BaseModel
 
 

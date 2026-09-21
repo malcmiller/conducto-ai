@@ -18,8 +18,10 @@ from conducto.core.provider import (
     GenerationOptions,
     MalformedStructuredOutputError,
     ProviderResult,
+    StructuredOutputRequest,
     ToolResultMessage,
     build_model_decision_schema,
+    complete_with_retries,
     parse_model_decision,
 )
 from conducto.core.runtime import ModelCallResult, use_run_context
@@ -103,6 +105,29 @@ def test_fake_model_records_scripted_tool_aware_requests() -> None:
         assert second.structured and second.structured["type"] == "terminal"
         assert model.calls == 2
         assert model.requests[1].tool_results[0].call_id == "call-1"
+
+    asyncio.run(exercise())
+
+
+def test_effective_deadline_is_forwarded_without_tools() -> None:
+    async def exercise() -> None:
+        model = FakeModel({"value": "ok"})
+        result = await complete_with_retries(
+            model,
+            (ChatMessage(role="user", content="respond"),),
+            options=GenerationOptions(model="fake"),
+            structured_output=StructuredOutputRequest(
+                name="Response",
+                schema=Response.model_json_schema(),
+            ),
+            effective_deadline=100.0,
+            clock=lambda: 1.0,
+        )
+
+        assert result.structured == {"value": "ok"}
+        assert model.requests[0].effective_deadline == 100.0
+        assert model.requests[0].tools == ()
+        assert model.requests[0].tool_results == ()
 
     asyncio.run(exercise())
 

@@ -202,6 +202,59 @@ def test_one_tool_result_is_matched_and_terminal_output_is_validated() -> None:
     asyncio.run(exercise())
 
 
+def test_sequential_tool_calls_preserve_all_results_and_ordered_provenance() -> None:
+    async def exercise() -> None:
+        Worker.calls = 0
+        agents = AgentRegistry()
+        agents.register(Worker())
+        probe = Runtime(agent_registry=agents)
+        tool_id = await _tool_id(probe, _policy())
+        runtime, model = _runtime(
+            FakeModel(
+                script=(
+                    {
+                        "type": "tool_call",
+                        "call_id": "call-1",
+                        "tool_id": tool_id,
+                        "arguments": {"value": "first"},
+                    },
+                    {
+                        "type": "tool_call",
+                        "call_id": "call-2",
+                        "tool_id": tool_id,
+                        "arguments": {"value": "second"},
+                    },
+                    {"type": "terminal", "response": {"value": "complete"}},
+                ),
+                usage=Usage(input_tokens=2, output_tokens=1, total_tokens=3, cost=0.25),
+            ),
+            registry=agents,
+        )
+
+        outcome = await _run(runtime, DelegationConfig(toolbox=_policy()))
+
+        assert outcome.code is DelegationOutcomeCode.SUCCESS
+        assert Worker.calls == 2
+        assert model.calls == 3
+        assert [result.call_id for result in model.requests[1].tool_results] == ["call-1"]
+        assert [result.call_id for result in model.requests[2].tool_results] == [
+            "call-1",
+            "call-2",
+        ]
+        assert [record.call_id for record in outcome.provenance.tool_calls] == [
+            "call-1",
+            "call-2",
+        ]
+        assert outcome.metadata.usage == Usage(
+            input_tokens=6,
+            output_tokens=3,
+            total_tokens=9,
+            cost=0.75,
+        )
+
+    asyncio.run(exercise())
+
+
 def test_unknown_invalid_and_replayed_calls_never_reexecute_business_logic() -> None:
     async def exercise() -> None:
         Worker.calls = 0

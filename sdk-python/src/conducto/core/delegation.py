@@ -383,7 +383,7 @@ async def run_delegation(
                             status=result.status.value,
                             result=result.to_dict(),
                         )
-                        for result in results[-1:]
+                        for result in results
                     ),
                     effective_deadline=deadline,
                     purpose="delegation_turn",

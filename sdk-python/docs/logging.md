@@ -94,7 +94,7 @@ The fields below are emitted when applicable:
 | `output_tokens`     | Completion/output tokens reported by the provider, when available.             |
 | `total_tokens`      | Total tokens reported by the provider, when available.                         |
 | `loop_id`           | Runtime-generated identifier for one isolated delegation loop.                  |
-| `turn`              | One-based model decision turn within the loop.                                  |
+| `turn`              | Completed model turns; `0` when the loop ends before its first model call, otherwise one-based. |
 | `tool_call_id`       | Model-supplied stable call identifier after validation.                         |
 | `snapshot_revision`  | Registry revision captured for the decision's immutable toolbox.                |
 

@@ -604,6 +604,7 @@ async def complete_with_retries(
             if tool_aware:
                 request_kwargs["tools"] = tools
                 request_kwargs["tool_results"] = tool_results
+            if tool_aware or effective_deadline is not None:
                 request_kwargs["effective_deadline"] = deadline
             completion = provider.complete(messages, **request_kwargs)
             if timeout_for_attempt is not None:
