@@ -1,14 +1,29 @@
 # `conducto-ai` Python SDK
 
-The **`conducto-ai`** Python SDK provides the Milestone 1 local-agent runtime:
-decorated Python agents, deterministic Agent Card generation, model-mediated
-local routing, validated capability invocation, typed result envelopes, runtime
-model provenance, and structured correlation-safe logs.
+The **`conducto-ai`** Python SDK provides the local reference runtime:
+decorated Python agents, deterministic Agent Card generation, governed
+capability discovery, model-mediated routing and delegation, validated
+invocation, typed result envelopes, runtime model provenance, and structured
+correlation-safe logs.
 
 Agent Cards are generated against the pinned Conducto A2A `1.0` JSON-RPC
 profile (`A2A_AGENT_CARD_SPEC_VERSION`). Use
 `BaseAgent.get_agent_card("https://agent.example/a2a")` for the card
 dictionary or `get_agent_card_json()` for canonical JSON.
+
+## Documentation
+
+The [Python SDK documentation index](docs/README.md) separates the major
+implementation responsibilities:
+
+- [Architecture](docs/architecture.md)
+- [Agents and registration](docs/agents-and-registration.md)
+- [Gateway and discovery](docs/gateway-and-discovery.md)
+- [Orchestration and delegation](docs/orchestration-and-delegation.md)
+- [Providers and models](docs/providers-and-models.md)
+- [Runtime and invocation](docs/runtime-and-invocation.md)
+- [SDK reference](docs/sdk-reference.md)
+- [Security and governance](docs/security-and-governance.md)
 
 ## Quick start
 
@@ -185,10 +200,21 @@ fallback success with the child failure retained in provenance.
 ```text
 sdk-python/
 ├── docs/
+│   ├── README.md
+│   ├── architecture.md
+│   ├── agents-and-registration.md
+│   ├── gateway-and-discovery.md
 │   ├── logging.md
+│   ├── orchestration-and-delegation.md
 │   ├── provider-registration.md
-│   └── quickstart.md
+│   ├── providers-and-models.md
+│   ├── quickstart.md
+│   ├── runtime-and-invocation.md
+│   ├── sdk-reference.md
+│   └── security-and-governance.md
 ├── examples/
+│   ├── agent_chaining.py
+│   ├── local_gateway.py
 │   └── quickstart.py
 ├── scripts/
 │   └── smoke_test.py

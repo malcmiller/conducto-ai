@@ -8,7 +8,7 @@ Scopes are opaque, case-sensitive values. Multiple declarations are cumulative
 and every scope must be present. `require_approval(role, condition)` accepts an
 application callback receiving the immutable context and validated argument
 mapping. The callback is never an expression string; callback failure fails
-  to close.
+closed.
 
 The runtime pipeline resolves the target, establishes `RunContext`, checks
 identity and scopes, validates arguments, evaluates approval conditions, and

@@ -1,6 +1,7 @@
-# Development guide
+# Python SDK development guide
 
-This repository is small enough to work with conventionally, but it is structured to support deterministic, testable behavior. The Python SDK is the primary implementation and is the best place to begin if you want to extend the framework.
+The Python SDK is structured around deterministic, testable behavior and is
+the reference implementation for Conducto contracts.
 
 ## Local setup
 
@@ -54,7 +55,7 @@ uv build
 
 ## Test philosophy
 
-The tests in `sdk-python/tests/` cover both the implementation and the public contract:
+The tests in `tests/` cover both the implementation and the public contract:
 
 - `test_decorators.py` verifies metadata and decorator behavior
 - `test_agent.py` exercises reflected Agent Cards and validation rules
@@ -70,7 +71,7 @@ This gives the project a layered validation strategy: low-level behavior, contra
 2. Keep changes focused and aligned with the public contract.
 3. Update or add tests when behavior changes.
 4. Run the smallest relevant validation command while developing, then the complete applicable
-   validation gate in `AGENTS.md`.
+   validation gate in [`AGENTS.md`](../../AGENTS.md).
 5. Submit a pull request and ensure CI passes.
 
 ## CI expectations
@@ -83,9 +84,12 @@ For local reproduction, use the commands above before opening a PR.
 
 The most important code paths are:
 
-- `sdk-python/src/conducto/core/decorators.py` — metadata declaration
-- `sdk-python/src/conducto/core/agent.py` — reflection and Agent Card generation
-- `sdk-python/src/conducto/core/orchestrator.py` — runtime registry and invocation
-- `sdk-python/src/conducto/core/provider.py` — model provider abstraction and routing contracts
+- `src/conducto/core/decorators.py` — metadata declaration
+- `src/conducto/core/agent.py` — reflection and Agent Card generation
+- `src/conducto/core/registry.py` — local agent registration and snapshots
+- `src/conducto/core/gateway.py` — governed discovery and bound invocation
+- `src/conducto/core/orchestrator.py` — direct and model-mediated routing facade
+- `src/conducto/core/runtime.py` — execution composition and invocation context
+- `src/conducto/core/provider.py` — model provider and structured-output contracts
 
 If you are extending the SDK, change the smallest surface area that preserves the public API and update tests that assert the public contract.

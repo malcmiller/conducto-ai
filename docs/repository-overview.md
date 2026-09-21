@@ -1,88 +1,72 @@
 # Repository overview
 
-Conducto is a secure multi-agent orchestration framework built around a small but explicit abstraction: a Python or .NET agent exposes named capabilities, those capabilities are reflected into a structured Agent Card, and a local orchestrator can route a user request to the correct capability.
+Conducto is a capability-first framework for governed multi-agent systems. An
+agent publishes typed capabilities, callers discover only the capabilities
+they are authorized to use, and every invocation follows the same validation,
+security, deadline, cancellation, result, and provenance rules.
 
 ## Repository shape
 
 ```text
 conducto-ai/
-├── README.md
-├── LICENSE
-├── .github/
-├── sdk-python/
-│   ├── README.md
-│   ├── pyproject.toml
-│   ├── src/
-│   │   └── conducto/
-│   │       ├── __init__.py
-│   │       └── core/
-│   │           ├── __init__.py
-│   │           ├── agent.py
-│   │           ├── decorators.py
-│   │           ├── orchestrator.py
-│   │           └── provider.py
-│   ├── tests/
-│   │   ├── acceptance/
-│   │   ├── golden/
-│   │   └── *.py
-│   └── uv.lock
-└── docs/
+├── .github/                  Workflows and path-scoped agent instructions
+├── docs/                     Product, protocol, deployment, and automation docs
+├── sdk-python/               Python reference SDK and implementation docs
+├── AGENTS.md                 Repository-wide agent guidance
+├── README.md                 Product overview and roadmap
+└── LICENSE
 ```
 
-## Core concepts
+The repository is intentionally Python-first. The Python SDK establishes
+reference behavior and language-neutral fixtures before .NET parity is added.
+Cross-organization federation follows only after local, remote, and
+cross-language behavior is proven.
 
-### Agent
+## Product concepts
 
-An agent is a Python class that subclasses `BaseAgent`. It is the primary unit of discovery and execution.
+### Agent and capability
 
-The class declares:
+An agent publishes identity, version, and typed capabilities. Capability
+descriptors provide stable identifiers, schemas, tags, security requirements,
+and enough metadata for compatible discovery without exposing implementation
+objects.
 
-- a published name and version via `@a2a_agent`
-- one or more exported capabilities via `@a2a_capability`
-- optional internal helper methods via `@tool`
+### Registry and catalog
 
-The agent does not need to be network-aware to be useful. It is a reflection-driven registry object that can be installed into an `OrchestratorAgent` and invoked locally.
+A registry or catalog owns identity, capability metadata, lifecycle, health,
+versions, and coherent snapshots. It does not call models, make
+caller-specific policy decisions, or execute capabilities.
 
-### Capability
+### Gateway
 
-A capability is a method on an agent that is published as a callable action. Each capability is introspected to create a parameter schema, a stable identifier, and a description used in the A2A Agent Card.
+The gateway combines catalog facts with caller authority and policy. It owns
+filtered discovery, target selection, opaque bindings, transport choice, and
+normalized invocation. A model may select only from the bounded tools the
+gateway has already authorized.
 
-The `BaseAgent` class uses Pydantic to convert Python signatures into structured JSON Schema payloads. This is crucial because the capability metadata is used both for validation and for agent discovery.
+### Runtime
 
-### Orchestrator
+The runtime owns invocation state: identity, authorization, model resolution,
+deadlines, cancellation, budgets, audit, execution, and typed results. Local
+execution is the reference path; transports must preserve its behavior rather
+than create alternate validation or error semantics.
 
-An `OrchestratorAgent` is a local registry of agents and their capabilities. It:
+### Provider
 
-- stores agents by published name
-- tracks capability collisions
-- exposes routing metadata
-- validates invocation arguments before execution
-- runs custom model-based routing when a `ModelProvider` is configured
+Model providers implement a neutral structured-output contract behind
+credential-free references. Vendor clients and credentials remain
+application-owned runtime concerns and do not leak into agent contracts.
 
-The orchestrator aims to be deterministic and safe: it serializes return values, prevents invalid data from leaking through the public contract, and exposes typed result envelopes instead of raw exceptions.
+### Orchestration
 
-### Provider abstraction
+Orchestration may be deterministic application logic, model-assisted
+top-level routing, bounded model-selected delegation, or a durable workflow.
+All modes use the same discovery, authority, invocation, and result
+boundaries.
 
-The provider layer is deliberately neutral. `ModelProvider` is a protocol, and `ModelConfiguration` configures the runtime model that will rank or select capabilities. The project includes a `FakeModel` implementation for deterministic tests and a structured-output schema that routes the orchestrator's decisions.
+## Documentation boundaries
 
-## Why the repository exists
-
-This repository solves a specific orchestration problem:
-
-1. an agent must advertise what it can do
-2. a caller must be able to discover those capabilities without manual registry wiring
-3. a capability invocation must validate arguments, run safely, and return a typed result
-4. the output must be portable and structured enough to be used in a larger multi-agent system
-
-The result is a foundation for Agent2Agent interoperability and for future polyglot agent ecosystems.
-
-## Current implementation status
-
-The codebase clearly separates product concepts from implementation details:
-
-- `decorators.py` stores metadata declaratively
-- `agent.py` materializes metadata into Agent Cards and JSON schemas
-- `orchestrator.py` performs local routing, validation, and timeout-safe invocation
-- `provider.py` provides the model contract and deterministic routing helpers
-
-This is intentionally minimal, explicit, and testable rather than hidden behind a large framework layer.
+Repository-wide documents in [`docs/`](./README.md) define shared protocols,
+deployment progression, federation, and project automation. Python APIs and
+implementation details are documented beside the package in
+[`sdk-python/docs/`](../sdk-python/docs/README.md).

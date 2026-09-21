@@ -53,15 +53,16 @@ Implemented foundations include:
 
 - `@a2a_agent`, `@a2a_capability`, and `@tool` metadata
 - deterministic Agent Card generation
-- local agent registration and model-mediated routing
+- local agent registration, policy-filtered discovery, and opaque capability bindings
+- model-mediated routing and bounded model-selected delegation
 - validated capability invocation and typed result envelopes
 - provider-neutral model configuration and per-run model isolation
 - authorization scopes and approval challenges
 - structured, correlation-safe runtime logging
 
-The local agent gateway, model-selected nested chaining, A2A 1.0 transport, provider adapters,
-containers, Foundry integration, .NET parity, and federation are roadmap work. The README avoids
-presenting those planned capabilities as already released.
+A2A 1.0 network transport, concrete provider adapters, containers, Foundry integration, durable
+workflow orchestration, .NET parity, and federation are roadmap work. The README avoids presenting
+those planned capabilities as already released.
 
 ## Intended execution model
 
@@ -133,8 +134,9 @@ package build, installed-wheel smoke test, and development commands.
 7. **Local reproducibility.** Core behavior must remain usable without cloud credentials, network
    services, or model downloads.
 
-Read the [architecture guide](./docs/architecture.md), [security model](./docs/security-and-governance.md),
-and [deployment topology guide](./docs/deployment-and-federation.md) for details.
+Read the [Python SDK architecture](./sdk-python/docs/architecture.md),
+[security model](./sdk-python/docs/security-and-governance.md), and
+[deployment topology guide](./docs/deployment-and-federation.md) for details.
 
 ## Roadmap
 
@@ -158,8 +160,8 @@ optional federation**.
 
 ```text
 .
-├── docs/                        Architecture, security, deployment, and development guides
-└── sdk-python/                  Python reference SDK, tests, examples, and package metadata
+├── docs/                        Product, protocol, deployment, and repository guides
+└── sdk-python/                  Python SDK, component docs, tests, examples, and package metadata
 ```
 
 The .NET SDK will be added during the .NET parity milestone rather than maintained as an
@@ -168,9 +170,10 @@ unimplemented placeholder.
 ## Documentation
 
 - [Documentation index](./docs/README.md)
-- [Architecture](./docs/architecture.md)
-- [SDK reference](./docs/sdk-reference.md)
-- [Security and governance](./docs/security-and-governance.md)
+- [Python SDK documentation](./sdk-python/docs/README.md)
+- [Python SDK architecture](./sdk-python/docs/architecture.md)
+- [Python SDK reference](./sdk-python/docs/sdk-reference.md)
+- [Python security and governance](./sdk-python/docs/security-and-governance.md)
 - [Communication and standards](./docs/communication-and-standards.md)
 - [Deployment and federation](./docs/deployment-and-federation.md)
 - [Repository automation and agent guidance](./docs/repository-automation.md)
@@ -180,7 +183,7 @@ unimplemented placeholder.
 
 Choose an issue from the [roadmap](https://github.com/malcmiller/conducto-ai/issues), confirm its
 dependencies are complete, and keep implementation aligned with its acceptance criteria. See the
-[development guide](./docs/development-guide.md) for setup and validation and
+[Python SDK development guide](./sdk-python/docs/development-guide.md) for setup and validation and
 [repository automation documentation](./docs/repository-automation.md) for agent instructions and
 workflows.
 

@@ -11,11 +11,16 @@ The package root exports the stable public API from `conducto`:
   `A2A_PYTHON_SDK_VERSION`, `parse_agent_card`, `parse_message`, and
   `parse_task`
 - `OrchestratorAgent`
+- `Runtime`, `RunContext`, and runtime configuration types
+- `AgentRegistry`, `AgentGateway`, discovery queries, descriptors, and typed
+  gateway outcomes
 - `a2a_agent`
 - `a2a_capability`
 - `tool`
 - `InvocationSuccess`, `InvocationFailure`, and related result types
-- model-provider and routing helpers such as `ModelConfiguration`, `RoutingSelection`, and `build_routing_schema`
+- delegation and toolbox contracts such as `DelegationConfig`,
+  `CapabilityUse`, and `ToolboxPolicy`
+- provider registration, model-provider, and routing contracts
 
 For consumers, the package root is the supported import surface.
 
@@ -32,6 +37,9 @@ Declared on a class to mark it as an A2A-capable agent.
     name: str | None = None,
     version: str = "0.1.0",
     description: str | None = None,
+    default_model: str | None = None,
+    model_required: bool = False,
+    tags: tuple[str, ...] = (),
 )
 ```
 
@@ -117,12 +125,13 @@ The default card generation requires:
 
 Conducto rejects A2A 0.3 Agent Cards, unknown required extensions, unsupported
 JSON-RPC methods, unsupported media types, and terminal task-state transitions
-explicitly. The pinned wire profile and update procedure are documented in
-[`docs/a2a-1-profile.md`](./a2a-1-profile.md).
+explicitly. The pinned wire profile and update procedure are documented in the repository's
+[A2A 1.0 profile](../../docs/a2a-1-profile.md).
 
 ## `OrchestratorAgent`
 
-The orchestrator manages a local registry of agents and executes capabilities safely.
+The orchestrator is the application-facing facade for a local agent registry,
+direct invocation, and optional model-assisted top-level routing.
 
 ### Primary operations
 
@@ -147,6 +156,8 @@ The orchestrator returns strongly typed result envelopes:
 - `InvocationTimeout`
 - `InvocationCancelled`
 - `InvocationFailure`
+- authorization, approval, and audit failures
+- binding, lifecycle, schema, budget, and delegation failures
 
 These ensure callers can handle protocol-level outcomes without relying on thrown exceptions for ordinary workflow states.
 
@@ -216,7 +227,8 @@ class RoutingSelection(BaseModel):
 
 ## Return serialization rules
 
-Capability return values are converted to JSON-compatible values via `orchestrator._serialize_result()`. Supported values include:
+Capability return values are converted to JSON-compatible values through
+`serialization.serialize_result()`. Supported values include:
 
 - `None`, strings, booleans, ints
 - finite floats
@@ -227,3 +239,14 @@ Capability return values are converted to JSON-compatible values via `orchestrat
 - lists, tuples, sets, and other sequences
 
 Unsupported values raise `UnsupportedReturnValueError` and become an `InvocationFailure` result rather than crashing the orchestrator.
+
+## Component guides
+
+The reference lists public types. The following guides explain how the
+components cooperate and where ownership boundaries sit:
+
+- [Agents and registration](./agents-and-registration.md)
+- [Gateway and discovery](./gateway-and-discovery.md)
+- [Orchestration and delegation](./orchestration-and-delegation.md)
+- [Providers and models](./providers-and-models.md)
+- [Runtime and invocation](./runtime-and-invocation.md)
