@@ -27,6 +27,7 @@ SUPPORTED_JSONRPC_METHODS = frozenset({"message/send", "tasks/get", "tasks/list"
 MAX_MESSAGE_PARTS = 16
 MAX_METADATA_BYTES = 4096
 MAX_HISTORY_MESSAGES = 32
+MAX_TASK_ARTIFACTS = 16
 MAX_ARTIFACT_PARTS = 16
 TERMINAL_TASK_STATES = frozenset(
     {
@@ -134,8 +135,8 @@ def parse_task(payload: Mapping[str, Any]) -> Task:
         raise A2AProtocolError(f"Invalid A2A 1.0 Task: {exc}") from exc
     if len(task.history) > MAX_HISTORY_MESSAGES:
         raise A2AProtocolError(f"Task history exceeds limit {MAX_HISTORY_MESSAGES}")
-    if len(task.artifacts) > MAX_ARTIFACT_PARTS:
-        raise A2AProtocolError(f"Task artifacts exceed limit {MAX_ARTIFACT_PARTS}")
+    if len(task.artifacts) > MAX_TASK_ARTIFACTS:
+        raise A2AProtocolError(f"Task artifacts exceed limit {MAX_TASK_ARTIFACTS}")
     _validate_metadata_size(payload.get("metadata"))
     for artifact in task.artifacts:
         if len(artifact.parts) > MAX_ARTIFACT_PARTS:
@@ -144,7 +145,7 @@ def parse_task(payload: Mapping[str, Any]) -> Task:
 
 
 def validate_jsonrpc_method(method: str) -> None:
-    """Validate that a JSON-RPC method is implemented by the Milestone 4 profile.
+    """Validate that a JSON-RPC method is implemented by the pinned A2A profile.
 
     Args:
         method: Candidate A2A JSON-RPC method name.

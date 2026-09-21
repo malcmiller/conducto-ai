@@ -80,6 +80,7 @@ def test_positive_a2a_conformance_fixtures_parse_with_official_sdk(
         ("overLimitMessageParts", parse_message, "Message parts exceed"),
         ("overLimitMetadataMessage", parse_message, "Metadata exceeds"),
         ("overLimitTaskHistory", parse_task, "Task history exceeds"),
+        ("overLimitTaskArtifacts", parse_task, "Task artifacts exceed"),
         ("overLimitArtifactParts", parse_task, "Artifact parts exceed"),
     ],
 )

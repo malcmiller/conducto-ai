@@ -21,6 +21,7 @@ from conducto import (
     ModelConfiguration,
     OrchestratorAgent,
     RoutingFailure,
+    RunConfig,
     Usage,
     a2a_agent,
     a2a_capability,
@@ -82,6 +83,7 @@ async def _route_with_logs(
     *,
     correlation_id: str,
     timeout: float | None = None,
+    agent_timeout: float | None = None,
 ) -> tuple[Any, FailureAgent, list[dict[str, Any]]]:
     stream = io.StringIO()
     configure_logging(format="json", stream=stream)
@@ -90,6 +92,7 @@ async def _route_with_logs(
         "Exercise failure path.",
         correlation_id=correlation_id,
         timeout=timeout,
+        agent_run_config=RunConfig(timeout=agent_timeout) if agent_timeout is not None else None,
     )
     events = [
         event
@@ -193,7 +196,7 @@ def test_timeout_preserves_correlation_id_and_returns_timeout_envelope() -> None
                 "arguments": {"delay": 0.05},
             },
             correlation_id="failure-timeout",
-            timeout=0.001,
+            agent_timeout=0.001,
         )
 
         assert isinstance(result, InvocationTimeout)

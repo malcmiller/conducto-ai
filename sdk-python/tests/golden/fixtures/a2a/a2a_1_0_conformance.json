@@ -185,6 +185,168 @@
       ],
       "role": "ROLE_USER"
     },
+    "overLimitTaskArtifacts": {
+      "artifacts": [
+        {
+          "artifactId": "artifact-0",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-1",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-2",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-3",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-4",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-5",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-6",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-7",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-8",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-9",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-10",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-11",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-12",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-13",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-14",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-15",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-16",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        }
+      ],
+      "contextId": "ctx-over",
+      "id": "task-too-many-artifacts",
+      "status": {
+        "state": "TASK_STATE_WORKING"
+      }
+    },
     "overLimitTaskHistory": {
       "contextId": "ctx-over",
       "history": [
@@ -1162,7 +1324,8 @@
       "artifactParts": 16,
       "historyMessages": 32,
       "messageParts": 16,
-      "metadataBytes": 4096
+      "metadataBytes": 4096,
+      "taskArtifacts": 16
     },
     "normativeCommit": "173695755607e884aa9acf8ce4feed90e32727a1",
     "normativeProtoSha256": "4b74c0baa923ae0acb55474e548f1d6e5d3f83b80d757b65f8bf3e99a3c2257f",

@@ -130,9 +130,7 @@ def build_agent_card(
         ],
         "version": metadata.version,
         "capabilities": {
-            "streaming": agent_capabilities["streaming"],
-            "pushNotifications": agent_capabilities["pushNotifications"],
-            "extendedAgentCard": agent_capabilities["extendedAgentCard"],
+            **agent_capabilities,
             "extensions": [
                 {
                     "uri": CONDUCTO_PARAMETER_EXTENSION_URI,

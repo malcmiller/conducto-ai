@@ -422,16 +422,17 @@ def _parameter_map_from_card(card: Mapping[str, Any]) -> Mapping[str, Any]:
     return {}
 
 
-def _primary_interface_url(card: Mapping[str, Any]) -> Any:
+def _primary_interface_url(card: Mapping[str, Any]) -> str | None:
     legacy_url = card.get("url")
-    if legacy_url is not None:
+    if isinstance(legacy_url, str):
         return legacy_url
     interfaces = card.get("supportedInterfaces", [])
     if isinstance(interfaces, (str, bytes)) or not isinstance(interfaces, Sequence):
         return None
     for interface in interfaces:
         if isinstance(interface, Mapping):
-            return interface.get("url")
+            url = interface.get("url")
+            return url if isinstance(url, str) else None
     return None
 
 
