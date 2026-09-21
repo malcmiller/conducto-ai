@@ -27,7 +27,7 @@ class AgentMetadata:
             default when no call-level or run-level override is supplied.
         model_required: Whether capabilities require a resolved model unless
             they explicitly opt out.
-        tags: Opaque discovery tags inherited by the agent's capabilities.
+        tags: Opaque discovery tags inherited by the agent's abilities.
     """
 
     name: str

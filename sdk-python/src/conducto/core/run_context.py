@@ -105,7 +105,7 @@ class DelegationBudget:
         current_depth: int,
         remaining_time: float | None,
     ) -> RemainingDelegationBudget:
-        """Return an immutable snapshot without exposing mutable ledger state."""
+        """Return an immutable snapshot without exposing the mutable ledger state."""
         with self._lock:
             return RemainingDelegationBudget(
                 depth=max(0, self._max_depth - current_depth),
