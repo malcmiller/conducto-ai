@@ -75,3 +75,46 @@ diagnostic signal and are never silently downgraded. Timeouts, buffers, and
 retry attempts are bounded; each buffered event is retried once at `flush`,
 then accounted as dropped. `InMemoryAuditSink` and `FailingAuditSink` are
 network-free reference and conformance fixtures, not production persistence.
+
+## OAuth token exchange and mTLS transport security
+
+`conducto.security.trust` defines immutable, versioned `TrustPolicy` snapshots
+(`IssuerPolicy`, `AudiencePolicy`, `ScopePolicy`, `ClockSkewPolicy`,
+`CertificatePolicy`). A snapshot's `version` is bound to every `ValidatedIdentity`
+produced under it, so configuration refresh cannot mutate in-flight
+authorization.
+
+`conducto.security.tokens` defines provider-neutral `TokenAcquirer` and
+`TokenValidator` protocols, an RFC 8693 `TokenExchangeRequest`/`AcquiredToken`
+pair, and `JWTBearerTokenValidator`, a strict RS256/ES256 bearer-token
+validator built directly on `cryptography` primitives. Algorithms, issuers,
+audiences, and verification keys are always resolved from the trust policy and
+an application-owned `JWKSKeyResolver`, never from the token under validation.
+`attenuate_scopes` enforces that a nested call's requested authority is always
+a subset of both the caller's incoming scopes and the destination's allowed
+scopes, raising `ScopeAttenuationError` otherwise. `TokenCache` bounds cache
+size and lifetime, refreshes before expiry using a configured skew, and uses a
+per-key lock so concurrent callers sharing one cache key perform one bounded
+acquisition instead of a refresh stampede.
+
+`conducto.transport.tls` builds application-owned client/server
+`ssl.SSLContext` objects for mTLS. Hostname verification and certificate-chain
+validation are always enabled; there is no parameter or code path that
+disables them. Certificate and key material is supplied as PEM bytes by the
+application and loaded through private, immediately-removed temporary files.
+
+`conducto.transport.auth` binds these contracts to one inbound request:
+`authenticate_incoming_request` treats mTLS workload authentication and OAuth
+delegated-subject authorization as independent checks — a trusted client
+certificate never substitutes for bearer-token validation and vice versa — and
+returns a `Principal`/`AuthorizationContext` pair reusable by Story 2
+guardrails. `build_delegated_token_request` attenuates scopes before building
+an outgoing RFC 8693 exchange request for a nested call. Supplying an
+`AuditEmitter` records token-exchange, token-validation, mTLS, and delegation
+outcomes without logging protected material.
+
+These contracts are deterministic, local-fixture reference implementations:
+tests build local RSA/EC keys and sign fixture JWTs directly, without Azure,
+MSAL, Authlib, or internet access. Provider-specific flows (Azure Identity,
+MSAL, on-behalf-of) are expected to implement `TokenAcquirer`/`TokenValidator`
+behind these same contracts in a later adapter, without changing this module.
