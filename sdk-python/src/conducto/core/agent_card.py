@@ -13,6 +13,7 @@ from .a2a_profile import (
     A2A_PROTOCOL_VERSION,
     CONDUCTO_PARAMETER_EXTENSION_URI,
     SUPPORTED_MEDIA_TYPES,
+    A2AProtocolError,
     parse_agent_card,
 )
 from .decorators import AgentMetadata
@@ -156,7 +157,10 @@ def build_agent_card(
         "securityRequirements": normalized_security,
         "signatures": [],
     }
-    parse_agent_card(card)
+    try:
+        parse_agent_card(card)
+    except A2AProtocolError as exc:
+        raise AgentRegistrationError(str(exc)) from exc
     return card
 
 

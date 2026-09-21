@@ -6,7 +6,7 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from a2a.types import AgentCard, Message, Task
+from a2a.types.a2a_pb2 import AgentCard, Message, Task
 from google.protobuf.json_format import MessageToDict, ParseDict, ParseError
 from google.protobuf.message import Message as ProtobufMessage
 

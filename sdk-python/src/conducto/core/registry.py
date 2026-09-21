@@ -432,7 +432,8 @@ def _primary_interface_url(card: Mapping[str, Any]) -> str | None:
     for interface in interfaces:
         if isinstance(interface, Mapping):
             url = interface.get("url")
-            return url if isinstance(url, str) else None
+            if isinstance(url, str):
+                return url
     return None
 
 
