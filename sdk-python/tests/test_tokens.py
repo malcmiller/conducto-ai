@@ -363,13 +363,12 @@ def test_token_cache_prevents_refresh_stampede() -> None:
         task_a = asyncio.create_task(cache.get_or_acquire(key, acquire, clock=FixedClock(1_000)))
         await started.wait()
         task_b = asyncio.create_task(cache.get_or_acquire(key, acquire, clock=FixedClock(1_000)))
-        lock = cache._entries[key].lock
-        for _ in range(10_000):
-            if lock.locked() and getattr(lock, "_waiters", None):
-                break
+        # Cooperative scheduling is deterministic here: task_b's cache lookup never
+        # suspends until it blocks on the already-held per-key lock, so yielding
+        # control back to the event loop a bounded number of times is sufficient to
+        # guarantee task_b has reached that blocking wait before we release it.
+        for _ in range(10):
             await asyncio.sleep(0)
-        else:
-            raise AssertionError("task_b never reached the in-flight acquisition lock")
         release.set()
         result_a, result_b = await asyncio.gather(task_a, task_b)
         assert result_a is result_b

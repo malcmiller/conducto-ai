@@ -17,7 +17,7 @@ import binascii
 import json
 import time
 from collections import OrderedDict
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -371,13 +371,14 @@ class JWTBearerTokenValidator:
             raise MalformedTokenError("token subject is missing")
 
         audience_claim = claims.get("aud")
-        audiences = (
-            (audience_claim,)
-            if isinstance(audience_claim, str)
-            else tuple(audience_claim)
-            if isinstance(audience_claim, Sequence)
-            else ()
-        )
+        if isinstance(audience_claim, str):
+            audiences: tuple[str, ...] = (audience_claim,)
+        elif isinstance(audience_claim, list | tuple) and all(
+            isinstance(item, str) for item in audience_claim
+        ):
+            audiences = tuple(audience_claim)
+        else:
+            raise MalformedTokenError("token audience claim is invalid")
         if not audiences or not policy.audience.audiences.intersection(audiences):
             raise InvalidAudienceError("token audience does not match trust policy")
 
