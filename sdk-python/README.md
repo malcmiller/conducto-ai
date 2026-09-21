@@ -91,7 +91,7 @@ discovery calls without recreating the caller or runtime.
 
 ## Model-facing toolbox projection
 
-`conducto.gateway_tools` (re-exported from `conducto`) bridges gateway
+`conducto.core.gateway_tools` (re-exported from `conducto`) bridges gateway
 discovery and a future model/tool execution loop. An agent declares which
 capability families it may use – never a concrete provider agent ID -- and
 `build_toolbox` projects only already-authorized candidates into a bounded,

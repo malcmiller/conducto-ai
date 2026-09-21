@@ -1,4 +1,4 @@
-"""Immutable, transport-neutral contracts for capability of discovery and binding."""
+"""Immutable, transport-neutral contracts for capability discovery and binding."""
 
 from __future__ import annotations
 

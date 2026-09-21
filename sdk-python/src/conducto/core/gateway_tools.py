@@ -363,7 +363,10 @@ async def build_toolbox(
                     ),
                 )
             encoded_size = len(canonical_json(tool.to_dict()).encode("utf-8"))
-            if total_bytes + encoded_size > policy.max_total_bytes:
+            # A comma separator is only needed between elements, never after the
+            # last one, so only account for it once a prior tool exists.
+            separator_size = 1 if tools else 0
+            if total_bytes + separator_size + encoded_size > policy.max_total_bytes:
                 return ToolboxResult(
                     ToolboxStatus.LIMIT_EXCEEDED,
                     failure=GatewayFailure(
@@ -371,7 +374,7 @@ async def build_toolbox(
                         "Toolbox exceeds the configured maximum serialized size",
                     ),
                 )
-            total_bytes += encoded_size + 1
+            total_bytes += separator_size + encoded_size
             tools.append(tool)
 
     snapshot = ToolboxSnapshot(registry_revision=revision, tools=tuple(tools))
