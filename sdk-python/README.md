@@ -186,6 +186,7 @@ fallback success with the child failure retained in provenance.
 sdk-python/
 ├── docs/
 │   ├── logging.md
+│   ├── provider-registration.md
 │   └── quickstart.md
 ├── examples/
 │   └── quickstart.py
@@ -267,3 +268,10 @@ and exception tracebacks are excluded by default. See
 Provider clients and credentials belong to a runtime-owned `ProviderRegistry`.
 Agents and callers use opaque model references. Resolution is deterministic:
 **call override → run override → agent default → runtime default**.
+
+Applications register an allowlisted provider-type factory once and bind
+credential-free model references to configuration-constructed or
+preconstructed clients — see
+[`docs/provider-registration.md`](docs/provider-registration.md) for the full
+registration API, typed failures, and the migration path from the deprecated
+`ProviderRegistry.register(...)`.

@@ -20,6 +20,9 @@ from pydantic import (
     field_validator,
 )
 
+from .model_config import ModelReference
+from .runtime_errors import IncompatibleProviderCapabilitiesError
+
 
 class MessageContentPart(BaseModel):
     """A provider-neutral content part supported by the current contract."""
@@ -243,7 +246,7 @@ class ToolResultMessage:
 
 @dataclass(frozen=True, slots=True)
 class FakeModelRequest:
-    """Safe observation of one request issued to :class:`FakeModel`."""
+    """Safe observation of one request issued to: class:`FakeModel`."""
 
     message_roles: tuple[str, ...]
     options: GenerationOptions
@@ -376,6 +379,33 @@ class ProviderCapabilities:
             raise ValueError("provider context and output limits must be positive")
         object.__setattr__(self, "schema_dialects", frozenset(self.schema_dialects))
         object.__setattr__(self, "schema_features", frozenset(self.schema_features))
+
+
+def validate_provider_capabilities(
+    reference: ModelReference,
+    capabilities: ProviderCapabilities,
+    required: frozenset[str],
+) -> None:
+    """Ensure a provider capabilities object satisfies every required capability name.
+
+    Args:
+        reference: Model reference the capabilities were resolved for, used only
+            for the diagnostic message.
+        capabilities: Advertised provider capabilities.
+        required: Capability attribute names that must be present and truthy.
+
+    Raises:
+        IncompatibleProviderCapabilitiesError: If any required capability is missing.
+    """
+    unsupported = sorted(
+        name
+        for name in required
+        if not hasattr(capabilities, name) or not bool(getattr(capabilities, name))
+    )
+    if unsupported:
+        raise IncompatibleProviderCapabilitiesError(
+            f"Model reference '{reference}' lacks capabilities: {', '.join(unsupported)}"
+        )
 
 
 class ProviderError(RuntimeError):
@@ -548,7 +578,7 @@ class ProviderEndpointUnavailableError(ProviderError):
 
 
 class ProviderCancellationError(ProviderError):
-    """The caller cancelled an in-flight provider request."""
+    """The caller canceled an in-flight provider request."""
 
     def __init__(self, message: str = "Provider request cancelled") -> None:
         super().__init__(message, category=ProviderFailureCategory.CANCELLATION)

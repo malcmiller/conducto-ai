@@ -82,7 +82,7 @@ class OrchestratorAgent(BaseAgent):
             provider_registry = ProviderRegistry()
             if model_provider is not None and model_config is not None:
                 assert effective_reference is not None
-                provider_registry.register(effective_reference, model_provider, model_config)
+                provider_registry.register_client(effective_reference, model_provider, model_config)
             runtime = Runtime(provider_registry=provider_registry)
         self.runtime = runtime
 
@@ -126,7 +126,7 @@ class OrchestratorAgent(BaseAgent):
         if model_provider is not None and model_config is not None:
             registry = ProviderRegistry()
             call_override = ModelReference(model_config.model)
-            registry.register(call_override, model_provider, model_config)
+            registry.register_client(call_override, model_provider, model_config)
             active_runtime = Runtime(
                 provider_registry=registry,
                 config=self.runtime.config,

@@ -24,7 +24,7 @@ before a model call; optional failure produces an empty or partial toolbox.
 
 Use `OrchestratorAgent.route()` when a model must select the parent agent. Use
 `OrchestratorAgent.invoke()` when the application already knows the target;
-this avoids a routing decision but the target may still opt into model-selected
+this avoids a routing decision, but the target may still opt into model-selected
 delegation. Each `DelegationConfig` bounds turns, sequential tool calls, depth,
 timeout, token and cost budgets, and serialized tool results.
 

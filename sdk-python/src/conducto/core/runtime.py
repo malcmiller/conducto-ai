@@ -27,6 +27,7 @@ from .model_config import (
     ModelReference,
     ModelRequirement,
     ModelResolutionSource,
+    ProviderType,
     RunConfig,
     RuntimeConfig,
 )
@@ -55,7 +56,16 @@ from .provider import (
     Usage,
     complete_with_retries,
 )
-from .provider_registry import ProviderRegistration, ProviderRegistry
+from .provider_registry import (
+    ModelBindingSnapshot,
+    ProviderClientConfig,
+    ProviderFactory,
+    ProviderOwnership,
+    ProviderRegistration,
+    ProviderRegistry,
+    ProviderRegistrySnapshot,
+    ProviderTypeRegistration,
+)
 from .run_context import (
     CancellationState,
     DelegationBudget,
@@ -74,13 +84,22 @@ from .run_context import (
 )
 from .runtime_errors import (
     ConductoError,
+    ContradictoryProviderConfigurationError,
+    DuplicateModelReferenceError,
+    DuplicateProviderTypeError,
     IncompatibleProviderCapabilitiesError,
     MissingModelDefaultError,
     ModelOverrideDeniedError,
     ModelResolutionError,
     NoActiveRunContextError,
+    ProviderClientValidationError,
+    ProviderConstructionError,
+    ProviderFactoryValidationError,
+    ProviderRegistrationError,
+    ProviderTypeMismatchError,
     ProviderUnavailableError,
     UnknownModelReferenceError,
+    UnknownProviderTypeError,
 )
 
 if TYPE_CHECKING:
@@ -92,9 +111,12 @@ if TYPE_CHECKING:
 __all__ = [
     "AgentModelConfig",
     "CancellationState",
+    "ContradictoryProviderConfigurationError",
     "DelegationBudget",
     "DelegationFrame",
     "ConductoError",
+    "DuplicateModelReferenceError",
+    "DuplicateProviderTypeError",
     "GenerationOptions",
     "IncompatibleProviderCapabilitiesError",
     "InvocationMetadata",
@@ -102,6 +124,7 @@ __all__ = [
     "MODEL_USAGE_RECORDED",
     "MalformedStructuredOutputError",
     "MissingModelDefaultError",
+    "ModelBindingSnapshot",
     "ModelCallProvenance",
     "ModelCallResult",
     "ModelConfiguration",
@@ -118,9 +141,20 @@ __all__ = [
     "ModelResolutionSource",
     "NoActiveRunContextError",
     "ProviderCapabilities",
+    "ProviderClientConfig",
+    "ProviderClientValidationError",
+    "ProviderConstructionError",
+    "ProviderFactory",
+    "ProviderFactoryValidationError",
+    "ProviderOwnership",
     "ProviderRegistration",
+    "ProviderRegistrationError",
     "ProviderRegistry",
+    "ProviderRegistrySnapshot",
     "ProviderResult",
+    "ProviderType",
+    "ProviderTypeMismatchError",
+    "ProviderTypeRegistration",
     "ProviderUnavailableError",
     "RemainingDelegationBudget",
     "ResolvedModel",
@@ -130,6 +164,7 @@ __all__ = [
     "RuntimeConfig",
     "StructuredOutputRequest",
     "UnknownModelReferenceError",
+    "UnknownProviderTypeError",
     "Usage",
     "complete_with_retries",
     "emit_event",

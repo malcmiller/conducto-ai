@@ -13,11 +13,15 @@ from .model_config import (
     RuntimeConfig,
     normalize_reference,
 )
-from .provider import ModelConfiguration, ModelProvider, ProviderCapabilities
+from .provider import (
+    ModelConfiguration,
+    ModelProvider,
+    ProviderCapabilities,
+    validate_provider_capabilities,
+)
 from .provider_registry import ProviderRegistry
 from .run_context import ModelPolicy, ModelPolicyContext, RunContext
 from .runtime_errors import (
-    IncompatibleProviderCapabilitiesError,
     MissingModelDefaultError,
     ModelOverrideDeniedError,
 )
@@ -177,12 +181,4 @@ class ModelResolver:
         Raises:
             IncompatibleProviderCapabilitiesError: If any required capability is missing.
         """
-        unsupported = sorted(
-            name
-            for name in required
-            if not hasattr(capabilities, name) or not bool(getattr(capabilities, name))
-        )
-        if unsupported:
-            raise IncompatibleProviderCapabilitiesError(
-                f"Model reference '{reference}' lacks capabilities: {', '.join(unsupported)}"
-            )
+        validate_provider_capabilities(reference, capabilities, required)
