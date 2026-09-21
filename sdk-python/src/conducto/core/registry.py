@@ -159,7 +159,7 @@ class AgentRegistry:
         agent_id: str,
         lifecycle: RegistrationLifecycle,
     ) -> None:
-        """Set active, draining, or disabled state for a registration."""
+        """Set an active, draining, or disabled state for a registration."""
         if lifecycle is RegistrationLifecycle.REMOVED:
             self.remove(agent_id)
             return
@@ -202,7 +202,7 @@ class AgentRegistry:
             self._revision += 1
 
     def lifecycle(self, agent_id: str) -> RegistrationLifecycle:
-        """Return current lifecycle state, including removed tombstones."""
+        """Return the current lifecycle state, including removed tombstones."""
         with self.lock:
             registration = self._registrations.get(agent_id)
             if registration is not None:

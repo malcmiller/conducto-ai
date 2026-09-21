@@ -236,6 +236,7 @@ class GatewayFailureCode(StrEnum):
     RESULT_LIMIT_EXCEEDED = "result_limit_exceeded"
     POLICY_EVALUATION_FAILED = "policy_evaluation_failed"
     UNSUPPORTED_SCHEMA = "unsupported_schema"
+    TOOL_ID_COLLISION = "tool_id_collision"
 
 
 @dataclass(frozen=True, slots=True)

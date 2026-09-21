@@ -20,6 +20,16 @@ from .gateway_models import (
     ToolDescriptor,
     ToolDiscoveryResult,
 )
+from .gateway_tools import (
+    CapabilityUse,
+    CapabilityUseRequirement,
+    ToolboxPolicy,
+    ToolboxResult,
+    ToolboxSnapshot,
+    ToolboxStatus,
+    ToolboxUseFailure,
+    build_toolbox,
+)
 from .invocation_results import (
     InvocationApprovalRequired,
     InvocationAuditFailure,
@@ -127,6 +137,14 @@ __all__ = [
     "SelectionStatus",
     "ToolDescriptor",
     "ToolDiscoveryResult",
+    "CapabilityUse",
+    "CapabilityUseRequirement",
+    "ToolboxPolicy",
+    "ToolboxResult",
+    "ToolboxSnapshot",
+    "ToolboxStatus",
+    "ToolboxUseFailure",
+    "build_toolbox",
     "InvocationCancelled",
     "InvocationApprovalRequired",
     "InvocationAuditFailure",

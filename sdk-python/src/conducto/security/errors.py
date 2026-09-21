@@ -104,7 +104,7 @@ class ApprovalTokenBindingError(ApprovalTokenError):
 
 
 class ApprovalTokenRoleError(ApprovalTokenError):
-    """The token's approver role is not required by the challenge."""
+    """The challenge does not require the token's approver role."""
 
     reason_code = "role_mismatch"
 

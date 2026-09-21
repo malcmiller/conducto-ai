@@ -63,7 +63,7 @@ imports from `conducto` and a deterministic `FakeModel`.
 
 ## Local capability gateway
 
-Agents obtain the model-neutral gateway only from their active
+Agents get the model-neutral gateway only from their active
 `require_run_context().gateway`. Applications own an `AgentRegistry`, inject it
 into `Runtime`, and declare the caller's allowed capability IDs when starting a
 run. Discovery returns immutable descriptors and opaque bindings; invocation
@@ -86,8 +86,38 @@ Inside `TravelAgent.plan`, use `await context.gateway.lookup(...)` or
 `discover(DiscoveryQuery(...))`, then pass the returned binding to
 `context.gateway.invoke(...)`. See
 [`examples/local_gateway.py`](examples/local_gateway.py) for a complete,
-model-free example. A later registry registration is visible to subsequent
+model-free example. A later registry registration is visible to later
 discovery calls without recreating the caller or runtime.
+
+## Model-facing toolbox projection
+
+`conducto.core.gateway_tools` (re-exported from `conducto`) bridges gateway
+discovery and a future model/tool execution loop. An agent declares which
+capability families it may use – never a concrete provider agent ID -- and
+`build_toolbox` projects only already-authorized candidates into a bounded,
+immutable, schema-valid snapshot for one model decision boundary.
+
+```python
+from conducto import CapabilityUse, CapabilityUseRequirement, ToolboxPolicy, build_toolbox
+
+policy = ToolboxPolicy(
+    uses=(
+        CapabilityUse(
+            capability_ids=frozenset({"documentation.search"}),
+            requirement=CapabilityUseRequirement.REQUIRED,
+        ),
+    )
+)
+result = await build_toolbox(context.gateway, policy)
+if result.ok:
+    tools = result.snapshot.as_model_payload()  # Safe to send to a provider.
+```
+
+A missing optional capability yields a partial toolbox; a missing required
+capability fails with a typed `ToolboxResult` before any model call. A tool ID
+returned by a model only resolves through `result.snapshot.resolve(tool_id)`
+when it belongs to that exact snapshot. This module does not select a target,
+invoke a capability, or call a model – that loop is delivered separately.
 
 ## Repository layout
 
@@ -174,4 +204,4 @@ and exception tracebacks are excluded by default. See
 
 Provider clients and credentials belong to a runtime-owned `ProviderRegistry`.
 Agents and callers use opaque model references. Resolution is deterministic:
-**call override -> run override -> agent default -> runtime default**.
+**call override → run override → agent default → runtime default**.
