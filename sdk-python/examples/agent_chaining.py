@@ -76,10 +76,11 @@ class ChainingModel:
                 effective_deadline=effective_deadline,
             )
         )
-        question = next(
+        question_value = next(
             (message.content for message in messages if message.role == "user"),
             "",
         )
+        question = question_value if isinstance(question_value, str) else ""
         if structured_output.name == "conducto_capability_selection":
             agent_id = "DiagnosticAgent" if "fail" in question.lower() else "KnowledgeAgent"
             return ProviderResult(

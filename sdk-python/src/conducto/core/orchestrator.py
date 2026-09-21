@@ -168,6 +168,7 @@ class OrchestratorAgent(BaseAgent):
             request = StructuredOutputRequest(
                 name="conducto_capability_selection",
                 schema=build_routing_schema(routing_metadata),
+                required=False,
             )
             messages = (
                 ChatMessage(
@@ -194,7 +195,7 @@ class OrchestratorAgent(BaseAgent):
                 result = call.result
                 selection = parse_routing_selection(result)
             except MalformedStructuredOutputError as error:
-                usage = call.result.usage if call is not None else Usage()
+                usage = call.result.usage if call is not None else (error.usage or Usage())
                 return RoutingFailure(
                     str(error),
                     error,
@@ -203,7 +204,7 @@ class OrchestratorAgent(BaseAgent):
                 )
             except ProviderError as error:
                 return RoutingFailure(
-                    str(error),
+                    error.diagnostic.to_dict()["message"] or "Provider failure",
                     error,
                     retryable=error.retryable,
                     metadata=context.invocation_metadata(),

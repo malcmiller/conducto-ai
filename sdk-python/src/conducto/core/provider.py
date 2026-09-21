@@ -7,7 +7,9 @@ import math
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal, Protocol, TypeAlias
+from enum import StrEnum
+from types import MappingProxyType
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast
 
 from pydantic import (
     BaseModel,
@@ -19,6 +21,23 @@ from pydantic import (
 )
 
 
+class MessageContentPart(BaseModel):
+    """A provider-neutral content part supported by the current contract."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: Literal["text", "json"]
+    text: str | None = None
+    value: dict[str, Any] | list[Any] | None = None
+
+    def model_post_init(self, __context: Any) -> None:
+        """Ensure a content part has exactly the payload its type requires."""
+        if self.type == "text" and (self.text is None or self.value is not None):
+            raise ValueError("text content parts require only text")
+        if self.type == "json" and (self.value is None or self.text is not None):
+            raise ValueError("json content parts require only value")
+
+
 class ChatMessage(BaseModel):
     """Provider-neutral chat message sent to a model client.
 
@@ -27,8 +46,20 @@ class ChatMessage(BaseModel):
         content: Text content for the message.
     """
 
-    role: str
-    content: str
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    role: str = Field(min_length=1)
+    content: str | tuple[MessageContentPart, ...]
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(
+        cls, value: str | tuple[MessageContentPart, ...] | list[MessageContentPart]
+    ) -> str | tuple[MessageContentPart, ...]:
+        """Normalize content parts to an immutable tuple."""
+        if isinstance(value, list):
+            return tuple(value)
+        return value
 
 
 class GenerationOptions(BaseModel):
@@ -47,36 +78,106 @@ class GenerationOptions(BaseModel):
     max_tokens: int | None = Field(default=None, gt=0)
     timeout: float | None = Field(default=None, gt=0)
     retries: int = Field(default=0, ge=0)
+    stop: tuple[str, ...] = ()
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    @field_validator("temperature")
+    @classmethod
+    def validate_temperature(cls, value: float) -> float:
+        """Reject non-finite sampling values."""
+        if not math.isfinite(value) or value < 0:
+            raise ValueError("temperature must be finite and non-negative")
+        return value
+
+
+class JsonSchemaDialect(StrEnum):
+    """JSON Schema dialects recognized by the provider contract."""
+
+    DRAFT_2020_12 = "https://json-schema.org/draft/2020-12/schema"
+    DRAFT_07 = "http://json-schema.org/draft-07/schema#"
+
+
+class SchemaFeature(StrEnum):
+    """Schema features a provider may advertise as natively supported."""
+
+    OBJECT = "object"
+    ARRAY = "array"
+    ENUM = "enum"
+    CONST = "const"
+    REQUIRED = "required"
+    ADDITIONAL_PROPERTIES = "additionalProperties"
+    MIN_LENGTH = "minLength"
+    MAX_LENGTH = "maxLength"
+    MIN_ITEMS = "minItems"
+    MAX_ITEMS = "maxItems"
+    ONE_OF = "oneOf"
+    ANY_OF = "anyOf"
+    ALL_OF = "allOf"
+    REF = "$ref"
 
 
 @dataclass(frozen=True)
 class StructuredOutputRequest:
-    """Named JSON schema that a provider must satisfy natively."""
+    """Immutable, native JSON-schema-constrained output request."""
 
     name: str
-    schema: dict[str, Any]
+    schema: Mapping[str, Any]
+    dialect: JsonSchemaDialect = JsonSchemaDialect.DRAFT_2020_12
+    required: bool = True
+    features: frozenset[SchemaFeature] = frozenset()
 
     def __init__(
         self,
         name: str,
-        schema: dict[str, Any] | None = None,
+        schema: Mapping[str, Any] | None = None,
         *,
-        json_schema: dict[str, Any] | None = None,
+        json_schema: Mapping[str, Any] | None = None,
+        dialect: JsonSchemaDialect = JsonSchemaDialect.DRAFT_2020_12,
+        required: bool = True,
+        features: frozenset[SchemaFeature] | set[SchemaFeature] = frozenset(),
     ) -> None:
         resolved_schema = schema if schema is not None else json_schema
         if resolved_schema is None:
             raise ValueError("StructuredOutputRequest requires 'schema' or 'json_schema'")
-        object.__setattr__(self, "name", name)
-        object.__setattr__(self, "schema", resolved_schema)
+        if not name.strip():
+            raise ValueError("Structured output name cannot be empty")
+        if not isinstance(resolved_schema, Mapping) or not resolved_schema:
+            raise ValueError("Structured output schema cannot be empty")
+        object.__setattr__(self, "name", name.strip())
+        object.__setattr__(self, "schema", _freeze_json(resolved_schema))
+        object.__setattr__(self, "dialect", JsonSchemaDialect(dialect))
+        object.__setattr__(self, "required", required)
+        object.__setattr__(self, "features", frozenset(features))
 
     @property
-    def json_schema(self) -> dict[str, Any]:
+    def json_schema(self) -> Mapping[str, Any]:
         """Return the native JSON schema for this structured-output request.
 
         Returns:
             The unconstrained serialized schema definition for the request.
         """
-        return self.schema
+        return cast(Mapping[str, Any], _thaw_json(self.schema))
+
+
+def _freeze_json(value: Any) -> Any:
+    """Freeze JSON-like contract data without leaking mutable provider state."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(k): _freeze_json(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    if isinstance(value, set):
+        return frozenset(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    """Return ordinary JSON-compatible dictionaries and lists."""
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, (tuple, frozenset)):
+        return [_thaw_json(item) for item in value]
+    return value
 
 
 class Usage(BaseModel):
@@ -88,16 +189,18 @@ class Usage(BaseModel):
         total_tokens: Total tokens reported for the request.
     """
 
-    input_tokens: int = Field(default=0, ge=0)
-    output_tokens: int = Field(default=0, ge=0)
-    total_tokens: int = Field(default=0, ge=0)
-    cost: float = Field(default=0.0, ge=0)
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    cost: float | None = Field(default=None, ge=0)
 
     @field_validator("cost")
     @classmethod
     def validate_cost(cls, value: float) -> float:
         """Reject non-finite provider cost values."""
-        if not math.isfinite(value):
+        if value is not None and not math.isfinite(value):
             raise ValueError("cost must be finite")
         return value
 
@@ -162,11 +265,88 @@ class ProviderResult(BaseModel):
         request_id: Optional non-secret provider request identifier.
     """
 
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
     content: str | None = None
-    structured: dict[str, Any] | None = None
+    structured: Any = None
     usage: Usage = Field(default_factory=Usage)
     accepted: bool = False
     request_id: str | None = None
+    finish_reason: str | None = None
+    content_filtered: bool = False
+
+    @property
+    def acceptance(self) -> AcceptanceState:
+        """Return the explicit acceptance state represented by this result."""
+        return AcceptanceState.ACCEPTED if self.accepted else AcceptanceState.ATTEMPTED_NOT_ACCEPTED
+
+
+class AcceptanceState(StrEnum):
+    """Whether a provider accepted work for processing."""
+
+    NOT_ATTEMPTED = "not_attempted"
+    ATTEMPTED_NOT_ACCEPTED = "attempted_not_accepted"
+    ACCEPTED = "accepted"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderCallContext:
+    """Credential-free deadline and cancellation state visible to adapters."""
+
+    deadline: float | None = None
+    cancelled: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDiagnostic:
+    """Safe, credential-free diagnostic suitable for public serialization."""
+
+    category: ProviderFailureCategory
+    message: str
+    request_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """Replace arbitrary caller text with a stable, safe summary."""
+        object.__setattr__(self, "message", f"provider failure: {self.category.value}")
+
+    def to_dict(self) -> dict[str, str | None]:
+        """Return a redacted diagnostic representation."""
+        return {
+            "category": self.category.value,
+            "message": self.message,
+            "request_id": self.request_id,
+        }
+
+
+class ProviderFailureCategory(StrEnum):
+    """Stable categories for failures surfaced by provider adapters."""
+
+    CONFIGURATION = "configuration"
+    MISSING_DEPENDENCY = "missing_dependency"
+    AUTHENTICATION = "authentication"
+    AUTHORIZATION = "authorization"
+    UNAVAILABLE = "unavailable"
+    UNSUPPORTED_CAPABILITY = "unsupported_capability"
+    UNSUPPORTED_SCHEMA = "unsupported_schema"
+    RATE_LIMIT = "rate_limit"
+    QUOTA = "quota"
+    TIMEOUT = "timeout"
+    CANCELLATION = "cancellation"
+    CONTENT_POLICY = "content_policy"
+    MALFORMED_OUTPUT = "malformed_output"
+    TRANSPORT = "transport"
+    PROTOCOL = "protocol"
+    INTERNAL = "internal"
+
+
+class FinishReason(StrEnum):
+    """Provider-neutral completion finish metadata."""
+
+    STOP = "stop"
+    LENGTH = "length"
+    CONTENT_FILTER = "content_filter"
+    TOOL_CALL = "tool_call"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -184,6 +364,18 @@ class ProviderCapabilities:
     tool_calling: bool = False
     context_limit: int = 0
     usage_reporting: bool = False
+    streaming: bool = False
+    cancellation: bool = False
+    output_limit: int | None = None
+    schema_dialects: frozenset[JsonSchemaDialect] = frozenset({JsonSchemaDialect.DRAFT_2020_12})
+    schema_features: frozenset[SchemaFeature] = frozenset(SchemaFeature)
+
+    def __post_init__(self) -> None:
+        """Normalize capability collections and validate numeric limits."""
+        if self.context_limit < 0 or (self.output_limit is not None and self.output_limit <= 0):
+            raise ValueError("provider context and output limits must be positive")
+        object.__setattr__(self, "schema_dialects", frozenset(self.schema_dialects))
+        object.__setattr__(self, "schema_features", frozenset(self.schema_features))
 
 
 class ProviderError(RuntimeError):
@@ -195,14 +387,52 @@ class ProviderError(RuntimeError):
         *,
         retryable: bool = False,
         accepted: bool = False,
+        category: ProviderFailureCategory = ProviderFailureCategory.INTERNAL,
+        request_id: str | None = None,
+        attempted: bool = False,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable and not accepted
         self.accepted = accepted
+        self.category = category
+        self.request_id = request_id
+        self.attempted = attempted
+
+    @property
+    def acceptance(self) -> AcceptanceState:
+        """Return the explicit acceptance state for retry decisions."""
+        if self.accepted:
+            return AcceptanceState.ACCEPTED
+        return (
+            AcceptanceState.ATTEMPTED_NOT_ACCEPTED
+            if self.attempted
+            else AcceptanceState.NOT_ATTEMPTED
+        )
+
+    @property
+    def diagnostic(self) -> ProviderDiagnostic:
+        """Return a safe diagnostic without provider exception details."""
+        return ProviderDiagnostic(self.category, self.__class__.__name__, self.request_id)
 
 
 class ProviderAuthenticationError(ProviderError):
     """Provider rejected or could not get authentication."""
+
+    def __init__(
+        self,
+        message: str = "Provider authentication failed",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            accepted=accepted,
+            category=ProviderFailureCategory.AUTHENTICATION,
+            request_id=request_id,
+            attempted=attempted,
+        )
 
 
 class ProviderRateLimitError(ProviderError):
@@ -213,12 +443,37 @@ class ProviderRateLimitError(ProviderError):
         message: str = "Provider rate limit exceeded",
         *,
         accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
     ) -> None:
-        super().__init__(message, retryable=True, accepted=accepted)
+        super().__init__(
+            message,
+            retryable=True,
+            accepted=accepted,
+            category=ProviderFailureCategory.RATE_LIMIT,
+            request_id=request_id,
+            attempted=attempted,
+        )
 
 
 class ProviderContentPolicyError(ProviderError):
     """Provider rejected content under its safety or usage policy."""
+
+    def __init__(
+        self,
+        message: str = "Provider content policy rejected the request",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            accepted=accepted,
+            category=ProviderFailureCategory.CONTENT_POLICY,
+            request_id=request_id,
+            attempted=attempted,
+        )
 
 
 class ProviderTimeoutError(ProviderError):
@@ -229,16 +484,74 @@ class ProviderTimeoutError(ProviderError):
         message: str = "Provider request timed out",
         *,
         accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
     ) -> None:
-        super().__init__(message, retryable=True, accepted=accepted)
+        super().__init__(
+            message,
+            retryable=True,
+            accepted=accepted,
+            category=ProviderFailureCategory.TIMEOUT,
+            request_id=request_id,
+            attempted=attempted,
+        )
 
 
 class UnsupportedProviderCapabilityError(ProviderError):
     """Provider cannot satisfy a capability required by the request."""
 
+    def __init__(self, message: str = "Provider capability is unsupported") -> None:
+        super().__init__(message, category=ProviderFailureCategory.UNSUPPORTED_CAPABILITY)
+
 
 class MalformedStructuredOutputError(ProviderError):
     """Provider output did not satisfy the required structured contract."""
+
+    def __init__(
+        self,
+        message: str = "Provider returned malformed structured output",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        usage: Usage | None = None,
+        attempted: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            category=ProviderFailureCategory.MALFORMED_OUTPUT,
+            accepted=accepted,
+            request_id=request_id,
+            attempted=attempted,
+        )
+        self.usage = usage
+
+
+class ProviderEndpointUnavailableError(ProviderError):
+    """The endpoint, deployment, or selected model is unavailable."""
+
+    def __init__(
+        self,
+        message: str = "Provider is unavailable",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            retryable=True,
+            accepted=accepted,
+            category=ProviderFailureCategory.UNAVAILABLE,
+            request_id=request_id,
+            attempted=attempted,
+        )
+
+
+class ProviderCancellationError(ProviderError):
+    """The caller cancelled an in-flight provider request."""
+
+    def __init__(self, message: str = "Provider request cancelled") -> None:
+        super().__init__(message, category=ProviderFailureCategory.CANCELLATION)
 
 
 class ModelProvider(Protocol):
@@ -271,10 +584,28 @@ class ModelProvider(Protocol):
             tools: Provider-neutral tools available for this turn.
             tool_results: Bounded results from prior provider-issued tool calls.
             effective_deadline: Optional monotonic deadline that bounds this call.
+            call_context: Optional credential-free cancellation/deadline context.
 
         Returns:
             Normalized provider response content, metadata, and usage counters.
         """
+
+
+class CancellableModelProvider(ModelProvider, Protocol):
+    """Optional provider protocol that receives cancellation context."""
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        options: GenerationOptions,
+        structured_output: StructuredOutputRequest,
+        tools: Sequence[Mapping[str, Any]] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
+        effective_deadline: float | None = None,
+        call_context: ProviderCallContext | None = None,
+    ) -> ProviderResult:
+        """Generate a completion while observing the caller context."""
 
 
 def build_routing_schema(
@@ -394,6 +725,7 @@ class FakeModel:
         tools: Sequence[Mapping[str, Any]] = (),
         tool_results: Sequence[ToolResultMessage] = (),
         effective_deadline: float | None = None,
+        call_context: ProviderCallContext | None = None,
     ) -> ProviderResult:
         """Return the configured fake completion payload.
 
@@ -408,6 +740,7 @@ class FakeModel:
         Returns:
             The synthetic provider result configured when the fake provider was created.
         """
+        del call_context
         self.calls += 1
         self.requests.append(
             FakeModelRequest(
@@ -470,7 +803,9 @@ def build_model_decision_schema(
     }
     if definitions is not None:
         schema["$defs"] = definitions
-    return StructuredOutputRequest(name="model_decision", schema=schema)
+    # The turn envelope is required; the terminal payload is validated by the
+    # delegation boundary so it can report final-output validation distinctly.
+    return StructuredOutputRequest(name="model_decision", schema=schema, required=False)
 
 
 def parse_model_decision(
@@ -510,12 +845,180 @@ def validate_provider_contract(
         raise UnsupportedProviderCapabilityError(
             "Provider does not support required native structured output"
         )
-    if not structured_output.json_schema:
-        raise ValueError("Structured output schema cannot be empty")
+    required_features = set(structured_output.features) or _schema_keywords(
+        structured_output.json_schema
+    )
+    unknown = _unknown_schema_keywords(structured_output.json_schema)
+    if unknown:
+        raise UnsupportedProviderCapabilityError(
+            f"Structured output schema uses unsupported keywords: {sorted(unknown)!r}"
+        )
+    unsupported = required_features - set(provider.capabilities.schema_features)
+    if unsupported:
+        raise UnsupportedProviderCapabilityError(
+            f"Structured output schema uses unsupported features: {sorted(unsupported)!r}"
+        )
+    if structured_output.dialect not in provider.capabilities.schema_dialects:
+        raise UnsupportedProviderCapabilityError(
+            f"Provider does not support JSON Schema dialect {structured_output.dialect}"
+        )
     if (tools or tool_results) and not provider.capabilities.tool_calling:
         raise UnsupportedProviderCapabilityError(
             "Provider does not support required native tool calling"
         )
+
+
+_SCHEMA_KEYWORDS = {
+    "type",
+    "properties",
+    "items",
+    "required",
+    "additionalProperties",
+    "enum",
+    "const",
+    "minLength",
+    "maxLength",
+    "minItems",
+    "maxItems",
+    "oneOf",
+    "anyOf",
+    "allOf",
+    "$ref",
+    "$defs",
+    "$schema",
+    "title",
+    "description",
+    "default",
+}
+
+
+def _schema_keywords(schema: Mapping[str, Any]) -> set[SchemaFeature]:
+    """Collect schema features used by a JSON Schema document."""
+    found: set[SchemaFeature] = set()
+    for key, value in schema.items():
+        if key == "type" and isinstance(value, str):
+            try:
+                found.add(SchemaFeature(value))
+            except ValueError:
+                pass
+        try:
+            feature = SchemaFeature(key)
+        except ValueError:
+            continue
+        found.add(feature)
+        if key in {"properties", "$defs"} and isinstance(value, Mapping):
+            for child in value.values():
+                if isinstance(child, Mapping):
+                    found.update(_schema_keywords(child))
+        elif isinstance(value, Mapping):
+            found.update(_schema_keywords(value))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, Mapping):
+                    found.update(_schema_keywords(item))
+    return found
+
+
+def _unknown_schema_keywords(schema: Mapping[str, Any]) -> set[str]:
+    """Find validation keywords outside the deliberately supported subset."""
+    unknown: set[str] = set()
+    for key, value in schema.items():
+        if key not in _SCHEMA_KEYWORDS and not key.startswith("x-"):
+            unknown.add(str(key))
+        if key in {"properties", "$defs"} and isinstance(value, Mapping):
+            for child in value.values():
+                if isinstance(child, Mapping):
+                    unknown.update(_unknown_schema_keywords(child))
+        elif isinstance(value, Mapping):
+            unknown.update(_unknown_schema_keywords(value))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, Mapping):
+                    unknown.update(_unknown_schema_keywords(item))
+    return unknown
+
+
+def validate_structured_output(
+    value: Any,
+    request: StructuredOutputRequest,
+) -> None:
+    """Validate decoded provider output against the requested schema.
+
+    This deliberately implements the provider-neutral subset instead of
+    depending on an optional JSON Schema package.
+    """
+    root_schema = request.json_schema
+
+    def check(instance: Any, schema: Mapping[str, Any], path: str = "$") -> None:
+        if "$ref" in schema:
+            ref = schema["$ref"]
+            if not isinstance(ref, str) or not ref.startswith("#/$defs/"):
+                raise MalformedStructuredOutputError(f"{path} has unsupported $ref")
+            target: Any = root_schema
+            for part in ref[2:].split("/"):
+                if not isinstance(target, Mapping) or part not in target:
+                    raise MalformedStructuredOutputError(f"{path} has unresolved $ref")
+                target = target[part]
+            if not isinstance(target, Mapping):
+                raise MalformedStructuredOutputError(f"{path} has invalid $ref")
+            check(instance, target, path)
+        if "allOf" in schema:
+            for branch in schema["allOf"]:
+                check(instance, branch, path)
+        expected = schema.get("type")
+        type_ok = {
+            "object": isinstance(instance, Mapping),
+            "array": isinstance(instance, list),
+            "string": isinstance(instance, str),
+            "number": isinstance(instance, (int, float)) and not isinstance(instance, bool),
+            "integer": isinstance(instance, int) and not isinstance(instance, bool),
+            "boolean": isinstance(instance, bool),
+            "null": instance is None,
+        }
+        if isinstance(expected, str) and not type_ok.get(expected, False):
+            raise MalformedStructuredOutputError(f"{path} must be {expected}")
+        if "enum" in schema and instance not in schema["enum"]:
+            raise MalformedStructuredOutputError(f"{path} is not an allowed enum value")
+        if "const" in schema and instance != schema["const"]:
+            raise MalformedStructuredOutputError(f"{path} does not match const")
+        if isinstance(instance, Mapping):
+            properties = schema.get("properties", {})
+            for key in schema.get("required", ()):
+                if key not in instance:
+                    raise MalformedStructuredOutputError(f"{path}.{key} is required")
+            if schema.get("additionalProperties") is False:
+                extra = set(instance) - set(properties)
+                if extra:
+                    raise MalformedStructuredOutputError(f"{path} has additional properties")
+            for key, child in properties.items():
+                if key in instance:
+                    check(instance[key], child, f"{path}.{key}")
+        if isinstance(instance, list):
+            if "minItems" in schema and len(instance) < schema["minItems"]:
+                raise MalformedStructuredOutputError(f"{path} has too few items")
+            if "maxItems" in schema and len(instance) > schema["maxItems"]:
+                raise MalformedStructuredOutputError(f"{path} has too many items")
+            if isinstance(schema.get("items"), Mapping):
+                for index, item in enumerate(instance):
+                    check(item, schema["items"], f"{path}[{index}]")
+        if isinstance(instance, str):
+            if "minLength" in schema and len(instance) < schema["minLength"]:
+                raise MalformedStructuredOutputError(f"{path} is too short")
+            if "maxLength" in schema and len(instance) > schema["maxLength"]:
+                raise MalformedStructuredOutputError(f"{path} is too long")
+        for keyword in ("oneOf", "anyOf"):
+            if keyword in schema:
+                matches = 0
+                for branch in schema[keyword]:
+                    try:
+                        check(instance, branch, path)
+                    except MalformedStructuredOutputError:
+                        continue
+                    matches += 1
+                if (keyword == "oneOf" and matches != 1) or (keyword == "anyOf" and matches < 1):
+                    raise MalformedStructuredOutputError(f"{path} does not satisfy {keyword}")
+
+    check(value, request.json_schema)
 
 
 def parse_routing_selection(result: ProviderResult) -> RoutingSelection:
@@ -545,6 +1048,7 @@ async def complete_with_retries(
     tools: Sequence[Mapping[str, Any]] = (),
     tool_results: Sequence[ToolResultMessage] = (),
     effective_deadline: float | None = None,
+    call_context: ProviderCallContext | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> ProviderResult:
     """Complete a provider request under timeout and safe-retry rules.
@@ -606,16 +1110,43 @@ async def complete_with_retries(
                 request_kwargs["tool_results"] = tool_results
             if tool_aware or effective_deadline is not None:
                 request_kwargs["effective_deadline"] = deadline
+            if call_context is not None and provider.capabilities.cancellation:
+                request_kwargs["call_context"] = call_context
             completion = provider.complete(messages, **request_kwargs)
             if timeout_for_attempt is not None:
-                return await asyncio.wait_for(completion, timeout_for_attempt)
-            return await completion
+                result = await asyncio.wait_for(completion, timeout_for_attempt)
+            else:
+                result = await completion
+            if result.content_filtered:
+                raise ProviderContentPolicyError(
+                    accepted=result.accepted,
+                    request_id=result.request_id,
+                )
+            if structured_output.required:
+                if result.structured is None:
+                    error = MalformedStructuredOutputError(
+                        "Provider returned no required structured output",
+                        accepted=result.accepted,
+                        request_id=result.request_id,
+                        usage=result.usage,
+                    )
+                    raise error
+                try:
+                    validate_structured_output(result.structured, structured_output)
+                except MalformedStructuredOutputError as error:
+                    error.usage = result.usage
+                    error.accepted = result.accepted
+                    error.request_id = result.request_id
+                    error.attempted = True
+                    raise
+            return result
         except TimeoutError as error:
             timeout_error = ProviderTimeoutError()
             if attempt == attempts - 1 or (deadline is not None and deadline <= clock()):
                 raise timeout_error from error
             await asyncio.sleep(0)
         except ProviderError as error:
+            error.attempted = True
             if not error.retryable or error.accepted or attempt == attempts - 1:
                 raise
             await asyncio.sleep(0)

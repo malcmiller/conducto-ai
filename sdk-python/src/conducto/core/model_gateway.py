@@ -18,6 +18,7 @@ from .provider import (
     MalformedStructuredOutputError,
     ModelConfiguration,
     ModelProvider,
+    ProviderCallContext,
     ProviderResult,
     StructuredOutputRequest,
     ToolResultMessage,
@@ -220,6 +221,14 @@ async def complete_model_call(
                 tools=tools,
                 tool_results=tool_results,
                 effective_deadline=deadline,
+                call_context=(
+                    ProviderCallContext(
+                        deadline=deadline,
+                        cancelled=context.cancellation.cancelled,
+                    )
+                    if binding.client.capabilities.cancellation
+                    else None
+                ),
                 clock=clock,
             )
         )

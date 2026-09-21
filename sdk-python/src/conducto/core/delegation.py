@@ -249,6 +249,7 @@ class DelegationOutcomeCode(StrEnum):
     DEADLINE_EXHAUSTED = "deadline_exhausted"
     TOKEN_BUDGET_EXHAUSTED = "token_budget_exhausted"
     COST_BUDGET_EXHAUSTED = "cost_budget_exhausted"
+    USAGE_UNKNOWN = "usage_unknown"
     SHARED_BUDGET_EXHAUSTED = "shared_budget_exhausted"
     RESULT_SIZE_EXHAUSTED = "result_size_exhausted"
     PROVIDER_FAILURE = "provider_failure"
@@ -303,6 +304,7 @@ async def run_delegation(
         *,
         terminal_value: ResponseT | None = None,
         failure_code: str | None = None,
+        usage: Usage | None = None,
     ) -> DelegationOutcome[ResponseT]:
         provenance = DelegationProvenance(
             loop_id=loop_id,
@@ -334,7 +336,7 @@ async def run_delegation(
             model_reference=base_metadata.model_reference,
             provider=base_metadata.provider,
             resolution_source=base_metadata.resolution_source,
-            usage=aggregate_usage(ordered_model_calls),
+            usage=usage or aggregate_usage(ordered_model_calls),
             model_calls=tuple(ordered_model_calls),
             attributes=base_metadata.attributes,
         )
@@ -409,6 +411,8 @@ async def run_delegation(
                     DelegationOutcomeCode.PROVIDER_FAILURE,
                     failure_code=type(error).__name__,
                 )
+            except MalformedStructuredOutputError as error:
+                return finish(DelegationOutcomeCode.MALFORMED_DECISION, usage=error.usage)
             except ProviderError as error:
                 return finish(
                     DelegationOutcomeCode.PROVIDER_FAILURE,
@@ -418,8 +422,14 @@ async def run_delegation(
             if context.cancellation.cancelled:
                 return finish(DelegationOutcomeCode.CANCELLATION)
             ordered_model_calls.extend(model_call.metadata.model_calls)
-            consumed_tokens += model_call.result.usage.total_tokens
-            consumed_cost += model_call.result.usage.cost
+            if config.token_budget is not None and model_call.result.usage.total_tokens is None:
+                return finish(DelegationOutcomeCode.USAGE_UNKNOWN)
+            if config.cost_budget is not None and model_call.result.usage.cost is None:
+                return finish(DelegationOutcomeCode.USAGE_UNKNOWN)
+            if model_call.result.usage.total_tokens is not None:
+                consumed_tokens += model_call.result.usage.total_tokens
+            if model_call.result.usage.cost is not None:
+                consumed_cost += model_call.result.usage.cost
             if config.token_budget is not None and consumed_tokens > config.token_budget:
                 return finish(DelegationOutcomeCode.TOKEN_BUDGET_EXHAUSTED)
             if config.cost_budget is not None and consumed_cost > config.cost_budget:
