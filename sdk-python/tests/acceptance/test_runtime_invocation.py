@@ -88,12 +88,12 @@ def _runtime(
         {"report": worker_report},
         usage=Usage(input_tokens=8, output_tokens=3, total_tokens=11),
     )
-    registry.register(
+    registry.register_client(
         "router",
         router,
         ModelConfiguration(provider="routing-provider", model="routing-model"),
     )
-    registry.register(
+    registry.register_client(
         worker_reference,
         worker,
         ModelConfiguration(provider="worker-provider", model=worker_reference),
@@ -163,12 +163,12 @@ def test_concurrent_standalone_and_orchestrated_runs_are_isolated() -> None:
             {"report": "second"},
             usage=Usage(input_tokens=4, output_tokens=5, total_tokens=9),
         )
-        runtime.provider_registry.register(
+        runtime.provider_registry.register_client(
             "first",
             first,
             ModelConfiguration(provider="first-provider", model="first"),
         )
-        runtime.provider_registry.register(
+        runtime.provider_registry.register_client(
             "second",
             second,
             ModelConfiguration(provider="second-provider", model="second"),
@@ -236,7 +236,7 @@ def test_model_resolution_precedence_uses_public_configuration_types() -> None:
 
     registry = ProviderRegistry()
     for reference in ("runtime", "agent", "run", "call"):
-        registry.register(
+        registry.register_client(
             reference,
             FakeModel({"unused": reference}),
             ModelConfiguration(provider=f"{reference}-provider", model=f"{reference}-model"),
