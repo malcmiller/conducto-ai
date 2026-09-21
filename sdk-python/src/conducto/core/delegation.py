@@ -409,6 +409,8 @@ async def run_delegation(
                     DelegationOutcomeCode.PROVIDER_FAILURE,
                     failure_code=type(error).__name__,
                 )
+            except MalformedStructuredOutputError:
+                return finish(DelegationOutcomeCode.MALFORMED_DECISION)
             except ProviderError as error:
                 return finish(
                     DelegationOutcomeCode.PROVIDER_FAILURE,
@@ -418,8 +420,10 @@ async def run_delegation(
             if context.cancellation.cancelled:
                 return finish(DelegationOutcomeCode.CANCELLATION)
             ordered_model_calls.extend(model_call.metadata.model_calls)
-            consumed_tokens += model_call.result.usage.total_tokens
-            consumed_cost += model_call.result.usage.cost
+            if model_call.result.usage.total_tokens is not None:
+                consumed_tokens += model_call.result.usage.total_tokens
+            if model_call.result.usage.cost is not None:
+                consumed_cost += model_call.result.usage.cost
             if config.token_budget is not None and consumed_tokens > config.token_budget:
                 return finish(DelegationOutcomeCode.TOKEN_BUDGET_EXHAUSTED)
             if config.cost_budget is not None and consumed_cost > config.cost_budget:

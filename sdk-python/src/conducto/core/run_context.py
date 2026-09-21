@@ -188,11 +188,17 @@ class ModelCallProvenance:
 
 def aggregate_usage(calls: Sequence[ModelCallProvenance]) -> Usage:
     """Aggregate provider-neutral usage in call order."""
+    def total(name: str) -> int | None:
+        values = [getattr(call.usage, name) for call in calls]
+        return None if any(value is None for value in values) else sum(values)
+
+    costs = [call.usage.cost for call in calls]
+    known_costs = [value for value in costs if value is not None]
     return Usage(
-        input_tokens=sum(call.usage.input_tokens for call in calls),
-        output_tokens=sum(call.usage.output_tokens for call in calls),
-        total_tokens=sum(call.usage.total_tokens for call in calls),
-        cost=sum(call.usage.cost for call in calls),
+        input_tokens=total("input_tokens"),
+        output_tokens=total("output_tokens"),
+        total_tokens=total("total_tokens"),
+        cost=None if len(known_costs) != len(costs) else sum(known_costs),
     )
 
 
