@@ -58,6 +58,14 @@ class AuditEventName(StrEnum):
     EXECUTION_COMPLETED = "security.execution.completed"
     EXECUTION_FAILED = "security.execution.failed"
     DELIVERY_FAILED = "security.audit_delivery.failed"
+    TOKEN_EXCHANGE_SUCCEEDED = "security.token_exchange.succeeded"
+    TOKEN_EXCHANGE_FAILED = "security.token_exchange.failed"
+    TOKEN_VALIDATED = "security.token.validated"
+    TOKEN_VALIDATION_REJECTED = "security.token.rejected"
+    MTLS_AUTHENTICATED = "security.mtls.authenticated"
+    MTLS_REJECTED = "security.mtls.rejected"
+    DELEGATION_ATTENUATED = "security.delegation.attenuated"
+    DELEGATION_REJECTED = "security.delegation.rejected"
 
 
 class AuditDecision(StrEnum):

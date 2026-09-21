@@ -23,3 +23,11 @@ class LimitExceededError(TransportError):
 
 class RemoteTaskError(TransportError):
     """Raised when a requested remote task is missing or cannot transition."""
+
+
+class TLSConfigurationError(TransportError):
+    """Raised when application-owned TLS/mTLS configuration is invalid."""
+
+
+class AuthenticationError(TransportError):
+    """Raised when incoming or outgoing request authentication fails."""
