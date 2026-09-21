@@ -84,6 +84,17 @@ class A2AClient:
         self.descriptor = descriptor
         self._client = client
 
+    @classmethod
+    def from_descriptor(cls, descriptor: RemoteAgentDescriptor) -> A2AClient:
+        """Create an official JSON-RPC client from a validated descriptor snapshot."""
+        from a2a.client.client_factory import ClientFactory
+
+        try:
+            card = parse_agent_card(dict(descriptor.card))
+            return cls(descriptor, ClientFactory().create(card))
+        except (A2AProtocolError, ValueError) as exc:
+            raise CompatibilityError(f"Unable to create A2A client: {exc}") from exc
+
     async def send_message(self, request: Any, *, context: Any = None) -> Any:
         """Send a non-retried A2A message through the official SDK client."""
         return self._client.send_message(request, context=context)
