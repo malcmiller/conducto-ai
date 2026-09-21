@@ -199,5 +199,5 @@ def test_quickstart_script_executes_and_prints_concise_result() -> None:
 def test_quickstart_cards_use_documented_local_urls() -> None:
     invoice_card, incident_card = create_agent_cards()
 
-    assert invoice_card["url"] == f"{CARD_BASE_URL}/invoice"
-    assert incident_card["url"] == f"{CARD_BASE_URL}/incident"
+    assert invoice_card["supportedInterfaces"][0]["url"] == f"{CARD_BASE_URL}/invoice"
+    assert incident_card["supportedInterfaces"][0]["url"] == f"{CARD_BASE_URL}/incident"

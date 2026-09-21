@@ -86,11 +86,15 @@ This is a reflection-first runtime model: the SDK does not require a separate re
 ## Agent Card generation
 
 `BaseAgent.get_agent_card()` delegates to `agent_card.py`, which produces a
-dictionary shaped according to the A2A Agent Card contract. Important details:
+dictionary shaped according to the pinned A2A 1.0 Agent Card contract.
+Important details:
 
-- `protocolVersion` is pinned to `0.3.0` (`A2A_AGENT_CARD_SPEC_VERSION`)
+- `supportedInterfaces[].protocolVersion` is pinned to `1.0`
+  (`A2A_AGENT_CARD_SPEC_VERSION`)
+- `supportedInterfaces[].protocolBinding` is `JSONRPC`
 - `skills` contain each capability with a generated stable `id`
-- `x-conducto.parameters` carries the reflected JSON schema for consumer tooling
+- optional `x-conducto.parameters` extension data carries the reflected JSON
+  schema for consumer tooling
 - security blocks are validated to prevent malformed card definitions
 
 This makes the card both standards-aligned and practically useful for code generation and local dispatch.

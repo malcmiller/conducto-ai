@@ -14,6 +14,7 @@ This directory contains the canonical documentation for the Conducto core reposi
 - [Repository overview](./repository-overview.md) — repository purpose, structure, and key concepts.
 - [Architecture](./architecture.md) — runtime layers, data flow, and the relationship between agents, orchestrators, and providers.
 - [Communication paths and standards](./communication-and-standards.md) — A2A sequencing, local orchestration, container transport, and Microsoft Foundry-based model routing.
+- [Conducto A2A 1.0 profile](./a2a-1-profile.md) — pinned protocol provenance, feature matrix, compatibility policy, conformance fixtures, and update procedure.
 - [Deployment topologies and federation](./deployment-and-federation.md) — local, container, Foundry, hybrid, and cross-organization scenarios plus ownership, trust, catalog, and workflow orchestration.
 - [Repository automation and agent guidance](./repository-automation.md) — coding-agent instructions, required validation, CI behavior, branch protection, and workflow maintenance.
 - [SDK reference](./sdk-reference.md) — API surface for `BaseAgent`, decorators, orchestration, and provider contracts.

@@ -7,6 +7,9 @@ This reference describes the public Python SDK APIs currently shipped by `sdk-py
 The package root exports the stable public API from `conducto`:
 
 - `BaseAgent`
+- A2A protocol constants and validators such as `A2A_PROTOCOL_VERSION`,
+  `A2A_PYTHON_SDK_VERSION`, `parse_agent_card`, `parse_message`, and
+  `parse_task`
 - `OrchestratorAgent`
 - `a2a_agent`
 - `a2a_capability`
@@ -109,6 +112,13 @@ The default card generation requires:
 - a valid absolute HTTP or HTTPS URL
 - a non-empty `name` and `version`
 - a non-empty `description` on the agent class or explicit metadata
+- JSON-RPC A2A protocol version `1.0`
+- `text/plain` input and output modes
+
+Conducto rejects A2A 0.3 Agent Cards, unknown required extensions, unsupported
+JSON-RPC methods, unsupported media types, and terminal task-state transitions
+explicitly. The pinned wire profile and update procedure are documented in
+[`docs/a2a-1-profile.md`](./a2a-1-profile.md).
 
 ## `OrchestratorAgent`
 
