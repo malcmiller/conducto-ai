@@ -1,0 +1,1349 @@
+{
+  "negative": {
+    "legacy03AgentCard": {
+      "capabilities": {},
+      "defaultInputModes": [
+        "text"
+      ],
+      "defaultOutputModes": [
+        "text"
+      ],
+      "description": "Legacy unsupported card",
+      "name": "LegacyAgent",
+      "preferredTransport": "JSONRPC",
+      "protocolVersion": "0.3.0",
+      "skills": [],
+      "url": "https://legacy.conducto.test/a2a",
+      "version": "1.0.0"
+    },
+    "overLimitArtifactParts": {
+      "artifacts": [
+        {
+          "artifactId": "artifact-over",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "art-0"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-1"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-2"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-3"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-4"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-5"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-6"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-7"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-8"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-9"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-10"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-11"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-12"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-13"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-14"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-15"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "overflow"
+            }
+          ]
+        }
+      ],
+      "contextId": "ctx-over",
+      "id": "task-too-many-artifact-parts",
+      "status": {
+        "state": "TASK_STATE_WORKING"
+      }
+    },
+    "overLimitMessageParts": {
+      "messageId": "msg-too-many-parts",
+      "parts": [
+        {
+          "mediaType": "text/plain",
+          "text": "part-0"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-1"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-2"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-3"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-4"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-5"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-6"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-7"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-8"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-9"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-10"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-11"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-12"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-13"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-14"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-15"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "overflow"
+        }
+      ],
+      "role": "ROLE_USER"
+    },
+    "overLimitMetadataMessage": {
+      "messageId": "msg-metadata-over",
+      "metadata": {
+        "padding": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "parts": [
+        {
+          "mediaType": "text/plain",
+          "text": "hi"
+        }
+      ],
+      "role": "ROLE_USER"
+    },
+    "overLimitTaskArtifacts": {
+      "artifacts": [
+        {
+          "artifactId": "artifact-0",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-1",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-2",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-3",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-4",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-5",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-6",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-7",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-8",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-9",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-10",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-11",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-12",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-13",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-14",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-15",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        },
+        {
+          "artifactId": "artifact-16",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "artifact"
+            }
+          ]
+        }
+      ],
+      "contextId": "ctx-over",
+      "id": "task-too-many-artifacts",
+      "status": {
+        "state": "TASK_STATE_WORKING"
+      }
+    },
+    "overLimitTaskHistory": {
+      "contextId": "ctx-over",
+      "history": [
+        {
+          "messageId": "h-0",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-1",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-2",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-3",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-4",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-5",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-6",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-7",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-8",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-9",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-10",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-11",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-12",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-13",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-14",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-15",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-16",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-17",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-18",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-19",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-20",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-21",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-22",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-23",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-24",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-25",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-26",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-27",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-28",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-29",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-30",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-31",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-over",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "overflow"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "id": "task-too-much-history",
+      "status": {
+        "state": "TASK_STATE_WORKING"
+      }
+    },
+    "terminalTransition": {
+      "currentState": "TASK_STATE_COMPLETED",
+      "nextState": "TASK_STATE_WORKING"
+    },
+    "unknownRequiredExtensionCard": {
+      "capabilities": {
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "description": "Unsupported required extension",
+            "params": {},
+            "required": true,
+            "uri": "https://example.test/required-extension"
+          }
+        ],
+        "pushNotifications": false,
+        "streaming": false
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "description": "Golden fixture agent for CI schema checks.",
+      "name": "GoldenAgent",
+      "securityRequirements": [],
+      "securitySchemes": {},
+      "signatures": [],
+      "skills": [
+        {
+          "description": "Echoes the provided message back to the caller.",
+          "examples": [],
+          "id": "conducto-df5a981a73c4b6cc",
+          "inputModes": [
+            "text/plain"
+          ],
+          "name": "echo",
+          "outputModes": [
+            "text/plain"
+          ],
+          "securityRequirements": [],
+          "tags": [
+            "conducto-df5a981a73c4b6cc"
+          ]
+        }
+      ],
+      "supportedInterfaces": [
+        {
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0",
+          "tenant": "",
+          "url": "https://golden.conducto.test/a2a"
+        }
+      ],
+      "version": "1.0.0"
+    },
+    "unsupportedMediaMessage": {
+      "messageId": "msg-image",
+      "parts": [
+        {
+          "mediaType": "image/png",
+          "text": "not really an image"
+        }
+      ],
+      "role": "ROLE_USER"
+    },
+    "unsupportedMethod": "message/stream"
+  },
+  "positive": {
+    "agentCard": {
+      "capabilities": {
+        "extendedAgentCard": false,
+        "extensions": [
+          {
+            "description": "Conducto reflected JSON parameter schemas keyed by A2A skill id.",
+            "params": {
+              "x-conducto": {
+                "parameters": {
+                  "conducto-df5a981a73c4b6cc": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "message": {
+                        "title": "Message",
+                        "type": "string"
+                      },
+                      "repeat": {
+                        "default": 1,
+                        "title": "Repeat",
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "message"
+                    ],
+                    "title": "GoldenAgent_echo_Parameters",
+                    "type": "object"
+                  }
+                },
+                "skillIdStrategy": "conducto-<sha256(agent-name:capability-name)[:16]>"
+              }
+            },
+            "required": false,
+            "uri": "https://conducto.ai/a2a/extensions/parameters/v1"
+          }
+        ],
+        "pushNotifications": false,
+        "streaming": false
+      },
+      "defaultInputModes": [
+        "text/plain"
+      ],
+      "defaultOutputModes": [
+        "text/plain"
+      ],
+      "description": "Golden fixture agent for CI schema checks.",
+      "name": "GoldenAgent",
+      "securityRequirements": [],
+      "securitySchemes": {},
+      "signatures": [],
+      "skills": [
+        {
+          "description": "Echoes the provided message back to the caller.",
+          "examples": [],
+          "id": "conducto-df5a981a73c4b6cc",
+          "inputModes": [
+            "text/plain"
+          ],
+          "name": "echo",
+          "outputModes": [
+            "text/plain"
+          ],
+          "securityRequirements": [],
+          "tags": [
+            "conducto-df5a981a73c4b6cc"
+          ]
+        }
+      ],
+      "supportedInterfaces": [
+        {
+          "protocolBinding": "JSONRPC",
+          "protocolVersion": "1.0",
+          "tenant": "",
+          "url": "https://golden.conducto.test/a2a"
+        }
+      ],
+      "version": "1.0.0"
+    },
+    "messageMaxBoundary": {
+      "messageId": "msg-max-parts",
+      "metadata": {
+        "case": "max-boundary"
+      },
+      "parts": [
+        {
+          "mediaType": "text/plain",
+          "text": "part-0"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-1"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-2"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-3"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-4"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-5"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-6"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-7"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-8"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-9"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-10"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-11"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-12"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-13"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-14"
+        },
+        {
+          "mediaType": "text/plain",
+          "text": "part-15"
+        }
+      ],
+      "role": "ROLE_USER"
+    },
+    "taskMaxBoundary": {
+      "artifacts": [
+        {
+          "artifactId": "artifact-max",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "art-0"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-1"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-2"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-3"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-4"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-5"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-6"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-7"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-8"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-9"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-10"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-11"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-12"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-13"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-14"
+            },
+            {
+              "mediaType": "text/plain",
+              "text": "art-15"
+            }
+          ]
+        }
+      ],
+      "contextId": "ctx-max",
+      "history": [
+        {
+          "messageId": "h-0",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-1",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-2",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-3",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-4",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-5",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-6",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-7",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-8",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-9",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-10",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-11",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-12",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-13",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-14",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-15",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-16",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-17",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-18",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-19",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-20",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-21",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-22",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-23",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-24",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-25",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-26",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-27",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-28",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-29",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-30",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        },
+        {
+          "messageId": "h-31",
+          "parts": [
+            {
+              "mediaType": "text/plain",
+              "text": "hi"
+            }
+          ],
+          "role": "ROLE_USER"
+        }
+      ],
+      "id": "task-max",
+      "metadata": {
+        "case": "max-boundary"
+      },
+      "status": {
+        "state": "TASK_STATE_WORKING"
+      }
+    }
+  },
+  "profile": {
+    "deferredMethods": [
+      "message/stream",
+      "tasks/pushNotificationConfig/set",
+      "tasks/pushNotificationConfig/get",
+      "tasks/resubscribe"
+    ],
+    "directMessageResponses": false,
+    "jsonrpcBinding": "JSONRPC",
+    "limits": {
+      "artifactParts": 16,
+      "historyMessages": 32,
+      "messageParts": 16,
+      "metadataBytes": 4096,
+      "taskArtifacts": 16
+    },
+    "normativeCommit": "173695755607e884aa9acf8ce4feed90e32727a1",
+    "normativeProtoSha256": "4b74c0baa923ae0acb55474e548f1d6e5d3f83b80d757b65f8bf3e99a3c2257f",
+    "normativeSource": "https://github.com/a2aproject/A2A/blob/v1.0.0/specification/a2a.proto",
+    "protocolRelease": "1.0.0",
+    "protocolVersion": "1.0",
+    "pythonSdk": {
+      "package": "a2a-sdk",
+      "version": "1.0.3"
+    },
+    "supportedMediaTypes": [
+      "text/plain"
+    ],
+    "supportedMethods": [
+      "message/send",
+      "tasks/get",
+      "tasks/list",
+      "tasks/cancel"
+    ]
+  }
+}

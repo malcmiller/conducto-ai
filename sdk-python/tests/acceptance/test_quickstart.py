@@ -22,6 +22,7 @@ from examples.quickstart import (
 
 from conducto import (
     A2A_AGENT_CARD_SPEC_VERSION,
+    A2A_JSONRPC_BINDING,
     InvocationSuccess,
     OrchestratorAgent,
 )
@@ -30,33 +31,32 @@ pytestmark = pytest.mark.acceptance
 
 
 def _assert_supported_a2a_card(card: Mapping[str, Any]) -> None:
-    assert card["protocolVersion"] == A2A_AGENT_CARD_SPEC_VERSION
     assert isinstance(card["name"], str) and card["name"]
     assert isinstance(card["description"], str) and card["description"]
-    assert isinstance(card["url"], str) and card["url"].startswith("https://")
-    assert card["preferredTransport"] == "JSONRPC"
+    assert card["supportedInterfaces"][0]["url"].startswith("https://")
+    assert card["supportedInterfaces"][0]["protocolBinding"] == A2A_JSONRPC_BINDING
+    assert card["supportedInterfaces"][0]["protocolVersion"] == A2A_AGENT_CARD_SPEC_VERSION
     assert isinstance(card["version"], str) and card["version"]
-    assert card["capabilities"] == {
-        "streaming": False,
-        "pushNotifications": False,
-        "stateTransitionHistory": False,
-    }
-    assert card["defaultInputModes"] == ["text"]
-    assert card["defaultOutputModes"] == ["text"]
+    assert card["capabilities"]["streaming"] is False
+    assert card["capabilities"]["pushNotifications"] is False
+    assert card["capabilities"]["extendedAgentCard"] is False
+    assert card["defaultInputModes"] == ["text/plain"]
+    assert card["defaultOutputModes"] == ["text/plain"]
     assert isinstance(card["securitySchemes"], dict)
-    assert isinstance(card["security"], list)
+    assert isinstance(card["securityRequirements"], list)
 
     skills = card["skills"]
     assert isinstance(skills, Sequence) and not isinstance(skills, (str, bytes)) and skills
-    parameter_schemas = card["x-conducto"]["parameters"]
+    extension = card["capabilities"]["extensions"][0]
+    parameter_schemas = extension["params"]["x-conducto"]["parameters"]
     assert isinstance(parameter_schemas, Mapping)
     for skill in skills:
         assert isinstance(skill, Mapping)
         assert isinstance(skill["id"], str) and skill["id"].startswith("conducto-")
         assert isinstance(skill["name"], str) and skill["name"]
         assert isinstance(skill["description"], str) and skill["description"]
-        assert skill["inputModes"] == ["text"]
-        assert skill["outputModes"] == ["text"]
+        assert skill["inputModes"] == ["text/plain"]
+        assert skill["outputModes"] == ["text/plain"]
         assert skill["id"] in parameter_schemas
         assert parameter_schemas[skill["id"]]["type"] == "object"
 
@@ -199,5 +199,5 @@ def test_quickstart_script_executes_and_prints_concise_result() -> None:
 def test_quickstart_cards_use_documented_local_urls() -> None:
     invoice_card, incident_card = create_agent_cards()
 
-    assert invoice_card["url"] == f"{CARD_BASE_URL}/invoice"
-    assert incident_card["url"] == f"{CARD_BASE_URL}/incident"
+    assert invoice_card["supportedInterfaces"][0]["url"] == f"{CARD_BASE_URL}/invoice"
+    assert incident_card["supportedInterfaces"][0]["url"] == f"{CARD_BASE_URL}/incident"

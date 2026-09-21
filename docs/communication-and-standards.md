@@ -204,7 +204,10 @@ sequenceDiagram
 ### 1. Discovery hop
 
 - `A2A Agent Card` is generated from reflected `@a2a_agent` and `@a2a_capability` metadata.
-- The card includes `skills`, `capabilities`, and `x-conducto.parameters` for deeper schema usage.
+- The card follows the pinned Conducto A2A 1.0 profile documented in
+  [Conducto A2A 1.0 profile](./a2a-1-profile.md).
+- The card includes `skills`, `capabilities`, and the optional
+  `x-conducto.parameters` extension payload for deeper schema usage.
 - This is how a caller learns what an agent can do.
 
 ### 2. RPC hop
