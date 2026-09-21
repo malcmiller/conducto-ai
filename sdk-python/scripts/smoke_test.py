@@ -13,9 +13,11 @@ Usage (from an environment with only the built wheel installed):
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import io
 import json
+import runpy
 import sys
 from pathlib import Path
 
@@ -95,7 +97,24 @@ def main() -> int:
 
     asyncio.run(invoke())
 
-    print("Smoke test passed: installed conducto-ai wheel routed a two-agent local flow.")
+    example = Path(__file__).resolve().parents[1] / "examples" / "agent_chaining.py"
+    tree = ast.parse(example.read_text(encoding="utf-8"), filename=str(example))
+    for node in ast.walk(tree):
+        module = (
+            node.module
+            if isinstance(node, ast.ImportFrom)
+            else next((name.name for name in node.names if name.name == "conducto.core"), None)
+            if isinstance(node, ast.Import)
+            else None
+        )
+        if module == "conducto.core" or (
+            isinstance(module, str) and module.startswith("conducto.core.")
+        ):
+            raise AssertionError("agent chaining example imports a non-public conducto.core module")
+    chaining = runpy.run_path(str(example))
+    asyncio.run(chaining["main"]())
+
+    print("Smoke test passed: installed conducto-ai wheel routed local and chained flows.")
     return 0
 
 
