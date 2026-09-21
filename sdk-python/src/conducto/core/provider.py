@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Annotated, Any, Literal, Protocol, TypeAlias
+from typing import Annotated, Any, Literal, Protocol, TypeAlias, cast
 
 from pydantic import (
     BaseModel,
@@ -32,10 +32,10 @@ class MessageContentPart(BaseModel):
 
     def model_post_init(self, __context: Any) -> None:
         """Ensure a content part has exactly the payload its type requires."""
-        if self.type == "text" and self.text is None:
-            raise ValueError("text content parts require text")
-        if self.type == "json" and self.value is None:
-            raise ValueError("json content parts require value")
+        if self.type == "text" and (self.text is None or self.value is not None):
+            raise ValueError("text content parts require only text")
+        if self.type == "json" and (self.value is None or self.text is not None):
+            raise ValueError("json content parts require only value")
 
 
 class ChatMessage(BaseModel):
@@ -157,7 +157,7 @@ class StructuredOutputRequest:
         Returns:
             The unconstrained serialized schema definition for the request.
         """
-        return self.schema
+        return cast(Mapping[str, Any], _thaw_json(self.schema))
 
 
 def _freeze_json(value: Any) -> Any:
@@ -168,6 +168,15 @@ def _freeze_json(value: Any) -> Any:
         return tuple(_freeze_json(item) for item in value)
     if isinstance(value, set):
         return frozenset(_freeze_json(item) for item in value)
+    return value
+
+
+def _thaw_json(value: Any) -> Any:
+    """Return ordinary JSON-compatible dictionaries and lists."""
+    if isinstance(value, Mapping):
+        return {str(key): _thaw_json(item) for key, item in value.items()}
+    if isinstance(value, (tuple, frozenset)):
+        return [_thaw_json(item) for item in value]
     return value
 
 
@@ -259,7 +268,7 @@ class ProviderResult(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     content: str | None = None
-    structured: dict[str, Any] | None = None
+    structured: Any = None
     usage: Usage = Field(default_factory=Usage)
     accepted: bool = False
     request_id: str | None = None
@@ -295,6 +304,10 @@ class ProviderDiagnostic:
     category: ProviderFailureCategory
     message: str
     request_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """Replace arbitrary caller text with a stable, safe summary."""
+        object.__setattr__(self, "message", f"provider failure: {self.category.value}")
 
     def to_dict(self) -> dict[str, str | None]:
         """Return a redacted diagnostic representation."""
@@ -354,9 +367,7 @@ class ProviderCapabilities:
     streaming: bool = False
     cancellation: bool = False
     output_limit: int | None = None
-    schema_dialects: frozenset[JsonSchemaDialect] = frozenset(
-        {JsonSchemaDialect.DRAFT_2020_12}
-    )
+    schema_dialects: frozenset[JsonSchemaDialect] = frozenset({JsonSchemaDialect.DRAFT_2020_12})
     schema_features: frozenset[SchemaFeature] = frozenset(SchemaFeature)
 
     def __post_init__(self) -> None:
@@ -378,19 +389,25 @@ class ProviderError(RuntimeError):
         accepted: bool = False,
         category: ProviderFailureCategory = ProviderFailureCategory.INTERNAL,
         request_id: str | None = None,
+        attempted: bool = False,
     ) -> None:
         super().__init__(message)
         self.retryable = retryable and not accepted
         self.accepted = accepted
         self.category = category
         self.request_id = request_id
+        self.attempted = attempted
 
     @property
     def acceptance(self) -> AcceptanceState:
         """Return the explicit acceptance state for retry decisions."""
         if self.accepted:
             return AcceptanceState.ACCEPTED
-        return AcceptanceState.ATTEMPTED_NOT_ACCEPTED
+        return (
+            AcceptanceState.ATTEMPTED_NOT_ACCEPTED
+            if self.attempted
+            else AcceptanceState.NOT_ATTEMPTED
+        )
 
     @property
     def diagnostic(self) -> ProviderDiagnostic:
@@ -401,8 +418,21 @@ class ProviderError(RuntimeError):
 class ProviderAuthenticationError(ProviderError):
     """Provider rejected or could not get authentication."""
 
-    def __init__(self, message: str = "Provider authentication failed", **kwargs: Any) -> None:
-        super().__init__(message, category=ProviderFailureCategory.AUTHENTICATION, **kwargs)
+    def __init__(
+        self,
+        message: str = "Provider authentication failed",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            accepted=accepted,
+            category=ProviderFailureCategory.AUTHENTICATION,
+            request_id=request_id,
+            attempted=attempted,
+        )
 
 
 class ProviderRateLimitError(ProviderError):
@@ -413,17 +443,37 @@ class ProviderRateLimitError(ProviderError):
         message: str = "Provider rate limit exceeded",
         *,
         accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
     ) -> None:
         super().__init__(
             message,
             retryable=True,
             accepted=accepted,
             category=ProviderFailureCategory.RATE_LIMIT,
+            request_id=request_id,
+            attempted=attempted,
         )
 
 
 class ProviderContentPolicyError(ProviderError):
     """Provider rejected content under its safety or usage policy."""
+
+    def __init__(
+        self,
+        message: str = "Provider content policy rejected the request",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            accepted=accepted,
+            category=ProviderFailureCategory.CONTENT_POLICY,
+            request_id=request_id,
+            attempted=attempted,
+        )
 
 
 class ProviderTimeoutError(ProviderError):
@@ -434,12 +484,16 @@ class ProviderTimeoutError(ProviderError):
         message: str = "Provider request timed out",
         *,
         accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
     ) -> None:
         super().__init__(
             message,
             retryable=True,
             accepted=accepted,
             category=ProviderFailureCategory.TIMEOUT,
+            request_id=request_id,
+            attempted=attempted,
         )
 
 
@@ -453,20 +507,43 @@ class UnsupportedProviderCapabilityError(ProviderError):
 class MalformedStructuredOutputError(ProviderError):
     """Provider output did not satisfy the required structured contract."""
 
-    def __init__(self, message: str = "Provider returned malformed structured output") -> None:
-        super().__init__(message, category=ProviderFailureCategory.MALFORMED_OUTPUT)
-        self.usage: Usage | None = None
+    def __init__(
+        self,
+        message: str = "Provider returned malformed structured output",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        usage: Usage | None = None,
+        attempted: bool = True,
+    ) -> None:
+        super().__init__(
+            message,
+            category=ProviderFailureCategory.MALFORMED_OUTPUT,
+            accepted=accepted,
+            request_id=request_id,
+            attempted=attempted,
+        )
+        self.usage = usage
 
 
-class ProviderUnavailableError(ProviderError):
+class ProviderEndpointUnavailableError(ProviderError):
     """The endpoint, deployment, or selected model is unavailable."""
 
-    def __init__(self, message: str = "Provider is unavailable", **kwargs: Any) -> None:
+    def __init__(
+        self,
+        message: str = "Provider is unavailable",
+        *,
+        accepted: bool = False,
+        request_id: str | None = None,
+        attempted: bool = True,
+    ) -> None:
         super().__init__(
             message,
             retryable=True,
+            accepted=accepted,
             category=ProviderFailureCategory.UNAVAILABLE,
-            **kwargs,
+            request_id=request_id,
+            attempted=attempted,
         )
 
 
@@ -507,10 +584,28 @@ class ModelProvider(Protocol):
             tools: Provider-neutral tools available for this turn.
             tool_results: Bounded results from prior provider-issued tool calls.
             effective_deadline: Optional monotonic deadline that bounds this call.
+            call_context: Optional credential-free cancellation/deadline context.
 
         Returns:
             Normalized provider response content, metadata, and usage counters.
         """
+
+
+class CancellableModelProvider(ModelProvider, Protocol):
+    """Optional provider protocol that receives cancellation context."""
+
+    async def complete(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        options: GenerationOptions,
+        structured_output: StructuredOutputRequest,
+        tools: Sequence[Mapping[str, Any]] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
+        effective_deadline: float | None = None,
+        call_context: ProviderCallContext | None = None,
+    ) -> ProviderResult:
+        """Generate a completion while observing the caller context."""
 
 
 def build_routing_schema(
@@ -630,6 +725,7 @@ class FakeModel:
         tools: Sequence[Mapping[str, Any]] = (),
         tool_results: Sequence[ToolResultMessage] = (),
         effective_deadline: float | None = None,
+        call_context: ProviderCallContext | None = None,
     ) -> ProviderResult:
         """Return the configured fake completion payload.
 
@@ -644,6 +740,7 @@ class FakeModel:
         Returns:
             The synthetic provider result configured when the fake provider was created.
         """
+        del call_context
         self.calls += 1
         self.requests.append(
             FakeModelRequest(
@@ -751,6 +848,11 @@ def validate_provider_contract(
     required_features = set(structured_output.features) or _schema_keywords(
         structured_output.json_schema
     )
+    unknown = _unknown_schema_keywords(structured_output.json_schema)
+    if unknown:
+        raise UnsupportedProviderCapabilityError(
+            f"Structured output schema uses unsupported keywords: {sorted(unknown)!r}"
+        )
     unsupported = required_features - set(provider.capabilities.schema_features)
     if unsupported:
         raise UnsupportedProviderCapabilityError(
@@ -782,6 +884,11 @@ _SCHEMA_KEYWORDS = {
     "anyOf",
     "allOf",
     "$ref",
+    "$defs",
+    "$schema",
+    "title",
+    "description",
+    "default",
 }
 
 
@@ -789,22 +896,50 @@ def _schema_keywords(schema: Mapping[str, Any]) -> set[SchemaFeature]:
     """Collect schema features used by a JSON Schema document."""
     found: set[SchemaFeature] = set()
     for key, value in schema.items():
+        if key == "type" and isinstance(value, str):
+            try:
+                found.add(SchemaFeature(value))
+            except ValueError:
+                pass
         try:
             feature = SchemaFeature(key)
         except ValueError:
             continue
         found.add(feature)
-        if isinstance(value, Mapping):
+        if key in {"properties", "$defs"} and isinstance(value, Mapping):
+            for child in value.values():
+                if isinstance(child, Mapping):
+                    found.update(_schema_keywords(child))
+        elif isinstance(value, Mapping):
             found.update(_schema_keywords(value))
-        elif isinstance(value, list):
+        elif isinstance(value, (list, tuple)):
             for item in value:
                 if isinstance(item, Mapping):
                     found.update(_schema_keywords(item))
     return found
 
 
+def _unknown_schema_keywords(schema: Mapping[str, Any]) -> set[str]:
+    """Find validation keywords outside the deliberately supported subset."""
+    unknown: set[str] = set()
+    for key, value in schema.items():
+        if key not in _SCHEMA_KEYWORDS and not key.startswith("x-"):
+            unknown.add(str(key))
+        if key in {"properties", "$defs"} and isinstance(value, Mapping):
+            for child in value.values():
+                if isinstance(child, Mapping):
+                    unknown.update(_unknown_schema_keywords(child))
+        elif isinstance(value, Mapping):
+            unknown.update(_unknown_schema_keywords(value))
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                if isinstance(item, Mapping):
+                    unknown.update(_unknown_schema_keywords(item))
+    return unknown
+
+
 def validate_structured_output(
-    value: Mapping[str, Any],
+    value: Any,
     request: StructuredOutputRequest,
 ) -> None:
     """Validate decoded provider output against the requested schema.
@@ -812,7 +947,24 @@ def validate_structured_output(
     This deliberately implements the provider-neutral subset instead of
     depending on an optional JSON Schema package.
     """
+    root_schema = request.json_schema
+
     def check(instance: Any, schema: Mapping[str, Any], path: str = "$") -> None:
+        if "$ref" in schema:
+            ref = schema["$ref"]
+            if not isinstance(ref, str) or not ref.startswith("#/$defs/"):
+                raise MalformedStructuredOutputError(f"{path} has unsupported $ref")
+            target: Any = root_schema
+            for part in ref[2:].split("/"):
+                if not isinstance(target, Mapping) or part not in target:
+                    raise MalformedStructuredOutputError(f"{path} has unresolved $ref")
+                target = target[part]
+            if not isinstance(target, Mapping):
+                raise MalformedStructuredOutputError(f"{path} has invalid $ref")
+            check(instance, target, path)
+        if "allOf" in schema:
+            for branch in schema["allOf"]:
+                check(instance, branch, path)
         expected = schema.get("type")
         type_ok = {
             "object": isinstance(instance, Mapping),
@@ -863,12 +1015,10 @@ def validate_structured_output(
                     except MalformedStructuredOutputError:
                         continue
                     matches += 1
-                if (keyword == "oneOf" and matches != 1) or (
-                    keyword == "anyOf" and matches < 1
-                ):
+                if (keyword == "oneOf" and matches != 1) or (keyword == "anyOf" and matches < 1):
                     raise MalformedStructuredOutputError(f"{path} does not satisfy {keyword}")
 
-    check(dict(value), request.json_schema)
+    check(value, request.json_schema)
 
 
 def parse_routing_selection(result: ProviderResult) -> RoutingSelection:
@@ -898,6 +1048,7 @@ async def complete_with_retries(
     tools: Sequence[Mapping[str, Any]] = (),
     tool_results: Sequence[ToolResultMessage] = (),
     effective_deadline: float | None = None,
+    call_context: ProviderCallContext | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> ProviderResult:
     """Complete a provider request under timeout and safe-retry rules.
@@ -959,28 +1110,34 @@ async def complete_with_retries(
                 request_kwargs["tool_results"] = tool_results
             if tool_aware or effective_deadline is not None:
                 request_kwargs["effective_deadline"] = deadline
+            if call_context is not None and provider.capabilities.cancellation:
+                request_kwargs["call_context"] = call_context
             completion = provider.complete(messages, **request_kwargs)
             if timeout_for_attempt is not None:
                 result = await asyncio.wait_for(completion, timeout_for_attempt)
             else:
                 result = await completion
+            if result.content_filtered:
+                raise ProviderContentPolicyError(
+                    accepted=result.accepted,
+                    request_id=result.request_id,
+                )
             if structured_output.required:
-                if result.content_filtered:
-                    raise ProviderError(
-                        "Provider filtered the requested content",
-                        category=ProviderFailureCategory.CONTENT_POLICY,
-                        accepted=result.accepted,
-                    )
                 if result.structured is None:
                     error = MalformedStructuredOutputError(
-                        "Provider returned no required structured output"
+                        "Provider returned no required structured output",
+                        accepted=result.accepted,
+                        request_id=result.request_id,
+                        usage=result.usage,
                     )
-                    error.usage = result.usage
                     raise error
                 try:
                     validate_structured_output(result.structured, structured_output)
                 except MalformedStructuredOutputError as error:
                     error.usage = result.usage
+                    error.accepted = result.accepted
+                    error.request_id = result.request_id
+                    error.attempted = True
                     raise
             return result
         except TimeoutError as error:
@@ -989,6 +1146,7 @@ async def complete_with_retries(
                 raise timeout_error from error
             await asyncio.sleep(0)
         except ProviderError as error:
+            error.attempted = True
             if not error.retryable or error.accepted or attempt == attempts - 1:
                 raise
             await asyncio.sleep(0)

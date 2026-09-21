@@ -204,7 +204,7 @@ class OrchestratorAgent(BaseAgent):
                 )
             except ProviderError as error:
                 return RoutingFailure(
-                    str(error),
+                    error.diagnostic.to_dict()["message"] or "Provider failure",
                     error,
                     retryable=error.retryable,
                     metadata=context.invocation_metadata(),

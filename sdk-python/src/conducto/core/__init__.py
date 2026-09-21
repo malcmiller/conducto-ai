@@ -73,6 +73,7 @@ from .logging import (
 from .orchestrator import OrchestratorAgent
 from .provider import (
     AcceptanceState,
+    CancellableModelProvider,
     ChatMessage,
     FakeModel,
     FakeModelRequest,
@@ -90,6 +91,7 @@ from .provider import (
     ProviderCapabilities,
     ProviderContentPolicyError,
     ProviderDiagnostic,
+    ProviderEndpointUnavailableError,
     ProviderError,
     ProviderFailureCategory,
     ProviderRateLimitError,
@@ -214,6 +216,7 @@ __all__ = [
     "ChatMessage",
     "MessageContentPart",
     "AcceptanceState",
+    "CancellableModelProvider",
     "FinishReason",
     "FakeModel",
     "FakeModelRequest",
@@ -229,6 +232,7 @@ __all__ = [
     "ProviderCapabilities",
     "ProviderContentPolicyError",
     "ProviderDiagnostic",
+    "ProviderEndpointUnavailableError",
     "ProviderError",
     "ProviderFailureCategory",
     "ProviderRateLimitError",

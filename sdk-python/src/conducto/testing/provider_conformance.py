@@ -7,22 +7,45 @@ Conducto contracts and never inspects provider internals.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from conducto.core.provider import (
+    AcceptanceState,
     ChatMessage,
     GenerationOptions,
     ModelProvider,
+    ProviderCallContext,
     ProviderCapabilities,
+    ProviderEndpointUnavailableError,
     ProviderError,
+    ProviderRateLimitError,
     ProviderResult,
     StructuredOutputRequest,
+    Usage,
     complete_with_retries,
 )
 
 PROVIDER_FIXTURE_VERSION = "1"
+
+
+@dataclass(frozen=True, slots=True)
+class ConformanceFixture:
+    """Language-neutral expected result for one deterministic contract case."""
+
+    name: str
+    expected_acceptance: AcceptanceState | None = None
+    expected_request_id: str | None = None
+    expected_usage: Usage | None = None
+
+
+MANDATORY_FIXTURES = (
+    ConformanceFixture("success", AcceptanceState.ACCEPTED, "fixture-success"),
+    ConformanceFixture("unknown-usage", AcceptanceState.ACCEPTED, "fixture-unknown"),
+    ConformanceFixture("malformed-output", AcceptanceState.ACCEPTED, "fixture-malformed"),
+)
+"""Stable mandatory fixture names consumed by provider adapters."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +56,7 @@ class ScriptedProviderCall:
     options: GenerationOptions
     structured_output: StructuredOutputRequest
     deadline: float | None
+    cancellation: bool
 
 
 class ScriptedProvider:
@@ -64,6 +88,7 @@ class ScriptedProvider:
         tools: Sequence[Mapping[str, Any]] = (),
         tool_results: Sequence[Any] = (),
         effective_deadline: float | None = None,
+        call_context: ProviderCallContext | None = None,
     ) -> ProviderResult:
         """Return the next deterministic response without sleeping."""
         del tools, tool_results
@@ -73,6 +98,7 @@ class ScriptedProvider:
                 options,
                 structured_output,
                 effective_deadline,
+                call_context.cancelled if call_context is not None else False,
             )
         )
         if not self._responses:
@@ -85,7 +111,12 @@ class ScriptedProvider:
 
 
 async def assert_provider_conformance(provider: ModelProvider) -> None:
-    """Run mandatory, deterministic checks shared by all provider adapters."""
+    """Run the mandatory deterministic checks shared by provider adapters.
+
+    The provider is expected to be a fresh fixture-backed instance. Conditional
+    capability checks are represented by :data:`MANDATORY_FIXTURES` and can be
+    run by adapter-specific suites without network access.
+    """
     request = StructuredOutputRequest(
         name="conformance",
         schema={
@@ -102,5 +133,54 @@ async def assert_provider_conformance(provider: ModelProvider) -> None:
         structured_output=request,
     )
     assert result.structured == {"answer": "ok"}
-    assert result.acceptance.value in {"accepted", "attempted_not_accepted"}
-    assert result.usage is not None
+    assert result.acceptance is AcceptanceState.ACCEPTED
+    assert result.usage.input_tokens is None or result.usage.input_tokens >= 0
+
+
+async def run_provider_conformance(
+    provider_factory: Callable[[], ModelProvider],
+) -> tuple[str, ...]:
+    """Run deterministic mandatory and conditional provider fixtures."""
+    await assert_provider_conformance(provider_factory())
+
+    rejected = provider_factory()
+    rejected.capabilities = ProviderCapabilities()
+    try:
+        await complete_with_retries(
+            rejected,
+            (ChatMessage(role="user", content="capability"),),
+            options=GenerationOptions(model="fixture"),
+            structured_output=_request(),
+        )
+    except ProviderError as error:
+        assert error.acceptance is AcceptanceState.NOT_ATTEMPTED
+    else:
+        raise AssertionError("unsupported capability was not rejected before dispatch")
+
+    retried = provider_factory()
+    try:
+        await complete_with_retries(
+            retried,
+            (ChatMessage(role="user", content="retry"),),
+            options=GenerationOptions(model="fixture", retries=1),
+            structured_output=_request(),
+        )
+    except (ProviderRateLimitError, ProviderEndpointUnavailableError):
+        pass
+
+    diagnostic = ProviderError("secret=should-not-escape").diagnostic.to_dict()
+    assert "should-not-escape" not in str(diagnostic)
+    return tuple(fixture.name for fixture in MANDATORY_FIXTURES)
+
+
+def _request() -> StructuredOutputRequest:
+    """Build the schema shared by deterministic conformance cases."""
+    return StructuredOutputRequest(
+        name="conformance",
+        schema={
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"answer": {"type": "string"}},
+            "required": ["answer"],
+        },
+    )
