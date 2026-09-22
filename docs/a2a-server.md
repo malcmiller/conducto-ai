@@ -166,7 +166,10 @@ handler = A2ARuntimeHandler(
 ```
 
 `A2AASGI` never calls a reflected agent's capability methods directly. Every
-accepted message is delegated to the injected `A2ARequestHandler`.
+accepted message is delegated to the injected context-aware handler. The original
+Story 4.4 `A2ARequestHandler` signature remains supported for advanced and testing
+composition; `A2AContextRequestHandler` additionally receives immutable transport
+facts.
 `A2ARuntimeHandler` is the standard implementation: it resolves the advertised
 skill to an opaque runtime-bound capability binding, revalidates registration,
 generation, schema, lifecycle, health, and binding integrity, and safely renews

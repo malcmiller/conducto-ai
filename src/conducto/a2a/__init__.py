@@ -62,7 +62,12 @@ from conducto.core.invocation_results import (
 
 from .errors import A2ADependencyError, A2AServerError
 from .factory import create_a2a_app
-from .handler import A2ACancellableRequestHandler, A2ARequestContext, A2ARequestHandler
+from .handler import (
+    A2ACancellableRequestHandler,
+    A2AContextRequestHandler,
+    A2ARequestContext,
+    A2ARequestHandler,
+)
 from .profile import A2A_SERVER_EXTRA, require_a2a_server_dependency
 from .runtime import (
     A2AAuthenticatedIdentity,
@@ -221,6 +226,7 @@ __all__ = [
     "A2AAuthenticatedIdentity",
     "A2AAuthenticationRequest",
     "A2ACancellableRequestHandler",
+    "A2AContextRequestHandler",
     "A2ACapabilityBinding",
     "A2ADependencyError",
     "A2AIdentityResolver",

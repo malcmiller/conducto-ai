@@ -187,7 +187,8 @@ See [MCP tool export](./mcp-export.md).
    the advertised skill to an immutable runtime-bound capability binding.
 3. An injected identity resolver authenticates transport facts and returns an
    immutable `AuthorizationContext`; transport metadata cannot add scopes,
-   roles, principals, capabilities, deadlines, or budget.
+   roles, principals, or capabilities, and may only shorten deadlines or
+   attenuate authenticated/server-owned budgets.
 4. The binding is revalidated against the current registry snapshot, and
    duplicate request/message identifiers are atomically coalesced.
 5. Execution enters `Runtime.invoke()` or `Runtime.resume_approval()`, using

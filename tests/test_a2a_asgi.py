@@ -85,6 +85,25 @@ class _RecordingHandler:
         return InvocationSuccess(correlation_id=task_id, value={"echo": True})
 
 
+class _LegacyRecordingHandler:
+    """Story 4.4 handler implementation without request-context support."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def handle_message(
+        self,
+        message: Message,
+        *,
+        task_id: str,
+        context_id: str,
+    ) -> InvocationResult:
+        """Record a context-free invocation."""
+        del message, context_id
+        self.calls += 1
+        return InvocationSuccess(correlation_id=task_id, value={"legacy": True})
+
+
 class _FixedIDGenerator(IDGenerator):
     """Deterministic identifier generator used to force id collisions in tests."""
 
@@ -184,6 +203,23 @@ def test_agent_card_route_serves_the_reflected_agent_card() -> None:
     assert len(body["supportedInterfaces"]) == 1
     assert body["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
     assert body["supportedInterfaces"][0]["protocolVersion"] == "1.0"
+
+
+def test_story_44_request_handler_remains_usable() -> None:
+    """The low-level adapter accepts the original context-free handler seam."""
+    handler = _LegacyRecordingHandler()
+    app = A2AASGI(
+        agent=_EchoAgent(),
+        endpoint_url=ENDPOINT_URL,
+        task_repository=InMemoryTaskRepository(),
+        request_handler=handler,
+    )
+
+    response = asyncio.run(_post(app, "SendMessage", SendMessageRequest(message=_message())))
+
+    assert response.status_code == 200
+    assert response.json()["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert handler.calls == 1
 
 
 def test_advertised_jsonrpc_url_equals_mounted_endpoint_configuration() -> None:
@@ -713,14 +749,15 @@ def test_importing_conducto_does_not_eagerly_import_the_asgi_adapter() -> None:
 
 
 def test_server_dependencies_are_isolated_from_core_and_client_import_paths() -> None:
-    """Blocking Starlette and the SDK's route factories does not break base imports."""
+    """Blocking server and HTTP client dependencies does not break base imports."""
     script = (
         "import builtins\n"
         "_original_import = builtins.__import__\n"
-        "_blocked = {'starlette.applications'}\n"
+        "_blocked = {'httpx', 'starlette.applications'}\n"
         "\n"
         "def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):\n"
-        "    if name in _blocked or name.startswith('a2a.server.routes'):\n"
+        "    if name in _blocked or name.startswith('httpx.') or "
+        "name.startswith('a2a.server.routes'):\n"
         "        raise ImportError(f'blocked: {name}')\n"
         "    return _original_import(name, globals, locals, fromlist, level)\n"
         "\n"

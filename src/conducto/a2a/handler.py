@@ -45,12 +45,36 @@ class A2ARequestContext:
 
 @runtime_checkable
 class A2ARequestHandler(Protocol):
-    """Abstract seam between the A2A ASGI host and Conducto capability dispatch.
+    """Original Story 4.4 seam for Conducto capability dispatch.
 
     The ASGI host owns protocol adaptation and task dispatch only; it never calls
-    reflected capability methods directly. Runtime-backed implementations bind this
-    seam to the same governed invocation contract used by local calls.
+    reflected capability methods directly. This context-free form remains supported
+    for backward-compatible advanced and testing composition.
     """
+
+    async def handle_message(
+        self,
+        message: Message,
+        *,
+        task_id: str,
+        context_id: str,
+    ) -> InvocationResult:
+        """Invoke Conducto capability dispatch for one accepted A2A message.
+
+        Args:
+            message: Validated inbound A2A message.
+            task_id: Server-assigned or continued A2A task identifier.
+            context_id: A2A context identifier shared across related tasks.
+
+        Returns:
+            The invocation outcome to map onto the A2A task lifecycle.
+        """
+        ...
+
+
+@runtime_checkable
+class A2AContextRequestHandler(Protocol):
+    """Context-aware seam used by the canonical inbound runtime adapter."""
 
     async def handle_message(
         self,
@@ -60,7 +84,7 @@ class A2ARequestHandler(Protocol):
         context_id: str,
         request_context: A2ARequestContext,
     ) -> InvocationResult:
-        """Invoke Conducto capability dispatch for one accepted A2A message.
+        """Invoke Conducto capability dispatch with immutable transport facts.
 
         Args:
             message: Validated inbound A2A message.
@@ -83,4 +107,9 @@ class A2ACancellableRequestHandler(Protocol):
         ...
 
 
-__all__ = ["A2ACancellableRequestHandler", "A2ARequestContext", "A2ARequestHandler"]
+__all__ = [
+    "A2ACancellableRequestHandler",
+    "A2AContextRequestHandler",
+    "A2ARequestContext",
+    "A2ARequestHandler",
+]

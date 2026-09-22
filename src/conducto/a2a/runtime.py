@@ -8,7 +8,6 @@ import inspect
 import json
 import math
 import time
-from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -49,12 +48,10 @@ from conducto.core.telemetry import SPAN_A2A_SERVER, extract_trace_context, star
 from conducto.security import ApprovalDecision, AuditDeliveryError, AuthorizationContext
 from conducto.security.errors import SecurityError
 from conducto.security.tokens import TokenValidationError
-from conducto.transport.errors import AuthenticationError
 
 from .handler import A2ARequestContext
 
 _CONDUCTO_METADATA_KEY = "x-conducto"
-_MAX_REPLAY_RECORDS = 1_000
 _DEFAULT_MAX_TIMEOUT = 300.0
 _DEFAULT_MAX_DELEGATION_DEPTH = 8
 _DEFAULT_MAX_DELEGATION_CALLS = 32
@@ -180,7 +177,6 @@ class A2ARuntimeHandler:
             absent; a conflicting registration fails construction.
         identity_resolver: Application-owned authentication and identity resolver.
         clock: UTC timestamp source used to convert inbound deadlines to timeouts.
-        max_replay_records: Maximum completed/in-flight replay records retained.
         max_timeout: Maximum timeout accepted from transport metadata.
         max_delegation_depth: Maximum transport-requested delegation depth.
         max_delegation_calls: Maximum transport-requested delegation calls.
@@ -188,7 +184,8 @@ class A2ARuntimeHandler:
     Notes:
         This adapter never calls reflected methods. It revalidates an immutable
         runtime binding and dispatches exclusively through ``Runtime.invoke`` or
-        ``Runtime.resume_approval``.
+        ``Runtime.resume_approval``. Replay identifiers remain retained for the
+        handler lifetime so completed requests cannot execute again.
     """
 
     def __init__(
@@ -198,13 +195,10 @@ class A2ARuntimeHandler:
         agent: BaseAgent,
         identity_resolver: A2AIdentityResolver,
         clock: Callable[[], float] = time.time,
-        max_replay_records: int = _MAX_REPLAY_RECORDS,
         max_timeout: float = _DEFAULT_MAX_TIMEOUT,
         max_delegation_depth: int = _DEFAULT_MAX_DELEGATION_DEPTH,
         max_delegation_calls: int = _DEFAULT_MAX_DELEGATION_CALLS,
     ) -> None:
-        if max_replay_records < 1:
-            raise ValueError("max_replay_records must be positive")
         if not math.isfinite(max_timeout) or max_timeout <= 0:
             raise ValueError("max_timeout must be a finite positive number")
         if max_delegation_depth < 0 or max_delegation_calls < 0:
@@ -213,13 +207,13 @@ class A2ARuntimeHandler:
         self._agent = agent
         self._identity_resolver = identity_resolver
         self._clock = clock
-        self._max_replay_records = max_replay_records
         self._max_timeout = max_timeout
         self._max_delegation_depth = max_delegation_depth
         self._max_delegation_calls = max_delegation_calls
         self._replay_lock = asyncio.Lock()
-        self._replays: OrderedDict[str, _ReplayRecord] = OrderedDict()
+        self._replays: dict[str, _ReplayRecord] = {}
         self._cancellations: dict[str, CancellationState] = {}
+        self._cancelled_tasks: set[str] = set()
         self._approval_bindings: dict[str, _ApprovalBinding] = {}
         self._bindings = self._build_bindings()
 
@@ -267,11 +261,13 @@ class A2ARuntimeHandler:
         ) as span:
             identity = await self._authenticate(auth_request)
             if not isinstance(identity, A2AAuthenticatedIdentity):
+                await self._discard_pending_cancellation(task_id)
                 return identity
             if (
                 identity.authorization.task_id != task_id
                 or identity.authorization.correlation_id != correlation_id
             ):
+                await self._discard_pending_cancellation(task_id)
                 span.set_outcome("denied", reason="identity_context_mismatch")
                 return InvocationAuthorizationFailure(correlation_id, "identity_context_mismatch")
             principal_namespace = _principal_namespace(identity.authorization)
@@ -292,8 +288,15 @@ class A2ARuntimeHandler:
         """Request cooperative cancellation of an active task invocation."""
         async with self._replay_lock:
             cancellation = self._cancellations.get(task_id)
+            if cancellation is None:
+                self._cancelled_tasks.add(task_id)
         if cancellation is not None:
             cancellation.cancel()
+
+    async def _discard_pending_cancellation(self, task_id: str) -> None:
+        """Release a pre-execution cancellation when execution will not start."""
+        async with self._replay_lock:
+            self._cancelled_tasks.discard(task_id)
 
     def binding_for_skill(self, skill_id: str) -> A2ACapabilityBinding | None:
         """Return the immutable advertised binding for deterministic inspection."""
@@ -492,6 +495,8 @@ class A2ARuntimeHandler:
         self,
         request: A2AAuthenticationRequest,
     ) -> A2AAuthenticatedIdentity | InvocationResult:
+        from conducto.transport.errors import AuthenticationError
+
         try:
             resolved = self._identity_resolver(request)
             identity = await resolved if inspect.isawaitable(resolved) else resolved
@@ -542,6 +547,8 @@ class A2ARuntimeHandler:
                 execution = existing.execution
             else:
                 cancellation = CancellationState()
+                if task_id in self._cancelled_tasks:
+                    cancellation.cancel()
                 self._cancellations[task_id] = cancellation
                 execution = asyncio.create_task(
                     self._execute(request, identity, cancellation=cancellation)
@@ -550,7 +557,6 @@ class A2ARuntimeHandler:
                 execution.add_done_callback(record.capture)
                 for key in replay_keys:
                     self._replays[key] = record
-                self._prune_replays()
         try:
             return await asyncio.shield(execution)
         except asyncio.CancelledError:
@@ -560,6 +566,7 @@ class A2ARuntimeHandler:
             if execution.done():
                 async with self._replay_lock:
                     self._cancellations.pop(task_id, None)
+                    self._cancelled_tasks.discard(task_id)
 
     async def _execute(
         self,
@@ -727,18 +734,6 @@ class A2ARuntimeHandler:
         )
         self._bindings[advertised.skill_id] = refreshed
         return refreshed
-
-    def _prune_replays(self) -> None:
-        while len({id(record) for record in self._replays.values()}) > self._max_replay_records:
-            completed = next(
-                (record for record in self._replays.values() if record.execution.done()),
-                None,
-            )
-            if completed is None:
-                break
-            for key in tuple(self._replays):
-                if self._replays[key] is completed:
-                    self._replays.pop(key)
 
     def _requested_budget(
         self,

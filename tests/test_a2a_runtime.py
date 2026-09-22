@@ -579,6 +579,31 @@ def test_explicit_cancellation_reaches_the_runtime_cancellation_state() -> None:
     asyncio.run(run())
 
 
+def test_cancellation_during_authentication_prevents_capability_execution() -> None:
+    """Cancellation remains sticky until authentication can enter the runtime."""
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class _PausedResolver(_IdentityResolver):
+        async def __call__(self, request: A2AAuthenticationRequest) -> A2AAuthenticatedIdentity:
+            entered.set()
+            await release.wait()
+            return await super().__call__(request)
+
+    handler, agent, _, _ = _handler(resolver=_PausedResolver())
+
+    async def run() -> None:
+        invocation = asyncio.create_task(_invoke(handler, _message(ECHO_SKILL, {"value": 1})))
+        await entered.wait()
+        await handler.cancel("task-1")
+        release.set()
+        result = await invocation
+        assert isinstance(result, InvocationCancelled)
+        assert agent.calls == 0
+
+    asyncio.run(run())
+
+
 def test_duplicate_and_racing_identifiers_execute_once() -> None:
     """Concurrent replays share one in-flight result and execute once."""
     handler, agent, _, _ = _handler()
@@ -594,6 +619,28 @@ def test_duplicate_and_racing_identifiers_execute_once() -> None:
         assert isinstance(first_result, InvocationSuccess)
         assert second_result == first_result
         assert agent.calls == 1
+
+    asyncio.run(run())
+
+
+def test_completed_replay_identifiers_remain_idempotent() -> None:
+    """A completed identifier is never evicted and allowed to execute again."""
+    handler, agent, _, _ = _handler()
+
+    async def run() -> None:
+        first = await _invoke(handler, _message(ECHO_SKILL, {"value": 0}))
+        for index in range(2, 1_003):
+            result = await _invoke(
+                handler,
+                _message(ECHO_SKILL, {"value": index}, message_id=f"message-{index}"),
+                task_id=f"task-{index}",
+                context_id=f"context-{index}",
+                request=_request(f"request-{index}"),
+            )
+            assert isinstance(result, InvocationSuccess)
+        replay = await _invoke(handler, _message(ECHO_SKILL, {"value": 0}))
+        assert replay == first
+        assert agent.calls == 1_002
 
     asyncio.run(run())
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 from collections.abc import AsyncGenerator, Mapping
 from typing import Any
 from urllib.parse import urlparse
@@ -30,7 +31,12 @@ from conducto.transport.tasks import TaskRepository
 
 from . import invocation_result_to_task
 from .errors import A2ADependencyError
-from .handler import A2ACancellableRequestHandler, A2ARequestContext, A2ARequestHandler
+from .handler import (
+    A2ACancellableRequestHandler,
+    A2AContextRequestHandler,
+    A2ARequestContext,
+    A2ARequestHandler,
+)
 from .profile import A2A_SERVER_EXTRA, require_a2a_server_dependency
 
 try:
@@ -95,12 +101,15 @@ class _ConductoRequestHandler(RequestHandler):
         *,
         agent_card: AgentCard,
         task_repository: TaskRepository,
-        request_handler: A2ARequestHandler,
+        request_handler: A2ARequestHandler | A2AContextRequestHandler,
         id_generator: IDGenerator,
     ) -> None:
         self._agent_card = agent_card
         self._task_repository = task_repository
         self._request_handler = request_handler
+        self._accepts_request_context = (
+            "request_context" in inspect.signature(request_handler.handle_message).parameters
+        )
         self._id_generator = id_generator
         self._supported_extensions = frozenset(
             extension.uri for extension in agent_card.capabilities.extensions
@@ -214,20 +223,27 @@ class _ConductoRequestHandler(RequestHandler):
         current_state = TaskState.TASK_STATE_WORKING
 
         try:
-            result = await self._request_handler.handle_message(
-                message,
-                task_id=task_id,
-                context_id=context_id,
-                request_context=A2ARequestContext(
-                    request_id=(
-                        str(context.state["request_id"])
-                        if context.state.get("request_id") is not None
-                        else ""
+            if self._accepts_request_context:
+                context_handler = self._request_handler
+                assert isinstance(context_handler, A2AContextRequestHandler)
+                result = await context_handler.handle_message(
+                    message,
+                    task_id=task_id,
+                    context_id=context_id,
+                    request_context=A2ARequestContext(
+                        request_id=str(context.state["request_id"]),
+                        headers=context.state.get("headers", {}),
+                        method=str(context.state.get("method", "SendMessage")),
                     ),
-                    headers=context.state.get("headers", {}),
-                    method=str(context.state.get("method", "SendMessage")),
-                ),
-            )
+                )
+            else:
+                legacy_handler = self._request_handler
+                assert isinstance(legacy_handler, A2ARequestHandler)
+                result = await legacy_handler.handle_message(
+                    message,
+                    task_id=task_id,
+                    context_id=context_id,
+                )
         except asyncio.CancelledError:
             if isinstance(self._request_handler, A2ACancellableRequestHandler):
                 await self._request_handler.cancel(task_id)
@@ -331,7 +347,7 @@ class A2AASGI:
         agent: BaseAgent,
         endpoint_url: str,
         task_repository: TaskRepository,
-        request_handler: A2ARequestHandler,
+        request_handler: A2ARequestHandler | A2AContextRequestHandler,
         id_generator: IDGenerator | None = None,
         agent_card_kwargs: Mapping[str, Any] | None = None,
     ) -> None:

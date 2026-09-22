@@ -27,7 +27,6 @@ def create_a2a_app(
     identity_resolver: A2AIdentityResolver,
     task_repository: TaskRepository | None = None,
     clock: Callable[[], float] = time.time,
-    max_replay_records: int = 1_000,
     max_timeout: float = 300.0,
     max_delegation_depth: int = 8,
     max_delegation_calls: int = 32,
@@ -42,7 +41,6 @@ def create_a2a_app(
         task_repository: Optional task persistence implementation. An isolated
             in-memory repository is created when omitted.
         clock: UTC timestamp source used for inbound deadline conversion.
-        max_replay_records: Maximum retained runtime replay records.
         max_timeout: Maximum transport-requested invocation timeout.
         max_delegation_depth: Maximum transport-requested delegation depth.
         max_delegation_calls: Maximum transport-requested delegation calls.
@@ -67,7 +65,6 @@ def create_a2a_app(
         agent=agent,
         identity_resolver=identity_resolver,
         clock=clock,
-        max_replay_records=max_replay_records,
         max_timeout=max_timeout,
         max_delegation_depth=max_delegation_depth,
         max_delegation_calls=max_delegation_calls,
