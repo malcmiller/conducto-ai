@@ -192,10 +192,18 @@ Captures a named schema used for structured provider responses.
 The provider response object includes:
 
 - `content`
-- `structured`
+- `structured` for terminal schema-constrained output
+- `tool_calls` for provider-native tool decisions
 - `usage`
 - `accepted`
 - `request_id`
+
+### `ProviderToolDefinition` and `ProviderToolCall`
+
+`ProviderToolDefinition` describes one tool from the exact toolbox snapshot
+supplied to a provider turn. `ProviderToolCall` is the normalized single tool
+decision resolved back to that snapshot, with an opaque `call_id`, resolved
+`tool_id`, and validated argument mapping.
 
 ### `ModelProvider`
 
@@ -211,6 +219,8 @@ class ModelProvider(Protocol):
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
+        tools: Sequence[ProviderToolDefinition] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
     ) -> ProviderResult: ...
 ```
 

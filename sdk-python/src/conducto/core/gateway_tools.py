@@ -29,6 +29,7 @@ from .gateway_models import (
     ToolDescriptor,
     canonical_json,
 )
+from .provider import ProviderToolDefinition
 
 __all__ = [
     "CapabilityUse",
@@ -224,6 +225,18 @@ class ToolboxSnapshot:
             JSON-serializable tool definitions containing no binding internals.
         """
         return tuple(tool.to_dict() for tool in self.tools)
+
+    def as_provider_tools(self) -> tuple[ProviderToolDefinition, ...]:
+        """Return typed provider-neutral tool definitions for this snapshot."""
+        return tuple(
+            ProviderToolDefinition(
+                tool_id=tool.tool_id,
+                name=tool.name,
+                description=tool.description,
+                input_schema=tool.input_schema,
+            )
+            for tool in self.tools
+        )
 
 
 @dataclass(frozen=True, slots=True)

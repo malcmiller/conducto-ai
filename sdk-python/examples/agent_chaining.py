@@ -8,7 +8,7 @@ Run from a built wheel with:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 from pydantic import BaseModel
@@ -26,9 +26,12 @@ from conducto import (
     ProviderCapabilities,
     ProviderRegistry,
     ProviderResult,
+    ProviderToolCallRequest,
+    ProviderToolDefinition,
     Runtime,
     StructuredOutputRequest,
     ToolboxPolicy,
+    ToolResultMessage,
     Usage,
     a2a_agent,
     a2a_capability,
@@ -61,8 +64,8 @@ class ChainingModel:
         *,
         options: Any,
         structured_output: StructuredOutputRequest,
-        tools: Sequence[Mapping[str, Any]] = (),
-        tool_results: Sequence[Any] = (),
+        tools: Sequence[ProviderToolDefinition] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
         effective_deadline: float | None = None,
     ) -> ProviderResult:
         self.calls += 1
@@ -103,15 +106,19 @@ class ChainingModel:
                 "evidence": "documentation.search",
             }
         else:
-            response = {
-                "type": "tool_call",
-                "call_id": f"docs-{self.calls}",
-                "tool_id": str(tools[0]["id"]),
-                "arguments": {"query": question},
-            }
-            return ProviderResult(structured=response, usage=Usage(total_tokens=1), accepted=True)
+            return ProviderResult(
+                tool_calls=(
+                    ProviderToolCallRequest(
+                        call_id=f"docs-{self.calls}",
+                        tool_id=tools[0].tool_id,
+                        arguments={"query": question},
+                    ),
+                ),
+                usage=Usage(total_tokens=1),
+                accepted=True,
+            )
         return ProviderResult(
-            structured={"type": "terminal", "response": response},
+            structured=response,
             usage=Usage(total_tokens=1),
             accepted=True,
         )

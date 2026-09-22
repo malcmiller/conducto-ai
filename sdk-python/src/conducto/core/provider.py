@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import time
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -15,9 +17,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    TypeAdapter,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from .model_config import ModelReference
@@ -163,6 +165,66 @@ class StructuredOutputRequest:
         return cast(Mapping[str, Any], _thaw_json(self.schema))
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderToolDefinition:
+    """Immutable provider-neutral tool definition for one model turn.
+
+    Attributes:
+        tool_id: Opaque runtime-issued identifier bound to one toolbox snapshot.
+        name: Provider-facing function name for this tool in the current turn.
+        description: Safe provider-facing description.
+        input_schema: Safe provider-facing JSON Schema for arguments.
+    """
+
+    tool_id: str
+    name: str
+    description: str
+    input_schema: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        if not self.tool_id.strip():
+            raise ValueError("tool_id cannot be blank")
+        if not self.name.strip():
+            raise ValueError("name cannot be blank")
+        if not self.description.strip():
+            raise ValueError("description cannot be blank")
+        object.__setattr__(self, "tool_id", self.tool_id.strip())
+        object.__setattr__(self, "name", self.name.strip())
+        object.__setattr__(self, "description", self.description.strip())
+        object.__setattr__(self, "input_schema", _freeze_json(self.input_schema))
+
+    @classmethod
+    def from_mapping(cls, value: Mapping[str, Any]) -> ProviderToolDefinition:
+        """Build a typed tool definition from a legacy mapping payload."""
+        tool_id = value.get("id", value.get("tool_id"))
+        if not isinstance(tool_id, str) or not tool_id.strip():
+            raise ValueError("Provider tool definitions require a non-empty id")
+        name = value.get("name", tool_id)
+        description = value.get("description", name)
+        input_schema = value.get("input_schema", {"type": "object"})
+        if not isinstance(name, str):
+            raise ValueError("Provider tool definition name must be a string")
+        if not isinstance(description, str):
+            raise ValueError("Provider tool definition description must be a string")
+        if not isinstance(input_schema, Mapping):
+            raise ValueError("Provider tool definition input_schema must be a mapping")
+        return cls(
+            tool_id=tool_id,
+            name=name,
+            description=description,
+            input_schema=input_schema,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a legacy JSON-serializable tool payload."""
+        return {
+            "id": self.tool_id,
+            "name": self.name,
+            "description": self.description,
+            "input_schema": _thaw_json(self.input_schema),
+        }
+
+
 def _freeze_json(value: Any) -> Any:
     """Freeze JSON-like contract data without leaking mutable provider state."""
     if isinstance(value, Mapping):
@@ -208,10 +270,50 @@ class Usage(BaseModel):
         return value
 
 
+class ProviderToolCallRequest(BaseModel):
+    """Provider-returned native tool call before snapshot resolution."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_id: str | None = Field(default=None, min_length=1)
+    tool_id: str | None = Field(default=None, min_length=1)
+    tool_name: str | None = Field(default=None, min_length=1)
+    arguments: Mapping[str, Any] = Field(default_factory=dict)
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def freeze_arguments(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Recursively freeze arguments so validated calls cannot be mutated in place."""
+        return cast(Mapping[str, Any], _freeze_json(value))
+
+    @model_validator(mode="after")
+    def validate_reference(self) -> ProviderToolCallRequest:
+        """Require exactly one provider tool identifier channel."""
+        if (self.tool_id is None) == (self.tool_name is None):
+            raise ValueError("Provider tool calls require exactly one of tool_id or tool_name")
+        return self
+
+
+class ProviderToolCall(BaseModel):
+    """Normalized provider tool call resolved against one toolbox snapshot."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_id: str = Field(min_length=1)
+    tool_id: str = Field(min_length=1)
+    arguments: Mapping[str, Any]
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def freeze_arguments(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Recursively freeze arguments so a normalized call cannot be mutated before execution."""
+        return cast(Mapping[str, Any], _freeze_json(value))
+
+
 class TerminalModelDecision(BaseModel):
     """The sole terminal response permitted for one model decision turn."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     type: Literal["terminal"]
     response: dict[str, Any]
@@ -220,19 +322,24 @@ class TerminalModelDecision(BaseModel):
 class ToolCallModelDecision(BaseModel):
     """The sole tool call permitted for one model decision turn."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     type: Literal["tool_call"]
     call_id: str = Field(min_length=1)
     tool_id: str = Field(min_length=1)
-    arguments: dict[str, Any]
+    arguments: Mapping[str, Any]
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def freeze_arguments(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Recursively freeze arguments so the decision cannot be mutated before execution."""
+        return cast(Mapping[str, Any], _freeze_json(value))
 
 
 ModelDecision: TypeAlias = Annotated[
     TerminalModelDecision | ToolCallModelDecision,
     Field(discriminator="type"),
 ]
-_MODEL_DECISION_ADAPTER: TypeAdapter[ModelDecision] = TypeAdapter(ModelDecision)
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,12 +353,21 @@ class ToolResultMessage:
 
 @dataclass(frozen=True, slots=True)
 class FakeModelRequest:
-    """Safe observation of one request issued to :class:`FakeModel`."""
+    """Safe observation of one request issued to :class:`FakeModel`.
+
+    Attributes:
+        message_roles: Roles supplied on the request.
+        options: Generation settings observed by the fake provider.
+        structured_output: Terminal structured-output schema for the turn.
+        tools: Provider-neutral tool definitions for the exact toolbox snapshot.
+        tool_results: Prior bounded tool results for the turn.
+        effective_deadline: Effective monotonic deadline applied to the turn.
+    """
 
     message_roles: tuple[str, ...]
     options: GenerationOptions
     structured_output: StructuredOutputRequest
-    tools: tuple[Mapping[str, Any], ...] = ()
+    tools: tuple[ProviderToolDefinition, ...] = ()
     tool_results: tuple[ToolResultMessage, ...] = ()
     effective_deadline: float | None = None
 
@@ -261,7 +377,8 @@ class ProviderResult(BaseModel):
 
     Attributes:
         content: Optional unstructured text response.
-        structured: Optional decoded structured response.
+        structured: Optional decoded terminal structured response.
+        tool_calls: Optional provider-native tool-call requests for this turn.
         usage: Provider-neutral usage counters.
         accepted: Whether the provider accepted the request. Accepted failures
             are not automatically retried.
@@ -272,6 +389,7 @@ class ProviderResult(BaseModel):
 
     content: str | None = None
     structured: Any = None
+    tool_calls: tuple[ProviderToolCallRequest, ...] = ()
     usage: Usage = Field(default_factory=Usage)
     accepted: bool = False
     request_id: str | None = None
@@ -616,7 +734,7 @@ class ModelProvider(Protocol):
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
-        tools: Sequence[Mapping[str, Any]] = (),
+        tools: Sequence[ProviderToolDefinition] = (),
         tool_results: Sequence[ToolResultMessage] = (),
         effective_deadline: float | None = None,
     ) -> ProviderResult:
@@ -646,7 +764,7 @@ class CancellableModelProvider(ModelProvider, Protocol):
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
-        tools: Sequence[Mapping[str, Any]] = (),
+        tools: Sequence[ProviderToolDefinition] = (),
         tool_results: Sequence[ToolResultMessage] = (),
         effective_deadline: float | None = None,
         call_context: ProviderCallContext | None = None,
@@ -768,7 +886,7 @@ class FakeModel:
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
-        tools: Sequence[Mapping[str, Any]] = (),
+        tools: Sequence[ProviderToolDefinition] = (),
         tool_results: Sequence[ToolResultMessage] = (),
         effective_deadline: float | None = None,
         call_context: ProviderCallContext | None = None,
@@ -788,12 +906,13 @@ class FakeModel:
         """
         del call_context
         self.calls += 1
+        normalized_tools = _normalize_provider_tools(tools)
         self.requests.append(
             FakeModelRequest(
                 message_roles=tuple(message.role for message in messages),
                 options=options,
                 structured_output=structured_output,
-                tools=tuple(dict(tool) for tool in tools),
+                tools=normalized_tools,
                 tool_results=tuple(tool_results),
                 effective_deadline=effective_deadline,
             )
@@ -812,72 +931,171 @@ class FakeModel:
         if isinstance(selection, str):
             return ProviderResult(content=selection, usage=self.usage, accepted=self.accepted)
         payload = selection.model_dump() if isinstance(selection, BaseModel) else selection
-        if not isinstance(payload, dict):
+        if not isinstance(payload, Mapping):
             raise TypeError("FakeModel script entries must be model results or dictionaries")
-        return ProviderResult(structured=payload, usage=self.usage, accepted=self.accepted)
+        return _coerce_fake_provider_result(payload, usage=self.usage, accepted=self.accepted)
+
+
+def _coerce_fake_provider_result(
+    payload: Mapping[str, Any],
+    *,
+    usage: Usage,
+    accepted: bool,
+) -> ProviderResult:
+    """Translate legacy fake payloads into the separated provider result contract."""
+    decision_type = payload.get("type")
+    if decision_type == "terminal":
+        return ProviderResult(
+            structured=payload.get("response"),
+            usage=usage,
+            accepted=accepted,
+        )
+    if decision_type == "tool_call":
+        call_payload = dict(payload)
+        call_payload.pop("type", None)
+        return ProviderResult(
+            tool_calls=(ProviderToolCallRequest.model_validate(call_payload),),
+            usage=usage,
+            accepted=accepted,
+        )
+    return ProviderResult(structured=dict(payload), usage=usage, accepted=accepted)
 
 
 def build_model_decision_schema(
     response_type: type[BaseModel],
 ) -> StructuredOutputRequest:
-    """Build the strict terminal-or-single-tool-call contract for a turn."""
-    response_schema = response_type.model_json_schema()
-    definitions = response_schema.pop("$defs", None)
-    schema = {
-        "oneOf": [
-            {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "type": {"const": "terminal"},
-                    "response": response_schema,
-                },
-                "required": ["type", "response"],
-            },
-            {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "type": {"const": "tool_call"},
-                    "call_id": {"type": "string", "minLength": 1},
-                    "tool_id": {"type": "string", "minLength": 1},
-                    "arguments": {"type": "object"},
-                },
-                "required": ["type", "call_id", "tool_id", "arguments"],
-            },
-        ]
-    }
-    if definitions is not None:
-        schema["$defs"] = definitions
-    # The turn envelope is required; the terminal payload is validated by the
-    # delegation boundary so it can report final-output validation distinctly.
-    return StructuredOutputRequest(name="model_decision", schema=schema, required=False)
+    """Build the terminal structured-output schema for one delegation turn.
+
+    Native tool definitions and prior tool results travel through their
+    dedicated provider channels rather than through a synthetic top-level
+    schema union.
+    """
+    return StructuredOutputRequest(
+        name=response_type.__name__,
+        schema=response_type.model_json_schema(),
+        required=False,
+    )
 
 
 def parse_model_decision(
     result: ProviderResult,
     *,
     response_type: type[BaseModel],
+    tools: Sequence[ProviderToolDefinition | Mapping[str, Any]] = (),
 ) -> ModelDecision:
-    """Parse exactly one strict terminal response or one strict tool call."""
+    """Parse exactly one terminal response or one provider-native tool call."""
     if not issubclass(response_type, BaseModel):
         raise TypeError("response_type must be a Pydantic model type")
-    if result.structured is None:
+    if result.structured is not None and result.tool_calls:
+        raise MalformedStructuredOutputError(
+            "Provider returned both terminal structured output and tool calls"
+        )
+    if result.structured is None and not result.tool_calls:
         raise MalformedStructuredOutputError("Provider returned no structured model decision")
+    if result.structured is not None:
+        if not isinstance(result.structured, Mapping):
+            raise MalformedStructuredOutputError(
+                "Provider returned malformed terminal structured output"
+            )
+        try:
+            return TerminalModelDecision(type="terminal", response=dict(result.structured))
+        except ValidationError as error:
+            raise MalformedStructuredOutputError(
+                "Provider returned malformed structured model decision"
+            ) from error
+    if len(result.tool_calls) != 1:
+        raise MalformedStructuredOutputError(
+            "Provider returned multiple tool calls for a single-turn decision"
+        )
+    normalized = _resolve_provider_tool_call(
+        result.tool_calls[0],
+        _normalize_provider_tools(tools),
+        request_id=result.request_id,
+    )
     try:
-        decision = _MODEL_DECISION_ADAPTER.validate_python(result.structured)
-        return decision
+        return ToolCallModelDecision(
+            type="tool_call",
+            call_id=normalized.call_id,
+            tool_id=normalized.tool_id,
+            arguments=normalized.arguments,
+        )
     except ValidationError as error:
         raise MalformedStructuredOutputError(
             "Provider returned malformed structured model decision"
         ) from error
 
 
+def _normalize_provider_tools(
+    tools: Sequence[ProviderToolDefinition | Mapping[str, Any]],
+) -> tuple[ProviderToolDefinition, ...]:
+    """Return typed provider tool definitions from public or legacy payloads."""
+    normalized: list[ProviderToolDefinition] = []
+    for tool in tools:
+        if isinstance(tool, ProviderToolDefinition):
+            normalized.append(tool)
+        elif isinstance(tool, Mapping):
+            normalized.append(ProviderToolDefinition.from_mapping(tool))
+        else:
+            raise TypeError(
+                "Provider tool definitions must be ProviderToolDefinition or mapping values"
+            )
+    return tuple(normalized)
+
+
+def _resolve_provider_tool_call(
+    request: ProviderToolCallRequest,
+    tools: Sequence[ProviderToolDefinition],
+    *,
+    request_id: str | None,
+) -> ProviderToolCall:
+    """Resolve a provider-returned tool reference through one exact toolbox snapshot."""
+    if not tools:
+        raise MalformedStructuredOutputError(
+            "Provider returned tool calls without an advertised tool snapshot"
+        )
+    if request.tool_id is not None:
+        if not any(tool.tool_id == request.tool_id for tool in tools):
+            raise MalformedStructuredOutputError("Provider returned an unknown tool id")
+        call_id = request.call_id or _synthesize_tool_call_id(request, request.tool_id, request_id)
+        return ProviderToolCall(
+            call_id=call_id,
+            tool_id=request.tool_id,
+            arguments=request.arguments,
+        )
+    matches = [
+        tool for tool in tools if (request.tool_name is not None and tool.name == request.tool_name)
+    ]
+    if not matches:
+        raise MalformedStructuredOutputError("Provider returned an unknown tool name")
+    if len(matches) != 1:
+        raise MalformedStructuredOutputError("Provider returned an ambiguous tool call")
+    call_id = request.call_id or _synthesize_tool_call_id(request, matches[0].tool_id, request_id)
+    return ProviderToolCall(
+        call_id=call_id,
+        tool_id=matches[0].tool_id,
+        arguments=request.arguments,
+    )
+
+
+def _synthesize_tool_call_id(
+    request: ProviderToolCallRequest,
+    resolved_tool_id: str,
+    request_id: str | None,
+) -> str:
+    """Create a stable opaque call ID for providers that omit one."""
+    raw_reference = request.tool_id or request.tool_name or resolved_tool_id
+    arguments = json.dumps(
+        request.arguments, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    )
+    seed = f"{request_id or ''}\0{resolved_tool_id}\0{raw_reference}\0{arguments}"
+    return f"tool_{uuid.uuid5(uuid.NAMESPACE_URL, seed).hex}"
+
+
 def validate_provider_contract(
     provider: ModelProvider,
     *,
     structured_output: StructuredOutputRequest,
-    tools: Sequence[Mapping[str, Any]] = (),
+    tools: Sequence[ProviderToolDefinition | Mapping[str, Any]] = (),
     tool_results: Sequence[ToolResultMessage] = (),
 ) -> None:
     """Validate provider support before issuing a structured request.
@@ -908,7 +1126,8 @@ def validate_provider_contract(
         raise UnsupportedProviderCapabilityError(
             f"Provider does not support JSON Schema dialect {structured_output.dialect}"
         )
-    if (tools or tool_results) and not provider.capabilities.tool_calling:
+    normalized_tools = _normalize_provider_tools(tools)
+    if (normalized_tools or tool_results) and not provider.capabilities.tool_calling:
         raise UnsupportedProviderCapabilityError(
             "Provider does not support required native tool calling"
         )
@@ -1091,7 +1310,7 @@ async def complete_with_retries(
     options: GenerationOptions,
     structured_output: StructuredOutputRequest,
     deadline: float | None = None,
-    tools: Sequence[Mapping[str, Any]] = (),
+    tools: Sequence[ProviderToolDefinition | Mapping[str, Any]] = (),
     tool_results: Sequence[ToolResultMessage] = (),
     effective_deadline: float | None = None,
     call_context: ProviderCallContext | None = None,
@@ -1123,13 +1342,14 @@ async def complete_with_retries(
         ProviderError: If a provider failure is not safely retryable or retries
             are exhausted.
     """
-    tool_aware = bool(tools) or bool(tool_results)
+    normalized_tools = _normalize_provider_tools(tools)
+    tool_aware = bool(normalized_tools) or bool(tool_results)
     if effective_deadline is not None:
         deadline = min(deadline, effective_deadline) if deadline is not None else effective_deadline
     validate_provider_contract(
         provider,
         structured_output=structured_output,
-        tools=tools,
+        tools=normalized_tools,
         tool_results=tool_results,
     )
     attempts = options.retries + 1
@@ -1152,7 +1372,7 @@ async def complete_with_retries(
                 "structured_output": structured_output,
             }
             if tool_aware:
-                request_kwargs["tools"] = tools
+                request_kwargs["tools"] = normalized_tools
                 request_kwargs["tool_results"] = tool_results
             if tool_aware or effective_deadline is not None:
                 request_kwargs["effective_deadline"] = deadline
