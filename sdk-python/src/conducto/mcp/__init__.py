@@ -44,9 +44,15 @@ from .schema import (
 )
 
 if TYPE_CHECKING:
+    from .http import McpHttpLimits, McpHttpRequest, McpHttpServer
     from .server import McpStdioServer
 
-_LAZY_EXPORTS = {"McpStdioServer": "conducto.mcp.server"}
+_LAZY_EXPORTS = {
+    "McpHttpLimits": "conducto.mcp.http",
+    "McpHttpRequest": "conducto.mcp.http",
+    "McpHttpServer": "conducto.mcp.http",
+    "McpStdioServer": "conducto.mcp.server",
+}
 
 
 def __getattr__(name: str) -> Any:
@@ -85,6 +91,9 @@ __all__ = [
     "McpExportError",
     "McpExportPolicy",
     "McpExportRule",
+    "McpHttpLimits",
+    "McpHttpRequest",
+    "McpHttpServer",
     "McpNameCollisionError",
     "McpPolicyError",
     "McpSchemaProjectionError",
