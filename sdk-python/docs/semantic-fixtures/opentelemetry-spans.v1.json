@@ -13,6 +13,7 @@
     {"name": "conducto.security.approval", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.agent.id", "conducto.capability.id"]},
     {"name": "conducto.model.complete", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.model.provider", "conducto.model.reference"]},
     {"name": "conducto.capability.invoke", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.agent.id", "conducto.capability.id"]},
-    {"name": "conducto.delegation.turn", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.delegation.loop_id", "conducto.delegation.turn"]}
+    {"name": "conducto.delegation.turn", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.delegation.loop_id", "conducto.delegation.turn"]},
+    {"name": "conducto.registration.server", "kind": "server", "required_attributes": ["conducto.trace_schema_version", "conducto.correlation_id", "conducto.registration.operation"]}
   ]
 }

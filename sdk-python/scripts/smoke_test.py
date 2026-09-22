@@ -56,12 +56,16 @@ def main() -> int:
     from conducto.core.logging import configure_logging
     from conducto.core.provider import ModelConfiguration, ProviderResult
     from conducto.core.provider_registry import ProviderRegistry
+    from conducto.registration import RegistrationCode, RegistrationResult
+    from conducto.registration.asgi import RegistrationASGI
     from conducto.testing import FakeModel
 
     source_root = Path(__file__).resolve().parents[1] / "src"
     imported_from = Path(conducto.__file__ or "").resolve()
     if imported_from.is_relative_to(source_root):
         raise AssertionError(f"conducto imported from source checkout: {imported_from}")
+    assert RegistrationASGI is not None
+    assert not RegistrationResult(code=RegistrationCode.SERVICE_UNAVAILABLE).ready
 
     @a2a_agent(
         name="SmokeInvoiceAgent",

@@ -2,6 +2,12 @@
 
 from ._admission import ProvenanceVerifier
 from ._lifecycle import AgentCatalog
+from ._managed_models import (
+    CatalogInstanceState,
+    CatalogManagedCode,
+    CatalogManagedCommand,
+    CatalogManagedResult,
+)
 from ._models import (
     AgentInstanceRecord,
     CatalogAgentRecord,
@@ -26,6 +32,10 @@ __all__ = [
     "CatalogEntry",
     "CatalogError",
     "CatalogLifecycleState",
+    "CatalogInstanceState",
+    "CatalogManagedCode",
+    "CatalogManagedCommand",
+    "CatalogManagedResult",
     "CatalogProvider",
     "CatalogProviderUnavailableError",
     "CatalogSnapshot",

@@ -7,10 +7,11 @@ The catalog never executes a capability or selects its transport.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from ..logging import (
     CATALOG_AGENT_ADMITTED,
@@ -21,6 +22,8 @@ from ..logging import (
     emit_event,
 )
 from ._admission import AdmissionPolicy, ProvenanceVerifier, prepare_entry
+from ._managed import ManagedInstances
+from ._managed_models import CatalogInstanceState, CatalogManagedCommand, CatalogManagedResult
 from ._models import (
     AgentInstanceRecord,
     CatalogAgentRecord,
@@ -28,6 +31,7 @@ from ._models import (
     CatalogEntry,
     CatalogLifecycleState,
     CatalogSnapshot,
+    CatalogValidationError,
     DeploymentType,
     UnknownCatalogAgentError,
     UnknownCatalogInstanceError,
@@ -44,6 +48,11 @@ class _InstanceState:
     healthy: bool
     lease_expires_at: float
     last_heartbeat_at: float
+    environment: str = ""
+    deployment_id: str = ""
+    provenance: str = ""
+    subject_id: str = ""
+    issuer: str = ""
 
     def to_record(self) -> AgentInstanceRecord:
         return AgentInstanceRecord(
@@ -54,6 +63,11 @@ class _InstanceState:
             healthy=self.healthy,
             lease_expires_at=self.lease_expires_at,
             last_heartbeat_at=self.last_heartbeat_at,
+            environment=self.environment,
+            deployment_id=self.deployment_id,
+            provenance=self.provenance,
+            subject_id=self.subject_id,
+            issuer=self.issuer,
         )
 
     def is_expired(self, now: float) -> bool:
@@ -70,6 +84,7 @@ class _AgentState:
     supported_versions: frozenset[str]
     card_name: str
     card_digest: str
+    logical_digest: str
     capabilities: tuple[CatalogCapabilityDescriptor, ...]
     lifecycle: CatalogLifecycleState
     generation: int
@@ -106,6 +121,7 @@ class AgentCatalog:
         clock: Callable[[], float] = time.time,
         provenance_verifier: ProvenanceVerifier | None = None,
         require_provenance: bool = False,
+        managed_capacity: int = 10_000,
     ) -> None:
         """Initialize an empty catalog.
 
@@ -116,12 +132,62 @@ class AgentCatalog:
                 provenance verification is required.
             require_provenance: Whether every entry must supply and pass
                 provenance verification, regardless of ``trust_policy_ref``.
+            managed_capacity: Maximum managed identities and successful operation
+                receipts retained without eviction. One additional terminal receipt
+                per identity reserves revocation/removal capacity. Exhaustion denies
+                further lease grants without preventing terminal operations.
         """
         self._clock = clock
         self._admission = AdmissionPolicy(provenance_verifier, require_provenance)
         self._lock = threading.RLock()
         self._agents: dict[str, _AgentState] = {}
         self._revision = 0
+        self._managed = ManagedInstances(
+            capacity=managed_capacity,
+            clock=self._clock,
+            agents=self._agents,
+            admit=self.register_instance,
+            changed=self._mark_managed_changed,
+        )
+
+    def _mark_managed_changed(self) -> None:
+        self._revision += 1
+
+    def manage_instance(self, command: CatalogManagedCommand) -> CatalogManagedResult:
+        """Atomically admit or mutate one authenticated managed instance.
+
+        Authentication and authorization belong to the caller. All catalog,
+        generation, replay, lease, and identity checks occur under this lock.
+        Revoke is instance-specific and never revokes its logical siblings.
+
+        Raises:
+            CatalogValidationError: If Agent Card admission rejects the entry.
+        """
+        with self._lock:
+            return self._managed.execute(command)
+
+    def expire_managed_instances(self) -> tuple[tuple[str, str, CatalogManagedResult], ...]:
+        """Expire managed leases and consume original-principal attribution receipts.
+
+        Each expiry is returned once, including expirations already observed by a
+        command, receipt lookup, or legacy sweep. Delivery failures after this
+        handoff must be retried by the caller.
+        """
+        with self._lock:
+            return self._managed.expire()
+
+    def lookup_managed_request(self, command: CatalogManagedCommand) -> CatalogManagedResult | None:
+        """Resolve a managed receipt before fetching a registration's Agent Card.
+
+        The caller must first authenticate and authorize the current request.
+        Returns ``None`` when its principal-scoped key has no receipt, otherwise
+        the original result or a current conflict, generation, or terminal error.
+        Expired leases are fenced under the catalog lock; no lease is created or
+        extended. A cache miss is not authorization to admit: ``manage_instance``
+        must still perform all checks after card retrieval.
+        """
+        with self._lock:
+            return self._managed.lookup(command)
 
     @property
     def revision(self) -> int:
@@ -159,12 +225,15 @@ class AgentCatalog:
 
         Raises:
             CatalogValidationError: If the Agent Card, identity, compatibility,
-                or provenance policy rejects this entry.
+                or provenance policy rejects this entry, or if the identity is
+                managed. Direct attempts to replace managed instances permanently
+                invalidate their authority; use ``manage_instance`` instead.
         """
         prepared = prepare_entry(entry)
         now = self._clock()
 
         with self._lock:
+            self._managed.guard_external_entry(entry, prepared)
             existing = self._agents.get(entry.agent_id)
             self._admission.validate(
                 entry=entry,
@@ -197,6 +266,7 @@ class AgentCatalog:
                 supported_versions=entry.supported_versions,
                 card_name=prepared.card_name,
                 card_digest=prepared.card_digest,
+                logical_digest=prepared.logical_digest,
                 capabilities=prepared.capabilities,
                 lifecycle=lifecycle,
                 generation=generation,
@@ -233,9 +303,13 @@ class AgentCatalog:
         Raises:
             UnknownCatalogAgentError: If the logical agent is not registered.
             UnknownCatalogInstanceError: If the instance is not registered.
+            CatalogValidationError: If the duration is not finite and positive,
+                or if the instance is managed. A direct managed heartbeat fences
+                its authority; use ``manage_instance`` instead.
         """
         now = self._clock()
         with self._lock:
+            self._managed.reject_external_instance(agent_id, instance_id)
             state = self._require_agent_locked(agent_id)
             instance = state.instances.get(instance_id)
             if instance is None:
@@ -247,11 +321,10 @@ class AgentCatalog:
                 if lease_seconds is not None
                 else max(instance.lease_expires_at - instance.last_heartbeat_at, 1.0)
             )
-            renewed = _InstanceState(
-                instance_id=instance.instance_id,
-                deployment_type=instance.deployment_type,
-                agent_card_url=instance.agent_card_url,
-                transports=instance.transports,
+            if not math.isfinite(duration) or duration <= 0:
+                raise CatalogValidationError("lease_seconds must be finite and positive")
+            renewed = replace(
+                instance,
                 healthy=True,
                 lease_expires_at=now + duration,
                 last_heartbeat_at=now,
@@ -280,19 +353,15 @@ class AgentCatalog:
         now = self._clock()
         expired: list[tuple[str, str]] = []
         with self._lock:
+            expired.extend(self._managed.sweep())
             for agent_id, state in list(self._agents.items()):
                 instances = dict(state.instances)
                 changed = False
                 for instance_id, instance in list(instances.items()):
                     if instance.healthy and instance.is_expired(now):
-                        instances[instance_id] = _InstanceState(
-                            instance_id=instance.instance_id,
-                            deployment_type=instance.deployment_type,
-                            agent_card_url=instance.agent_card_url,
-                            transports=instance.transports,
+                        instances[instance_id] = replace(
+                            instance,
                             healthy=False,
-                            lease_expires_at=instance.lease_expires_at,
-                            last_heartbeat_at=instance.last_heartbeat_at,
                         )
                         expired.append((agent_id, instance_id))
                         changed = True
@@ -311,6 +380,9 @@ class AgentCatalog:
     def set_lifecycle(self, agent_id: str, lifecycle: CatalogLifecycleState) -> None:
         """Set a lifecycle state (quarantine, disable, revoke, remove, or reactivate).
 
+        Any non-active transition permanently fences managed instance authority.
+        Reactivation restores legacy eligibility, not previously managed leases.
+
         Args:
             agent_id: The logical agent to transition.
             lifecycle: The lifecycle state to apply.
@@ -319,6 +391,13 @@ class AgentCatalog:
             UnknownCatalogAgentError: If the logical agent is not registered.
         """
         with self._lock:
+            if lifecycle is not CatalogLifecycleState.ACTIVE:
+                terminal = (
+                    CatalogInstanceState.REMOVED
+                    if lifecycle is CatalogLifecycleState.REMOVED
+                    else CatalogInstanceState.REVOKED
+                )
+                self._managed.fence(agent_id, terminal=terminal)
             state = self._require_agent_locked(agent_id)
             self._agents[agent_id] = _AgentState(
                 agent_id=state.agent_id,
@@ -328,6 +407,7 @@ class AgentCatalog:
                 supported_versions=state.supported_versions,
                 card_name=state.card_name,
                 card_digest=state.card_digest,
+                logical_digest=state.logical_digest,
                 capabilities=state.capabilities,
                 lifecycle=lifecycle,
                 generation=state.generation,
@@ -369,6 +449,7 @@ class AgentCatalog:
         """
         with self._lock:
             self._require_agent_locked(agent_id)
+            self._managed.fence(agent_id, terminal=CatalogInstanceState.REMOVED)
             del self._agents[agent_id]
             self._revision += 1
             emit_event(
@@ -452,6 +533,7 @@ def _replace_instances(state: _AgentState, instances: Mapping[str, _InstanceStat
         supported_versions=state.supported_versions,
         card_name=state.card_name,
         card_digest=state.card_digest,
+        logical_digest=state.logical_digest,
         capabilities=state.capabilities,
         lifecycle=state.lifecycle,
         generation=state.generation,

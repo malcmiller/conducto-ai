@@ -49,6 +49,8 @@ flowchart TD
     RT --> GW[core.gateway: discovery and binding]
     GW --> AR[core.registry: local facts]
     CAT[core.catalog: remote facts] --> ADM[Admission, provenance and leases]
+    REG[registration: authenticated deployment operations] --> CAT
+    REG --> DISC[transport: policy-bound Agent Card retrieval]
     DEL[core.delegation: bounded execution loop] --> GW
     DEL --> MG
     TEST[conducto.testing: fakes and conformance] --> PC

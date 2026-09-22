@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from dataclasses import dataclass
@@ -166,12 +167,25 @@ async def discover_agent(
     *,
     policy: DiscoveryPolicy = _DEFAULT_DISCOVERY_POLICY,
     http_client: httpx.AsyncClient | None = None,
+    correlation_id: str | None = None,
 ) -> RemoteAgentDescriptor:
     """Retrieve and validate a public Agent Card under an explicit SSRF policy.
 
     Redirects are disabled. The configured card location and the card's advertised
     JSON-RPC endpoint are independently validated, including fresh DNS resolution.
+    An optional bounded ASCII correlation identifier is propagated independently
+    of W3C trace context; authentication credentials are never forwarded.
     """
+    headers = {"accept": "application/json", "accept-encoding": "identity"}
+    if correlation_id is not None:
+        if (
+            not correlation_id
+            or len(correlation_id) > 128
+            or not correlation_id.isascii()
+            or any(ord(character) < 33 or ord(character) == 127 for character in correlation_id)
+        ):
+            raise ValueError("correlation_id must be a bounded printable ASCII identifier")
+        headers["x-correlation-id"] = correlation_id
     with start_span(
         SPAN_A2A_CLIENT,
         kind="client",
@@ -180,7 +194,7 @@ async def discover_agent(
             "conducto.transport": "agent_card",
         },
     ) as span:
-        _validate_url(card_url, policy)
+        await asyncio.to_thread(_validate_url, card_url, policy)
         owns_client = http_client is None
         client = http_client or httpx.AsyncClient(follow_redirects=False)
         try:
@@ -188,13 +202,15 @@ async def discover_agent(
                 async with client.stream(
                     "GET",
                     card_url,
-                    headers=inject_trace_context({"accept": "application/json"}),
+                    headers=inject_trace_context(headers),
                     follow_redirects=False,
                     timeout=policy.request_timeout,
                 ) as response:
                     if response.is_redirect:
                         raise DiscoveryError("Agent Card redirects are not permitted")
                     response.raise_for_status()
+                    if response.headers.get("content-encoding", "identity").lower() != "identity":
+                        raise ProtocolError("Compressed Agent Cards are not permitted")
                     content_type = response.headers.get("content-type", "")
                     if "application/json" not in content_type.lower():
                         raise DiscoveryError(
@@ -240,7 +256,7 @@ async def discover_agent(
                     "Agent Card must advertise exactly one A2A 1.0 JSON-RPC interface"
                 )
             endpoint_url = interfaces[0].url
-            _validate_url(endpoint_url, policy)
+            await asyncio.to_thread(_validate_url, endpoint_url, policy)
             if not _same_authority(card_url, endpoint_url):
                 span.set_outcome("validation_failure", reason="authority_mismatch")
                 raise DiscoveryError("Agent Card endpoint must use the configured card authority")

@@ -23,6 +23,8 @@ deployment, roadmap, and automation documentation remains in
 - [Remote-agent catalog](./remote-agent-catalog.md) — governed catalog
   provider contract, capability indexing, lease-based instance health, and
   quarantine, disablement, revocation, and removal lifecycle transitions.
+- [Deployment registration](./deployment-registration.md) — authenticated remote
+  admission, opaque leases, readiness, renewal, drain, and shutdown hooks.
 - [Orchestration and delegation](./orchestration-and-delegation.md) —
   deterministic routing, model-facing toolboxes, and bounded nested agent
   calls.

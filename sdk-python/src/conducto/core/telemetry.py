@@ -26,6 +26,7 @@ SPAN_SECURITY_APPROVAL = "conducto.security.approval"
 SPAN_MODEL_COMPLETE = "conducto.model.complete"
 SPAN_CAPABILITY_INVOKE = "conducto.capability.invoke"
 SPAN_DELEGATION_TURN = "conducto.delegation.turn"
+SPAN_REGISTRATION_SERVER = "conducto.registration.server"
 
 _SPAN_NAMES = frozenset(
     {
@@ -42,6 +43,7 @@ _SPAN_NAMES = frozenset(
         SPAN_MODEL_COMPLETE,
         SPAN_CAPABILITY_INVOKE,
         SPAN_DELEGATION_TURN,
+        SPAN_REGISTRATION_SERVER,
     }
 )
 
@@ -363,6 +365,7 @@ __all__ = [
     "SPAN_MCP_TOOLS_CALL",
     "SPAN_MCP_TOOLS_LIST",
     "SPAN_MODEL_COMPLETE",
+    "SPAN_REGISTRATION_SERVER",
     "SPAN_SECURITY_APPROVAL",
     "SPAN_SECURITY_AUTHORIZE",
     "TRACE_SCHEMA_VERSION",
