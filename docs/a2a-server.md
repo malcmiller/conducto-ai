@@ -246,11 +246,162 @@ by the A2A client transport. `InMemoryTaskRepository` is suitable for tests
 and single-process deployments; production task databases are out of scope
 for this story.
 
+## Transport hardening and operational lifecycle
+
+`A2AHostSecurityConfig` is the single immutable, validated policy object that
+bounds everything an untrusted caller controls. It is frozen, slot-based, uses
+no mutable defaults, and validates every field at construction, raising
+`A2AHostConfigurationError` on an invalid value. Two applications never share
+configuration, admission counters, readiness, or task state.
+
+```python
+from conducto.a2a import A2AHostSecurityConfig, create_a2a_app
+
+config = A2AHostSecurityConfig(
+    allowed_schemes=frozenset({"https"}),
+    allowed_authorities=frozenset({"agent.example:443"}),
+    trusted_proxies=frozenset({"10.0.0.5"}),
+    trust_forwarded_host=True,
+    trust_forwarded_proto=True,
+    trust_forwarded_for=True,
+    liveness_path="/livez",
+    readiness_path="/readyz",
+)
+
+app = create_a2a_app(
+    agent=agent,
+    runtime=runtime,
+    public_url="https://agent.example",
+    identity_resolver=resolve_identity,
+    security_config=config,
+    mtls_identity_extractor=extract_verified_peer_subject,
+    on_startup=check_dependencies,
+    resource_closers={"audit": audit_sink.aclose},
+)
+```
+
+### Configuration surface
+
+| Group | Fields |
+| --- | --- |
+| Public identity | `allowed_schemes`, `allowed_hosts`, `allowed_ports`, `allowed_authorities`, `allowed_paths`, `allowed_methods`, `allowed_content_types` |
+| Proxy trust | `trusted_proxies`, `trust_forwarded_host`, `trust_forwarded_proto`, `trust_forwarded_for`, `reject_untrusted_forwarded_headers` |
+| Headers | `max_header_count`, `max_total_header_bytes`, `max_authorization_header_bytes`, `max_correlation_header_bytes`, `max_trace_header_bytes` |
+| Bodies | `max_request_body_bytes`, `max_request_body_chunks`, `max_response_body_bytes` |
+| Payload | `max_metadata_bytes`, `max_message_parts`, `max_artifact_parts`, `max_task_artifacts`, `max_history_messages` |
+| Capacity | `max_page_size`, `max_retained_tasks`, `max_accepted_concurrency`, `max_caller_concurrency`, `max_capability_concurrency` |
+| Deadlines | `request_deadline_seconds`, `capability_deadline_seconds`, `cancellation_deadline_seconds`, `startup_deadline_seconds`, `shutdown_deadline_seconds`, `drain_deadline_seconds`, `task_store_flush_deadline_seconds` |
+| Probes | `liveness_path`, `readiness_path` |
+
+Payload defaults are the pinned protocol constants from
+`conducto.core.a2a_profile` (`MAX_METADATA_BYTES`, `MAX_MESSAGE_PARTS`,
+`MAX_ARTIFACT_PARTS`, `MAX_TASK_ARTIFACTS`, `MAX_HISTORY_MESSAGES`), so the
+hardening layer tightens but never contradicts the profile. When
+`allowed_paths` is omitted the host derives the exact mounted surface (the
+JSON-RPC path, the Agent Card path, and any configured probe paths); when it is
+supplied explicitly it must include the mounted routes or construction fails.
+
+### Request validation order
+
+Every inbound HTTP scope is validated before a single body byte is read and
+before any capability executes: method, header count and aggregate header
+bytes, forwarded-header trust, scheme, authority (`Host`, DNS name or IP
+literal, port range), exact path, content encoding, declared content length,
+media type and charset, bearer credential shape, correlation identifier, and
+W3C trace context. Rejections are plain JSON `{"reason": "..."}` bodies with a
+stable reason code and an explicit status (`400`, `404`, `405`, `413`, `415`,
+`429`, `431`, `500`, `503`, `504`). They never echo header values, credentials,
+exception text, or private endpoints.
+
+Request bodies are counted as they arrive and rejected once the limit is
+exceeded, with no unbounded buffering. Responses are bounded by
+`max_response_body_bytes`; a response that cannot be emitted within that bound
+becomes an explicit `500 {"reason": "response_too_large"}` rather than a
+truncated or partially written body.
+
+### Proxy trust and transport identity
+
+Forwarded information is honored only when the immediate ASGI transport peer
+(`scope["client"]`) is in `trusted_proxies` *and* the corresponding
+`trust_forwarded_*` flag is enabled. Otherwise forwarded headers are rejected
+outright (the default) or stripped when
+`reject_untrusted_forwarded_headers=False`. A direct client can therefore never
+promote its scheme, authority, or apparent address by setting a header.
+
+Verified mTLS peer identity is accepted only through the explicit
+`mtls_identity_extractor` seam, which the embedding server owns:
+
+```python
+def extract_verified_peer_subject(scope: Mapping[str, Any]) -> str | None:
+    """Return the subject the TLS terminator already verified for this scope."""
+    return scope.get("extensions", {}).get("tls", {}).get("client_cert_subject")
+```
+
+`x-conducto-mtls-subject` and `x-conducto-client-address` are reserved: any
+client-supplied value is stripped, and only the server-asserted values are
+injected into the sanitized scope that reaches the protocol adapter and the
+identity resolver. Sanitization copies the scope, so layered instances and
+middleware remain isolated.
+
+### Overload
+
+Admission uses non-queuing counters. `max_accepted_concurrency` bounds
+concurrently served requests, `max_caller_concurrency` bounds one caller
+(keyed by verified peer subject, otherwise by peer address), and
+`max_capability_concurrency` bounds in-flight capability execution and is
+acquired before a task is created so overload never orphans a task. An
+over-capacity request is rejected immediately with
+`429 {"reason": "concurrency_limit_reached"}`; nothing is queued and no partial
+execution begins.
+
+### Disconnect, cancellation, timeout, deadline, and drain
+
+These outcomes are distinct, separately observable, and each leaves coherent
+task state:
+
+| Condition | Result | Task state |
+| --- | --- | --- |
+| Disconnect before admission | No response; no task created | none |
+| Disconnect after admission | No response; work cancelled | `TASK_STATE_CANCELED` |
+| Caller task cancelled (server shutdown) | `asyncio.CancelledError` propagates | `TASK_STATE_CANCELED` |
+| Explicit `CancelTask` | JSON-RPC result from the protocol adapter | `TASK_STATE_CANCELED` |
+| Capability deadline (`capability_deadline_seconds`) | JSON-RPC `InternalError` | `TASK_STATE_FAILED` |
+| Server request deadline (`request_deadline_seconds`) | `504 {"reason": "request_deadline_exceeded"}` | `TASK_STATE_CANCELED` |
+| Drain or closed | `503 {"reason": "service_unavailable"}` | unchanged; never created |
+
+The hardening layer never re-implements the protocol adapter's task state
+machine: it cancels the in-flight execution task, and the Story 4.4 adapter's
+existing cancellation and failure branches drive the repository transition
+through `compare_and_transition`.
+
+### Lifespan, readiness, drain, and close
+
+`A2AASGI` implements the ASGI `lifespan` protocol and also exposes explicit
+methods for embedders that do not run it:
+
+- `is_alive()` reports only that the host object is not closed, revealing no
+  dependency, endpoint, or credential detail.
+- `is_ready()` reports whether new work can be accepted right now.
+- `startup()` runs the optional `on_startup` dependency check inside
+  `startup_deadline_seconds`; failure or timeout raises `A2AStartupError` with a
+  stable `reason` and leaves the host unready and `A2AHostState.FAILED`.
+- `drain()` marks the host unready *first*, then waits up to
+  `drain_deadline_seconds` for accepted work; work still outstanding at grace
+  expiry is cancelled and swept out of `submitted`/`working`.
+- `aclose()` is idempotent and bounded. Cleanup failures are never hidden: each
+  failing step contributes a stable reason code to `A2AShutdownError.reasons`.
+
+A host constructed without `on_startup` is ready immediately, so embedding
+servers that do not run lifespan keep working. A host constructed *with*
+`on_startup` stays unready until startup succeeds. Lifespan shutdown drains and
+then closes, emitting `lifespan.shutdown.failed` with the joined reason codes if
+cleanup failed. Probe paths are served only when configured, and return only
+`{"status": "alive" | "closed" | "ready" | "unready"}`.
+
 ## What this story does not cover
 
-- Bearer/mTLS extraction or production authentication implementations; those
-  are supplied through the identity resolver.
-- Production rate limiting, proxy trust, or extensive body/header limits.
-- Liveness/readiness/drain policy.
-- Uvicorn/FastAPI examples or separate-process acceptance; this story is
-  exercised entirely through an in-process ASGI transport in tests.
+- Starting or supervising Uvicorn/Hypercorn, or separate-process acceptance.
+- Production reverse-proxy, PKI, OAuth issuer, secret manager, or database
+  configuration; the proxy-trust and mTLS seams are configuration inputs only.
+- Docker/Compose deployment, Foundry hosting, or federation.
+- Expanded A2A operations such as streaming or push notifications.

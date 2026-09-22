@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -11,6 +11,7 @@ from conducto.core.agent import BaseAgent
 from conducto.core.runtime import Runtime
 from conducto.transport.tasks import InMemoryTaskRepository, TaskRepository
 
+from .hardening import A2AHostSecurityConfig, A2AMTLSIdentityExtractor
 from .runtime import A2AIdentityResolver, A2ARuntimeHandler
 
 if TYPE_CHECKING:
@@ -30,6 +31,11 @@ def create_a2a_app(
     max_timeout: float = 300.0,
     max_delegation_depth: int = 8,
     max_delegation_calls: int = 32,
+    security_config: A2AHostSecurityConfig | None = None,
+    mtls_identity_extractor: A2AMTLSIdentityExtractor | None = None,
+    monotonic_clock: Callable[[], float] = time.monotonic,
+    on_startup: Callable[[], Awaitable[None] | None] | None = None,
+    resource_closers: Mapping[str, Callable[[], Awaitable[None] | None]] | None = None,
 ) -> A2AASGI:
     """Build the recommended runtime-backed inbound A2A ASGI application.
 
@@ -44,6 +50,14 @@ def create_a2a_app(
         max_timeout: Maximum transport-requested invocation timeout.
         max_delegation_depth: Maximum transport-requested delegation depth.
         max_delegation_calls: Maximum transport-requested delegation calls.
+        security_config: Immutable transport hardening policy. A bounded,
+            permissive-authority default is used when omitted.
+        mtls_identity_extractor: Optional server-owned seam supplying verified
+            mTLS peer identity; peer identity is never read from a header.
+        monotonic_clock: Monotonic source budgeting bounded shutdown phases.
+        on_startup: Optional application-owned dependency check. When supplied,
+            the host stays unready until ASGI lifespan startup succeeds.
+        resource_closers: Named cleanup callables invoked during bounded close.
 
     Returns:
         An ASGI application suitable for an application-owned server process.
@@ -69,13 +83,23 @@ def create_a2a_app(
         max_delegation_depth=max_delegation_depth,
         max_delegation_calls=max_delegation_calls,
     )
-    repository = task_repository if task_repository is not None else InMemoryTaskRepository()
+    config = security_config or A2AHostSecurityConfig()
+    repository = (
+        task_repository
+        if task_repository is not None
+        else InMemoryTaskRepository(max_tasks=config.max_retained_tasks)
+    )
 
     return A2AASGI(
         agent=agent,
         endpoint_url=endpoint_url,
         task_repository=repository,
         request_handler=handler,
+        security_config=config,
+        mtls_identity_extractor=mtls_identity_extractor,
+        clock=monotonic_clock,
+        on_startup=on_startup,
+        resource_closers=resource_closers,
     )
 
 
