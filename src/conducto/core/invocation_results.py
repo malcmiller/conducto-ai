@@ -108,6 +108,28 @@ class InvocationFailure:
 
 
 @dataclass(frozen=True, slots=True)
+class InvocationInternalFailure:
+    """Envelope for a sanitized unexpected runtime or adapter failure.
+
+    Attributes:
+        correlation_id: Correlation identifier shared with the invocation.
+        reason_code: Stable public category with no exception detail.
+        exception: Originating exception retained for local diagnostics only.
+        metadata: Optional invocation metadata captured by the runtime.
+    """
+
+    correlation_id: str
+    reason_code: str = "internal_error"
+    exception: BaseException = dataclasses.field(
+        default_factory=lambda: RuntimeError("internal failure"),
+        repr=False,
+        compare=False,
+        hash=False,
+    )
+    metadata: InvocationMetadata | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class InvocationApprovalRequired:
     """Envelope returned before protected business logic can execute."""
 
@@ -200,6 +222,7 @@ InvocationResult: TypeAlias = (
     | InvocationTimeout
     | InvocationCancelled
     | InvocationFailure
+    | InvocationInternalFailure
     | InvocationApprovalRequired
     | InvocationAuthorizationFailure
     | InvocationAuditFailure

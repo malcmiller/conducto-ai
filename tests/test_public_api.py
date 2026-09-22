@@ -41,6 +41,11 @@ def test_domain_packages_publish_contracts_without_umbrella_aliases() -> None:
         "conducto.registration": ("RegistrationService", "RegisterRequest", "RegistrationResult"),
         "conducto.core.delegation": ("DelegationConfig", "run_delegation"),
         "conducto.core.invocation_results": ("InvocationSuccess", "RoutingFailure"),
+        "conducto.a2a": (
+            "A2AAuthenticatedIdentity",
+            "A2ARequestContext",
+            "A2ARuntimeHandler",
+        ),
         "conducto.testing": ("FakeModel", "FakeModelRequest"),
     }
     for module_name, symbols in owners.items():

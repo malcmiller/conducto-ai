@@ -34,6 +34,7 @@ from conducto.a2a import (
     A2A_SERVER_EXTRA,
     A2AASGI,
     A2ADependencyError,
+    A2ARequestContext,
     require_a2a_server_dependency,
 )
 from conducto.core.a2a_profile import parse_agent_card
@@ -69,9 +70,15 @@ class _RecordingHandler:
         self._results = list(results) if results else None
 
     async def handle_message(
-        self, message: Message, *, task_id: str, context_id: str
+        self,
+        message: Message,
+        *,
+        task_id: str,
+        context_id: str,
+        request_context: A2ARequestContext,
     ) -> InvocationResult:
         """Record the call and return the next configured (or default) result."""
+        del request_context
         self.calls.append((message, task_id, context_id))
         if self._results is not None:
             return self._results.pop(0)

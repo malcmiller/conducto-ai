@@ -10,6 +10,7 @@ with the runtime, later stories, and the application that mounts this adapter.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 from collections.abc import AsyncGenerator, Mapping
 from typing import Any
@@ -29,7 +30,7 @@ from conducto.transport.tasks import TaskRepository
 
 from . import invocation_result_to_task
 from .errors import A2ADependencyError
-from .handler import A2ARequestHandler
+from .handler import A2ACancellableRequestHandler, A2ARequestContext, A2ARequestHandler
 from .profile import A2A_SERVER_EXTRA, require_a2a_server_dependency
 
 try:
@@ -145,6 +146,8 @@ class _ConductoRequestHandler(RequestHandler):
         """Cancel a non-terminal task through the injected repository."""
         self._reject_unsupported_extensions(context)
         try:
+            if isinstance(self._request_handler, A2ACancellableRequestHandler):
+                await self._request_handler.cancel(params.id)
             return await self._task_repository.cancel(params.id)
         except RemoteTaskError as exc:
             text = str(exc)
@@ -156,6 +159,8 @@ class _ConductoRequestHandler(RequestHandler):
     async def on_message_send(self, params: SendMessageRequest, context: ServerCallContext) -> Task:
         """Create or continue one task and invoke the injected request-handler seam."""
         self._reject_unsupported_extensions(context)
+        if context.state.get("request_id") is None:
+            raise InvalidRequestError("SendMessage requires a JSON-RPC request identifier")
         message = params.message
         try:
             parse_message(MessageToDict(message, preserving_proto_field_name=False))
@@ -210,8 +215,27 @@ class _ConductoRequestHandler(RequestHandler):
 
         try:
             result = await self._request_handler.handle_message(
-                message, task_id=task_id, context_id=context_id
+                message,
+                task_id=task_id,
+                context_id=context_id,
+                request_context=A2ARequestContext(
+                    request_id=(
+                        str(context.state["request_id"])
+                        if context.state.get("request_id") is not None
+                        else ""
+                    ),
+                    headers=context.state.get("headers", {}),
+                    method=str(context.state.get("method", "SendMessage")),
+                ),
             )
+        except asyncio.CancelledError:
+            if isinstance(self._request_handler, A2ACancellableRequestHandler):
+                await self._request_handler.cancel(task_id)
+            with contextlib.suppress(RemoteTaskError):
+                await self._task_repository.compare_and_transition(
+                    task_id, current_state, TaskState.TASK_STATE_CANCELED
+                )
+            raise
         except Exception as exc:  # noqa: BLE001 - mapped to a typed A2A internal error
             with contextlib.suppress(RemoteTaskError):
                 await self._task_repository.compare_and_transition(
@@ -231,6 +255,9 @@ class _ConductoRequestHandler(RequestHandler):
                 task_id, current_state, final_task
             )
         except RemoteTaskError as exc:
+            latest = await self._task_repository.get(task_id)
+            if latest is not None and latest.status.state == TaskState.TASK_STATE_CANCELED:
+                return latest
             text = str(exc)
             if "not found" in text:
                 raise TaskNotFoundError(text) from exc

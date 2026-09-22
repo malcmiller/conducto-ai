@@ -63,6 +63,13 @@
       "structuredContent": null
     },
     {
+      "result": "InvocationInternalFailure",
+      "isError": true,
+      "reasonCode": "internal_error",
+      "message": "The capability invocation failed internally.",
+      "structuredContent": null
+    },
+    {
       "result": "InvocationApprovalRequired",
       "isError": true,
       "reasonCode": "approval_required",

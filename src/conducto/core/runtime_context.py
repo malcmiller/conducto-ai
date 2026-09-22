@@ -35,6 +35,7 @@ def build_run_context(
     allowed_capabilities: frozenset[str] | None,
     delegation_budget: DelegationBudget | None,
     delegation_frame: DelegationFrame | None,
+    cancellation: CancellationState | None,
 ) -> RunContext:
     """Build a context without amplifying its parent's deadlines or authority.
 
@@ -96,7 +97,9 @@ def build_run_context(
         model=binding.model if binding is not None else None,
         timeout=effective_timeout,
         deadline=deadline,
-        cancellation=parent.cancellation if parent is not None else CancellationState(),
+        cancellation=(
+            parent.cancellation if parent is not None else (cancellation or CancellationState())
+        ),
         metadata=run.metadata,
         agent_id=agent_id,
         parent_run_id=parent.run_id if parent is not None else None,

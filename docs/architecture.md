@@ -18,6 +18,7 @@ flowchart TD
     O --> RT[Runtime]
     G --> RT
     RT --> I[Invocation pipeline]
+    A2A[A2A ASGI and runtime adapter] --> RT
     RT --> MR[ModelResolver]
     MR --> PR[ProviderRegistry]
     RT --> MG[ModelGateway]
@@ -120,6 +121,7 @@ aliases, and agent-owned raw provider configuration. See the
 | `ModelGateway`             | Invocation-scoped provider calls, deadlines, cancellation, typed output, usage                                                                      | Long-lived provider ownership                                          |
 | `run_delegation`           | Bounded model/tool loop and terminal outcome                                                                                                        | Discovery authority or direct registry access                          |
 | `conducto.mcp`             | MCP export policy, deterministic tool naming, schema projection, result mapping, stdio lifecycle                                                    | Capability declaration, validation, authorization, MCP framing         |
+| `conducto.a2a`             | Official-SDK ASGI dispatch, immutable inbound context mapping, runtime-bound skill resolution, replay control, task/result projection              | Credentials, reflected execution, production HTTP/process hardening    |
 | `conducto.core.telemetry`  | Optional Conducto span names, safe attributes, W3C trace-context helpers, and test tracing helper                                                   | Application tracer-provider/exporter lifecycle or auto-instrumentation |
 | `conducto.core.otel_logs`  | Optional bridge attaching an application-owned `LoggerProvider` to `conducto` events, bounded/redacted attribute mapping, and test in-memory helper | Global provider/handler/exporter installation, security audit delivery |
 | `conducto.adapters`        | Optional SDK requirements and allowlisted external adapter metadata/loading                                                                         | Agent admission, provider execution, implicit plugin imports           |
@@ -176,6 +178,23 @@ The similarly named registries solve different problems:
    gateway call, and the typed result is mapped to an MCP tool result.
 
 See [MCP tool export](./mcp-export.md).
+
+### Inbound A2A execution
+
+1. `A2AASGI` validates and dispatches the pinned A2A request through the
+   official SDK and atomically claims its repository task.
+2. `A2ARuntimeHandler` parses the Conducto invocation envelope and resolves
+   the advertised skill to an immutable runtime-bound capability binding.
+3. An injected identity resolver authenticates transport facts and returns an
+   immutable `AuthorizationContext`; transport metadata cannot add scopes,
+   roles, principals, capabilities, deadlines, or budget.
+4. The binding is revalidated against the current registry snapshot, and
+   duplicate request/message identifiers are atomically coalesced.
+5. Execution enters `Runtime.invoke()` or `Runtime.resume_approval()`, using
+   the same validation, security, audit, model, deadline, cancellation,
+   serialization, logging, tracing, and result path as local invocation.
+6. The exhaustive A2A result mapper publishes only pinned task states, safe
+   messages/reasons, success artifacts, and credential-free provenance.
 
 ### Optional tracing
 

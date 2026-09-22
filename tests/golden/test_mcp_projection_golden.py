@@ -18,6 +18,7 @@ from conducto.core.invocation_results import (
     InvocationCancelled,
     InvocationDelegationFailure,
     InvocationFailure,
+    InvocationInternalFailure,
     InvocationResult,
     InvocationSchemaMismatch,
     InvocationStaleBinding,
@@ -83,6 +84,11 @@ def _results() -> dict[str, InvocationResult]:
             CORRELATION_ID,
             "unsupported",
             UnsupportedReturnValueError("secret detail"),
+        ),
+        "InvocationInternalFailure": InvocationInternalFailure(
+            CORRELATION_ID,
+            "internal_error",
+            RuntimeError("secret detail"),
         ),
         "InvocationApprovalRequired": InvocationApprovalRequired(CORRELATION_ID, _challenge()),
         "InvocationAuthorizationFailure": InvocationAuthorizationFailure(

@@ -5,9 +5,10 @@ host for one Conducto agent. It owns HTTP/ASGI protocol adaptation, exact
 route matching, Agent Card and mounted endpoint consistency, official A2A SDK
 JSON-RPC dispatch, protocol parsing and standard protocol errors, and task
 repository wiring. It does not own Conducto authorization, approvals, audit,
-model resolution, capability invocation, authentication, production
-hardening, or process hosting; those remain with the runtime, a later story,
-and the application that mounts this adapter.
+model resolution, capability invocation, or authentication. Those concerns
+remain with `Runtime`, `A2ARuntimeHandler`, and the application-owned identity
+resolver. Production hardening and process hosting remain application concerns
+and later roadmap work.
 
 The optional dependency lives in the `a2a-server` extra:
 
@@ -25,13 +26,19 @@ raises `A2ADependencyError` with installation guidance.
 
 ```python
 from conducto.a2a import A2AASGI
+from conducto.a2a import A2ARuntimeHandler
 from conducto.transport.tasks import InMemoryTaskRepository
 
+runtime_handler = A2ARuntimeHandler(
+    runtime=runtime,
+    agent=agent,
+    identity_resolver=resolve_identity,
+)
 app = A2AASGI(
     agent=agent,
     endpoint_url="https://agent.example/a2a",
     task_repository=InMemoryTaskRepository(),
-    request_handler=my_request_handler,
+    request_handler=runtime_handler,
 )
 ```
 
@@ -98,29 +105,103 @@ the same contract rather than leaking an exception to the caller, and a
 successful outcome's status, artifacts, and metadata are persisted onto the
 task atomically before it is returned.
 
-## The request-handler seam
+## Canonical runtime binding
 
 ```python
-from a2a.types.a2a_pb2 import Message
-from conducto.a2a import A2ARequestHandler
-from conducto.core.invocation_results import InvocationResult
+from conducto.a2a import (
+    A2AAuthenticatedIdentity,
+    A2AAuthenticationRequest,
+    A2ARuntimeHandler,
+)
 
 
-class MyRequestHandler(A2ARequestHandler):
-    async def handle_message(
-        self, message: Message, *, task_id: str, context_id: str
-    ) -> InvocationResult:
-        ...
+async def resolve_identity(
+    request: A2AAuthenticationRequest,
+) -> A2AAuthenticatedIdentity:
+    authorization = await authenticate_incoming_request(
+        authorization_header=request.headers.get("authorization"),
+        validator=validator,
+        policy=trust_policy,
+        task_id=request.task_id,
+        correlation_id=request.correlation_id,
+        trace_headers=dict(request.headers),
+    )
+    return A2AAuthenticatedIdentity(authorization)
+
+
+handler = A2ARuntimeHandler(
+    runtime=runtime,
+    agent=agent,
+    identity_resolver=resolve_identity,
+)
 ```
 
 `A2AASGI` never calls a reflected agent's capability methods directly. Every
-accepted message is delegated once to the injected `A2ARequestHandler`, and
-the returned `InvocationResult` is mapped onto the A2A task lifecycle by
-`conducto.a2a.invocation_result_to_task`. Binding this seam to the canonical
-Conducto runtime — so an inbound A2A message is invoked through the same
-governed contract as every other invocation path — is delivered by a later
-story; this story only defines and exercises the seam with a deterministic
-fake implementation.
+accepted message is delegated to the injected `A2ARequestHandler`.
+`A2ARuntimeHandler` is the standard implementation: it resolves the advertised
+skill to an opaque runtime-bound capability binding, revalidates registration,
+generation, schema, lifecycle, health, and binding integrity, and safely renews
+expired server-owned bindings only while the registered target is unchanged and
+active. It then dispatches only through `Runtime.invoke()` or
+`Runtime.resume_approval()`. Argument validation,
+guardrails, required audit delivery, timeout, cancellation, model resolution,
+serialization, and typed results are therefore identical to local invocation.
+
+The identity resolver is injected and may compose with
+`authenticate_incoming_request(...)`; the runtime adapter never acquires or
+validates credentials itself. Raw headers are visible only to that resolver.
+It returns immutable authorization facts, an optional capability allowlist and
+delegation budget, and an optional authenticated approval decision. Request
+metadata is intersected with a resolver-owned capability allowlist. A
+request-supplied budget is used only when the resolver did not establish one,
+and its depth and call counts are capped by handler-owned limits. Transport
+data therefore cannot broaden resolver-owned authority. Transport timeouts are
+also capped by the handler's `max_timeout`.
+
+### Invocation envelope
+
+The message contains exactly one `text/plain` part whose text is JSON:
+
+```json
+{
+  "skillId": "conducto-0123456789abcdef",
+  "arguments": {"value": 7}
+}
+```
+
+Optional message metadata uses the `x-conducto` object:
+
+```json
+{
+  "x-conducto": {
+    "correlationId": "correlation-1",
+    "deadline": 1790114400.0,
+    "timeoutSeconds": 10.0,
+    "modelReference": "runtime-model",
+    "allowedCapabilities": ["echo"],
+    "budget": {"maxDepth": 4, "calls": 8, "tokens": 1000, "cost": 1.0},
+    "metadata": {"classification": "internal"}
+  }
+}
+```
+
+`task_id`, `context_id`, `message_id`, JSON-RPC request ID, correlation ID,
+reference-task lineage, and safe metadata are copied into immutable run
+metadata. Sensitive metadata keys are rejected by `RunConfig`. Scopes and
+principal identity come only from the resolver. Caller deadlines are converted
+to the runtime timeout budget, and model references still pass through normal
+runtime policy and provider resolution.
+
+The handler atomically coalesces duplicate request or message identifiers
+within a hashed authenticated-principal namespace.
+Concurrent replays share the first execution result; conflicting reuse is
+rejected and never executes business logic. Active task cancellation signals
+the same `CancellationState` observed by local runtime invocation.
+
+`conducto.a2a.invocation_result_to_task` maps every public
+`InvocationResult` family to a pinned task state, fixed safe status message,
+reason code, optional success artifact, and credential-free provenance.
+Exceptions, tracebacks, arguments, and failed result values are never emitted.
 
 ## Task repository
 
@@ -132,10 +213,8 @@ for this story.
 
 ## What this story does not cover
 
-- Conducto authorization, approvals, audit, model resolution, or capability
-  invocation — the request-handler seam exists so a later story can bind
-  those without changing this adapter.
-- Bearer/mTLS extraction or authentication.
+- Bearer/mTLS extraction or production authentication implementations; those
+  are supplied through the identity resolver.
 - Production rate limiting, proxy trust, or extensive body/header limits.
 - Liveness/readiness/drain policy.
 - Uvicorn/FastAPI examples or separate-process acceptance; this story is

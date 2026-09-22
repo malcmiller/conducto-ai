@@ -22,6 +22,7 @@ from .agent_card import stable_skill_id
 from .invocation_results import (
     InvocationCancelled,
     InvocationFailure,
+    InvocationInternalFailure,
     InvocationResult,
     InvocationSuccess,
     InvocationTargetNotFound,
@@ -41,7 +42,7 @@ from .logging import (
 )
 from .model_config import ModelReference, ModelRequirement, RunConfig
 from .registration import RegisteredMethod
-from .run_context import DelegationBudget, DelegationFrame, use_run_context
+from .run_context import CancellationState, DelegationBudget, DelegationFrame, use_run_context
 from .runtime import Runtime
 from .serialization import freeze_mapping, serialize_result
 from .telemetry import SPAN_CAPABILITY_INVOKE, start_span
@@ -118,6 +119,7 @@ async def invoke_agent(
     approved_approval_id: str | None = None,
     allowed_capabilities: frozenset[str] | None = None,
     delegation_budget: DelegationBudget | None = None,
+    cancellation: CancellationState | None = None,
 ) -> InvocationResult:
     """Execute one capability through the shared runtime-owned pipeline."""
     if not isinstance(agent, BaseAgent):
@@ -188,6 +190,7 @@ async def invoke_agent(
         allowed_capabilities=allowed_capabilities,
         delegation_budget=delegation_budget,
         delegation_frame=DelegationFrame(agent_id, capability_name),
+        cancellation=cancellation,
     )
     invocation_timeout = context.timeout
     target = registered.callable
@@ -476,9 +479,9 @@ async def invoke_agent(
                 error_category="internal_error",
             )
             invocation_span.set_error("internal_error")
-            return InvocationFailure(
+            return InvocationInternalFailure(
                 correlation_id,
-                "Capability execution failed",
+                "internal_error",
                 error,
                 context.invocation_metadata(),
             )
