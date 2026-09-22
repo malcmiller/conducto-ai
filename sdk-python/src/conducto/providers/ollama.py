@@ -8,6 +8,7 @@ never pulls, deletes, or manages model weights.
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import os
 import uuid
@@ -652,7 +653,7 @@ def _create_official_client(
     """Construct the official Ollama AsyncClient lazily."""
     try:
         require_adapter("ollama")
-        import ollama
+        ollama = importlib.import_module("ollama")
     except AdapterDependencyError:
         raise
     except Exception as error:
