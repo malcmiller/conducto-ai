@@ -4,6 +4,8 @@
 Protocol (MCP) tools. Agent authors keep declaring public behavior once with
 `@a2a_capability`; there is no `@mcp_tool` decorator, no reflection path, and
 no second schema declaration. The internal `@tool` marker is never exported.
+See [Capabilities and tools](./capabilities-and-tools.md) for why a capability
+may be projected as an MCP or model-facing tool without using `@tool`.
 
 The optional dependency lives in the `mcp` extra:
 

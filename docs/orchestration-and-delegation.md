@@ -11,6 +11,10 @@ implementation boundaries. Tool discovery remains in `gateway_tools`;
 provider-native decision parsing remains in `provider`. Neither delegation
 nor a model output owns target authorization.
 
+In this flow, a “tool” is a policy-approved `@a2a_capability` projected into a
+provider-neutral model definition. It is not a method decorated only with
+`@tool`. See [Capabilities and tools](./capabilities-and-tools.md).
+
 ## Direct orchestration
 
 Use `OrchestratorAgent.invoke()` when the application already knows the agent
