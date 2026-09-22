@@ -1,7 +1,7 @@
 # Repository agent instructions
 
 These instructions apply to the entire repository. The additive Python rules in
-`.github/instructions/python.instructions.md` apply throughout this Python-only codebase.
+`.github/copilot-instructions.md` apply throughout this Python-only codebase.
 
 ## Product direction
 
@@ -97,7 +97,7 @@ Additional requirements:
 
 ## Python-specific rules
 
-Follow `.github/instructions/python.instructions.md` in addition to this file. In particular:
+Follow `.github/copilot-instructions.md` in addition to this file. In particular:
 
 - Use Python 3.12 or newer and strict typing.
 - Review and update docstrings after every code change.
