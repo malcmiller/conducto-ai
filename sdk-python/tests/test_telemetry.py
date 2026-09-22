@@ -196,4 +196,5 @@ def test_semantic_fixture_lists_exported_span_names() -> None:
         "conducto.model.complete",
         "conducto.capability.invoke",
         "conducto.delegation.turn",
+        "conducto.registration.server",
     } == names

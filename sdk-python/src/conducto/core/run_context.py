@@ -413,12 +413,20 @@ class RunContext:
 
     @property
     def gateway(self) -> AgentGateway:
-        """Return the local capability gateway scoped to this invocation."""
+        """Return the capability gateway scoped to this invocation."""
         self.require_active()
         if self._runtime is None or self._agent_registry is None:
             raise NoActiveRunContextError("Run context has no local agent gateway")
-        from .gateway import LocalAgentGateway
+        from .gateway import HybridAgentGateway, LocalAgentGateway
 
+        if self._runtime.agent_catalog is not None and self._runtime.gateway_transport is not None:
+            return HybridAgentGateway(
+                self._runtime,
+                self._agent_registry,
+                self._runtime.agent_catalog,
+                self._runtime.gateway_transport,
+                self,
+            )
         return LocalAgentGateway(self._runtime, self._agent_registry, self)
 
     def remaining_timeout(self) -> float | None:

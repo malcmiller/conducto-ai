@@ -1,5 +1,6 @@
 """Deterministic model doubles and provider conformance helpers."""
 
+from .a2a_transport import InMemoryA2ATransport
 from .fake_model import FakeModel, FakeModelRequest
 from .provider_conformance import (
     MANDATORY_FIXTURES,
@@ -18,6 +19,7 @@ __all__ = [
     "ConformanceFixture",
     "FakeModel",
     "FakeModelRequest",
+    "InMemoryA2ATransport",
     "ScriptedProvider",
     "ScriptedProviderCall",
     "assert_provider_conformance",

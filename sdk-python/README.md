@@ -26,6 +26,7 @@ implementation responsibilities:
 - [MCP tool export](docs/mcp-export.md)
 - [SDK reference](docs/sdk-reference.md)
 - [Security and governance](docs/security-and-governance.md)
+- [Deployment registration](docs/deployment-registration.md)
 
 ## Quick start
 

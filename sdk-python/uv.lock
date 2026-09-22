@@ -470,6 +470,9 @@ opentelemetry = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
+registration = [
+    { name = "httpx" },
+]
 test = [
     { name = "pytest" },
 ]
@@ -490,6 +493,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=44.0.0" },
     { name = "httpx", marker = "extra == 'ollama'", specifier = ">=0.28.1,<1.0" },
     { name = "httpx", marker = "extra == 'openai'", specifier = ">=0.28.1,<1.0" },
+    { name = "httpx", marker = "extra == 'registration'", specifier = ">=0.28.1,<1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = "==2.2.0" },
     { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.5" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
@@ -499,7 +503,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
 ]
-provides-extras = ["mcp", "ollama", "openai", "microsoft-foundry", "test", "opentelemetry"]
+provides-extras = ["registration", "mcp", "ollama", "openai", "microsoft-foundry", "test", "opentelemetry"]
 
 [package.metadata.requires-dev]
 dev = [

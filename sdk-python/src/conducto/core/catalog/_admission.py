@@ -15,11 +15,16 @@ ProvenanceVerifier = Callable[[CatalogEntry], bool]
 
 @dataclass(frozen=True, slots=True)
 class PreparedEntry:
-    """Validated card metadata ready for admission under the catalog lock."""
+    """Validated card metadata ready for admission under the catalog lock.
+
+    ``logical_digest`` excludes instance interface URLs and card signatures so
+    otherwise identical replicas can coexist without changing logical metadata.
+    """
 
     card_name: str
     card_digest: str
     capabilities: tuple[CatalogCapabilityDescriptor, ...]
+    logical_digest: str
 
 
 def prepare_entry(entry: CatalogEntry) -> PreparedEntry:
@@ -31,10 +36,17 @@ def prepare_entry(entry: CatalogEntry) -> PreparedEntry:
         raise CatalogValidationError(
             f"Invalid Agent Card for '{entry.agent_id}': {error}"
         ) from error
+    logical_card = dict(raw_card)
+    logical_card.pop("signatures", None)
+    logical_card["supportedInterfaces"] = [
+        {key: value for key, value in interface.items() if key != "url"}
+        for interface in raw_card.get("supportedInterfaces", ())
+    ]
     return PreparedEntry(
         str(raw_card.get("name", "")),
         hashlib.sha256(canonical_json(entry.agent_card).encode()).hexdigest(),
         _capabilities_from_card(raw_card),
+        hashlib.sha256(canonical_json(logical_card).encode()).hexdigest(),
     )
 
 
@@ -95,6 +107,7 @@ def _capabilities_from_card(card: Mapping[str, Any]) -> tuple[CatalogCapabilityD
         descriptors.append(
             CatalogCapabilityDescriptor(
                 capability_id=capability_id,
+                name=str(skill.get("name", capability_id)),
                 description=skill.get("description"),
                 tags=frozenset(skill.get("tags", ())),
                 input_schema=parameter_map.get(capability_id, {}),
