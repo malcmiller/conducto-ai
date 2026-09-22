@@ -55,7 +55,11 @@ def _check_members(path: Path, members: Iterable[str], name: str) -> None:
     """Reject repository, development, cache, or credential files."""
     member_list = list(members)
     has_package = any(
-        member.startswith(REQUIRED_PACKAGE_PREFIX) or "/src/" + REQUIRED_PACKAGE_PREFIX in member
+        member.endswith(".py")
+        and (
+            member.startswith(REQUIRED_PACKAGE_PREFIX)
+            or "/src/" + REQUIRED_PACKAGE_PREFIX in member
+        )
         for member in member_list
     )
     if not has_package:

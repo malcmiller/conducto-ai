@@ -50,7 +50,21 @@ jobs:
           uv run --locked python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             uv run --locked python -c "import tomllib, os, re; version=tomllib.load(open('pyproject.toml','rb'))['project']['version']; tag=os.environ['GITHUB_REF_NAME']; assert re.fullmatch(r'v'+re.escape(version), tag), f'{tag} does not equal v{version}'"
-            test "$(git tag --points-at HEAD | grep -Fx "$GITHUB_REF_NAME" | wc -l)" -eq 1
+            test "$(git rev-parse "$GITHUB_REF^{commit}")" = "$GITHUB_SHA"
+            if [ "${{ github.event_name }}" = "push" ]; then
+              test "${{ github.event.created }}" = "true"
+              test "${{ github.event.forced }}" != "true"
+              test "${{ github.event.before }}" = "0000000000000000000000000000000000000000"
+              release_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+                -H "Authorization: Bearer ${{ github.token }}" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+              if [ "$release_status" = "200" ]; then
+                echo "GitHub Release already exists for $GITHUB_REF_NAME; refusing tag reuse"
+                exit 1
+              fi
+              test "$release_status" = "404"
+            fi
           fi
       - name: Install locked development environment
         run: uv sync --locked --group dev
@@ -118,7 +132,7 @@ jobs:
       - name: Upload exact release bundle
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: conducto-ai-release-${{ steps.version.outputs.version }}
+          name: conducto-ai-release-${{ steps.version.outputs.version }}-${{ steps.digest.outputs.wheel_sha256 }}-${{ steps.digest.outputs.sdist_sha256 }}
           path: |
             sdk-python/dist/*
             sdk-python/release/*
@@ -137,11 +151,11 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: conducto-ai-release-${{ needs.build.outputs.version }}
+          name: conducto-ai-release-${{ needs.build.outputs.version }}-${{ needs.build.outputs.wheel_sha256 }}-${{ needs.build.outputs.sdist_sha256 }}
           path: release-bundle
       - name: Install wheel with only one optional extra
         run: |
-          wheel="$(ls release-bundle/sdk-python/dist/*.whl)"
+          wheel="$(ls release-bundle/dist/*.whl)"
           uv run --no-project --with "$wheel[${{ matrix.extra }}]" python -c "import conducto; print(conducto.__file__)"
           uv run --no-project --with "$wheel[${{ matrix.extra }}]" python sdk-python/scripts/smoke_test.py
 
@@ -176,23 +190,23 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: conducto-ai-release-${{ needs.build.outputs.version }}
+          name: conducto-ai-release-${{ needs.build.outputs.version }}-${{ needs.build.outputs.wheel_sha256 }}-${{ needs.build.outputs.sdist_sha256 }}
           path: release-bundle
       - name: Recheck verified artifact digests
         run: |
-          cd release-bundle/sdk-python/dist
+          cd release-bundle/dist
           sha256sum -c ../release/SHA256SUMS
       - name: Publish exact verified files
         uses: pypa/gh-action-pypi-publish@ed0c5390579b4a5c0b6ed5d3d5e9d48f15f6c6f # release/v1
         with:
-          packages-dir: release-bundle/sdk-python/dist
+          packages-dir: release-bundle/dist
           skip-existing: false
       - name: Attest exact release files
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.2.2
         with:
           subject-path: |
-            release-bundle/sdk-python/dist/*.whl
-            release-bundle/sdk-python/dist/*.tar.gz
+            release-bundle/dist/*.whl
+            release-bundle/dist/*.tar.gz
 
   github-release:
     name: Create GitHub Release
@@ -204,7 +218,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          name: conducto-ai-release-${{ needs.build.outputs.version }}
+          name: conducto-ai-release-${{ needs.build.outputs.version }}-${{ needs.build.outputs.wheel_sha256 }}-${{ needs.build.outputs.sdist_sha256 }}
           path: release-bundle
       - name: Create release with generated notes
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
@@ -213,5 +227,5 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(needs.build.outputs.version, '-') }}
           files: |
-            release-bundle/sdk-python/dist/*
-            release-bundle/sdk-python/release/*
+            release-bundle/dist/*
+            release-bundle/release/*
