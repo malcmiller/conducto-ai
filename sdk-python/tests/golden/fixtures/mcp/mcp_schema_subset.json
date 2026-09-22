@@ -1,0 +1,258 @@
+{
+  "supported": [
+    {
+      "case": "object_with_optional_field_and_bounds",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "quantity": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "name",
+          "quantity"
+        ]
+      },
+      "projection": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "quantity": {
+            "maximum": 10,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "quantity"
+        ]
+      }
+    },
+    {
+      "case": "array_of_referenced_objects_and_enum",
+      "schema": {
+        "$defs": {
+          "Item": {
+            "type": "object",
+            "properties": {
+              "sku": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sku"
+            ]
+          }
+        },
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/Item"
+            },
+            "minItems": 1,
+            "maxItems": 5
+          },
+          "colour": {
+            "type": "string",
+            "enum": [
+              "red",
+              "blue"
+            ]
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "items",
+          "colour"
+        ]
+      },
+      "projection": {
+        "properties": {
+          "colour": {
+            "enum": [
+              "red",
+              "blue"
+            ],
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "properties": {
+                "sku": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sku"
+              ],
+              "type": "object"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "type": "array"
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "items",
+          "colour"
+        ],
+        "type": "object"
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "case": "unsupported_keyword",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "allOf": [
+              {
+                "type": "string"
+              }
+            ]
+          }
+        }
+      },
+      "error": "unsupported JSON Schema keyword"
+    },
+    {
+      "case": "recursive_reference",
+      "schema": {
+        "$defs": {
+          "Node": {
+            "type": "object",
+            "properties": {
+              "child": {
+                "$ref": "#/$defs/Node"
+              }
+            }
+          }
+        },
+        "type": "object",
+        "properties": {
+          "root": {
+            "$ref": "#/$defs/Node"
+          }
+        }
+      },
+      "error": "recursive schema reference"
+    },
+    {
+      "case": "ambiguous_union",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ]
+          }
+        }
+      },
+      "error": "ambiguous union types"
+    },
+    {
+      "case": "non_string_mapping_keys",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "counters": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "type": "integer"
+            }
+          }
+        }
+      },
+      "error": "mapping keys must be strings"
+    },
+    {
+      "case": "unresolved_reference",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "$ref": "#/$defs/Missing"
+          }
+        }
+      },
+      "error": "unresolved schema reference"
+    },
+    {
+      "case": "non_object_root",
+      "schema": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "error": "MCP input schemas must describe an object"
+    }
+  ]
+}

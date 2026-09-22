@@ -22,6 +22,33 @@ import sys
 from pathlib import Path
 
 
+def _smoke_mcp_stdio() -> str:
+    """Drive the MCP example server with an official SDK stdio client."""
+    try:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+    except ImportError:
+        return "MCP stdio smoke skipped: install the 'mcp' extra to exercise it."
+
+    example = Path(__file__).resolve().parents[1] / "examples" / "mcp_stdio_server.py"
+    parameters = StdioServerParameters(command=sys.executable, args=[str(example)])
+
+    async def exercise() -> None:
+        async with stdio_client(parameters) as (read_stream, write_stream):
+            async with ClientSession(read_stream, write_stream) as session:
+                await session.initialize()
+                listed = await session.list_tools()
+                assert [tool.name for tool in listed.tools] == ["weatheragent__temperature"]
+                success = await session.call_tool("weatheragent__temperature", {"city": "Seattle"})
+                assert success.is_error is False
+                assert success.structured_content == {"result": {"celsius": 21, "city": "Seattle"}}
+                invalid = await session.call_tool("weatheragent__temperature", {"city": 7})
+                assert invalid.is_error is True
+
+    asyncio.run(exercise())
+    return "MCP stdio smoke passed: official SDK client listed and called one exported tool."
+
+
 def main() -> int:
     import conducto
     from conducto import (
@@ -116,6 +143,7 @@ def main() -> int:
     chaining = runpy.run_path(str(example))
     asyncio.run(chaining["main"]())
 
+    print(_smoke_mcp_stdio())
     print("Smoke test passed: installed conducto-ai wheel routed local and chained flows.")
     return 0
 

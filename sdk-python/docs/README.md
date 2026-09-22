@@ -31,6 +31,7 @@ deployment, roadmap, and automation documentation remains in
 ## Focused guides
 
 - [Agent chaining](./agent-chaining.md)
+- [MCP tool export](./mcp-export.md)
 - [Provider registration](./provider-registration.md)
 - [Security and governance](./security-and-governance.md)
 - [Logging](./logging.md)

@@ -22,6 +22,7 @@ implementation responsibilities:
 - [Orchestration and delegation](docs/orchestration-and-delegation.md)
 - [Providers and models](docs/providers-and-models.md)
 - [Runtime and invocation](docs/runtime-and-invocation.md)
+- [MCP tool export](docs/mcp-export.md)
 - [SDK reference](docs/sdk-reference.md)
 - [Security and governance](docs/security-and-governance.md)
 
@@ -48,6 +49,19 @@ quickstart result: agent=InvoiceAgent capability=classify_invoice value={"amount
 See the detailed, copy/pasteable guide in
 [`docs/quickstart.md`](docs/quickstart.md), including Windows PowerShell
 commands, package build steps, smoke testing, and troubleshooting.
+
+## Optional MCP tool export
+
+Projecting existing `@a2a_capability` declarations into MCP stdio tools
+requires the optional `mcp` extra:
+
+```bash
+uv sync --locked --extra mcp --group dev
+uv run python examples/mcp_stdio_server.py
+```
+
+Importing `conducto` never imports the MCP SDK. See
+[MCP tool export](docs/mcp-export.md).
 
 ## Public API example
 
