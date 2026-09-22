@@ -19,7 +19,8 @@ deployment, roadmap, and automation documentation remains in
 - [Agents and registration](./agents-and-registration.md) — decorators,
   reflection, schemas, Agent Cards, and the local `AgentRegistry`.
 - [Gateway and discovery](./gateway-and-discovery.md) — policy-filtered
-  discovery, immutable snapshots, opaque bindings, lifecycle, and invocation.
+  discovery across local and cataloged remote agents, immutable snapshots,
+  opaque bindings, lifecycle, and invocation.
 - [Remote-agent catalog](./remote-agent-catalog.md) — governed catalog
   provider contract, capability indexing, lease-based instance health, and
   quarantine, disablement, revocation, and removal lifecycle transitions.

@@ -62,7 +62,13 @@ from .runtime_invocation import (
 
 if TYPE_CHECKING:
     from .agent import BaseAgent
-    from .gateway import GatewayPolicy
+    from .catalog import AgentCatalog, DeploymentType
+    from .gateway import (
+        GatewayPolicy,
+        GatewayRemotePolicy,
+        GatewaySelectionPolicy,
+        RemoteGatewayTransport,
+    )
     from .invocation_results import InvocationResult
     from .registry import AgentRegistry
 
@@ -81,10 +87,16 @@ class Runtime:
         security_pipeline: SecurityPipeline | None = None,
         agent_registry: AgentRegistry | None = None,
         gateway_policy: GatewayPolicy | None = None,
+        agent_catalog: AgentCatalog | None = None,
+        gateway_transport: RemoteGatewayTransport | None = None,
+        gateway_remote_policy: GatewayRemotePolicy | None = None,
+        gateway_allowed_deployments: frozenset[DeploymentType] | None = None,
+        gateway_selection_policy: GatewaySelectionPolicy | None = None,
         gateway_preferred_agents: Mapping[str, str] | None = None,
         gateway_binding_ttl: float = 300.0,
         gateway_max_results: int = 20,
         gateway_max_serialized_bytes: int = 64 * 1024,
+        gateway_clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._provider_registry = provider_registry or ProviderRegistry()
         self._model_resolver = ModelResolver(self._provider_registry)
@@ -97,12 +109,30 @@ class Runtime:
             agent_registry = AgentRegistry()
         self.agent_registry = agent_registry
         self.gateway_policy = gateway_policy
+        if (agent_catalog is None) != (gateway_transport is None):
+            raise ValueError("agent_catalog and gateway_transport must be configured together")
+        self.agent_catalog = agent_catalog
+        self.gateway_transport = gateway_transport
+        self.gateway_remote_policy = gateway_remote_policy
+        self.gateway_allowed_deployments = (
+            frozenset(gateway_allowed_deployments)
+            if gateway_allowed_deployments is not None
+            else None
+        )
+        from .gateway import GatewaySelectionPolicy
+
+        self.gateway_selection_policy = gateway_selection_policy or GatewaySelectionPolicy()
         self.gateway_preferred_agents = dict(gateway_preferred_agents or {})
         self.gateway_binding_ttl = gateway_binding_ttl
         self.gateway_max_results = gateway_max_results
         self.gateway_max_serialized_bytes = gateway_max_serialized_bytes
+        self.gateway_clock = gateway_clock
         self._gateway_runtime_id = str(uuid.uuid4())
         self._gateway_secret = os.urandom(32)
+        self._gateway_binding_state: dict[str, object] = {}
+        self._gateway_binding_state_lock = threading.Lock()
+        self._gateway_selection_counters: dict[str, int] = {}
+        self._gateway_selection_lock = threading.Lock()
         self._execution_locks: dict[tuple[int, str], threading.Lock] = {}
         self._execution_locks_guard = threading.Lock()
         self._shutdown_task: asyncio.Task[ProviderCleanupReport] | None = None
@@ -112,9 +142,26 @@ class Runtime:
         if self._provider_registry.closed:
             raise RuntimeClosedError("Runtime is shut down")
 
-    def gateway_binding_material(self) -> tuple[str, bytes]:
+    def gateway_binding_material(
+        self,
+    ) -> tuple[str, bytes, dict[str, object], threading.Lock, Callable[[], float]]:
         """Return the runtime-scoped material used to issue gateway bindings."""
-        return self._gateway_runtime_id, self._gateway_secret
+        return (
+            self._gateway_runtime_id,
+            self._gateway_secret,
+            self._gateway_binding_state,
+            self._gateway_binding_state_lock,
+            self.gateway_clock,
+        )
+
+    def next_gateway_selection_index(self, key: str, size: int) -> int:
+        """Return the next deterministic round-robin slot for a gateway key."""
+        if size < 1:
+            raise ValueError("size must be positive")
+        with self._gateway_selection_lock:
+            current = self._gateway_selection_counters.get(key, 0)
+            self._gateway_selection_counters[key] = current + 1
+            return current % size
 
     async def aclose(
         self,
