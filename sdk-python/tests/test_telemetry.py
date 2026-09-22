@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from conducto import (
+    AgentRegistry,
     BaseAgent,
+    DiscoveryQuery,
     Principal,
     Runtime,
     a2a_agent,
@@ -19,6 +21,7 @@ from conducto import (
     require_scope,
     start_span,
 )
+from conducto.core.runtime import use_run_context
 from conducto.core.telemetry import (
     SPAN_CAPABILITY_INVOKE,
     SPAN_MCP_SERVER,
@@ -146,6 +149,38 @@ def test_w3c_remote_context_is_connected_and_invalid_context_is_marked() -> None
     assert valid_server.parent.span_id == parent.context.span_id
     assert invalid_server.context.trace_id != parent.context.trace_id
     assert invalid_server.attributes["conducto.invalid_remote_context"] is True
+
+
+def test_gateway_discovery_and_invocation_emit_spans() -> None:
+    """Local gateway discovery and invocation use stable operation names."""
+    tracing = configure_in_memory_tracing()
+    tracing.exporter.clear()
+    agent = TelemetryAgent()
+    registry = AgentRegistry()
+    registry.register(agent)
+    runtime = Runtime(agent_registry=registry)
+    context = runtime.create_run_context(
+        agent_id="caller",
+        authorization=_authorization(),
+        correlation_id="correlation-1",
+        allowed_capabilities=frozenset({"echo"}),
+    )
+
+    async def exercise() -> None:
+        with use_run_context(context):
+            discovery = await context.gateway.discover(
+                DiscoveryQuery(capability_ids=frozenset({"echo"}))
+            )
+            assert len(discovery) == 1
+            result = await context.gateway.invoke(discovery[0].binding, {"value": "safe"})
+            assert getattr(result, "value", None) == "safe"
+
+    asyncio.run(exercise())
+
+    names = [span.name for span in tracing.exporter.get_finished_spans()]
+    assert "conducto.gateway.discover" in names
+    assert "conducto.gateway.invoke" in names
+    assert "conducto.capability.invoke" in names
 
 
 def test_semantic_fixture_lists_exported_span_names() -> None:
