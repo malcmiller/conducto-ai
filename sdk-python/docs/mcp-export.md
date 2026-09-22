@@ -121,6 +121,62 @@ releases the owned SDK server. The embedding application owns process launch,
 standard-stream plumbing, principal selection, and supervision; see
 [`examples/mcp_stdio_server.py`](../examples/mcp_stdio_server.py).
 
-Streamable HTTP, network authentication, MCP resources/prompts/sampling, a
-general MCP client, and dynamic mutation of a running server's tool list are
-out of scope here.
+## Authenticated Streamable HTTP
+
+`McpHttpServer` provides an ASGI endpoint backed by the pinned official MCP
+SDK's Streamable HTTP session manager. The embedding application owns the ASGI
+server, TLS/mTLS termination, reverse proxy, listener, and process
+supervision. It must provide an authentication resolver that turns *already
+validated* HTTP identity material into an immutable Conducto
+`AuthorizationContext`; the adapter does not validate bearer tokens or
+certificate chains.
+
+```python
+from conducto.mcp import McpHttpLimits, McpHttpServer
+from conducto.security import AuthorizationContext, Principal
+
+
+def resolve_identity(request):
+    # Validate credentials at the application boundary before creating this
+    # context. Do not copy raw tokens or certificates into claims.
+    return AuthorizationContext(
+        principal=Principal(
+            subject_id="validated-subject",
+            issuer="https://issuer.example",
+            audience="conducto",
+            scopes=frozenset({"weather.read"}),
+        ),
+        task_id="http-session",
+        correlation_id="http-session",
+        policy_metadata={"environment": "production"},
+    )
+
+
+app = McpHttpServer(
+    exporter=exporter,
+    authorization_resolver=resolve_identity,
+    allowed_hosts=("mcp.example.com",),
+    allowed_origins=("https://console.example.com",),
+    trusted_proxy_hosts=frozenset({"10.0.0.10"}),
+    limits=McpHttpLimits(max_sessions=128, max_sessions_per_principal=4),
+).asgi_app
+```
+
+Use an HTTPS listener and configure the ASGI server's lifespan support. Only
+list the reverse proxies that terminate TLS in `trusted_proxy_hosts`; forwarded
+headers from any other peer are rejected. Configure exact public `Host` and
+browser `Origin` values—wildcards and credentialed cross-origin reflection are
+not permitted. The resolver runs on every request, and a session is rejected if
+the current identity or policy metadata differs from the identity that
+initialized it.
+
+Sessions have opaque SDK-generated identifiers, are bounded globally and per
+principal, and expire after `session_idle_timeout`. Tool calls retain no result
+body for idempotency: reuse of a JSON-RPC request identifier is rejected before
+business logic is run. `drain()` rejects new HTTP work; `aclose()` is
+idempotent and cancels accepted calls. The adapter only returns the existing
+MCP result mapping, so tool calls continue through the same exporter and
+`Runtime.invoke()` path as stdio.
+
+MCP resources/prompts/sampling, a general MCP client, and dynamic mutation of
+a running server's tool list remain out of scope.
