@@ -17,6 +17,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+mcp = [
+    "mcp==2.2.0",
+]
 ollama = [
     "ollama>=0.5",
 ]
@@ -33,7 +36,7 @@ test = [
 
 [dependency-groups]
 dev = [
-    "conducto-ai[test]",
+    "conducto-ai[mcp,test]",
     "mypy>=1.14",
     "ruff>=0.9",
     "types-protobuf==7.35.1.20260906",

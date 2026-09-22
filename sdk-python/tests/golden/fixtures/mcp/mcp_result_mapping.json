@@ -1,0 +1,129 @@
+{
+  "profile": {
+    "extra": "mcp",
+    "package": "mcp",
+    "version": "2.2.0",
+    "protocolVersion": "2026-07-28",
+    "resultProperty": "result",
+    "toolNameSeparator": "__"
+  },
+  "correlationId": "correlation-1",
+  "outcomes": [
+    {
+      "result": "InvocationSuccess",
+      "isError": false,
+      "reasonCode": "ok",
+      "message": "{\"result\": {\"total\": 12}}",
+      "structuredContent": {
+        "result": {
+          "total": 12
+        }
+      }
+    },
+    {
+      "result": "InvocationValidationFailure",
+      "isError": true,
+      "reasonCode": "invalid_arguments",
+      "message": "The tool arguments did not match the capability schema.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationTargetNotFound",
+      "isError": true,
+      "reasonCode": "target_not_found",
+      "message": "The requested capability is not available.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationTimeout",
+      "isError": true,
+      "reasonCode": "timeout",
+      "message": "The capability exceeded its execution deadline.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationCancelled",
+      "isError": true,
+      "reasonCode": "cancelled",
+      "message": "The capability invocation was cancelled.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationFailure",
+      "isError": true,
+      "reasonCode": "capability_failure",
+      "message": "The capability failed during execution.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationFailure.UnsupportedReturnValueError",
+      "isError": true,
+      "reasonCode": "unsupported_result",
+      "message": "The capability result cannot be represented as MCP content.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationApprovalRequired",
+      "isError": true,
+      "reasonCode": "approval_required",
+      "message": "The capability requires approval before it can execute. Approval reference: approval-1.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationAuthorizationFailure",
+      "isError": true,
+      "reasonCode": "authorization_denied",
+      "message": "The caller is not authorized to invoke this capability.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationAuditFailure",
+      "isError": true,
+      "reasonCode": "audit_unavailable",
+      "message": "Mandatory audit evidence could not be recorded.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationBindingFailure",
+      "isError": true,
+      "reasonCode": "binding_rejected",
+      "message": "The capability binding was rejected.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationStaleBinding",
+      "isError": true,
+      "reasonCode": "binding_stale",
+      "message": "The capability binding is no longer valid.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationTargetUnavailable",
+      "isError": true,
+      "reasonCode": "target_unavailable",
+      "message": "The capability target is not currently available.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationSchemaMismatch",
+      "isError": true,
+      "reasonCode": "schema_mismatch",
+      "message": "The capability schema changed after the tool was exported.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationBudgetExhausted",
+      "isError": true,
+      "reasonCode": "budget_exhausted",
+      "message": "The invocation budget for this capability is exhausted.",
+      "structuredContent": null
+    },
+    {
+      "result": "InvocationDelegationFailure",
+      "isError": true,
+      "reasonCode": "delegation_rejected",
+      "message": "The delegation request was rejected.",
+      "structuredContent": null
+    }
+  ]
+}
