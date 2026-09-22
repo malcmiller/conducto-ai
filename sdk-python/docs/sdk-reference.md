@@ -24,6 +24,12 @@ The package root exports the stable public API from `conducto`:
 
 For consumers, the package root is the supported import surface.
 
+MCP export types are published from `conducto.mcp` instead of the package root
+so that importing `conducto` never requires the optional `mcp` extra:
+`McpExportPolicy`, `McpExportRule`, `McpCapabilityQuery`, `McpToolExporter`,
+`McpToolDefinition`, `McpToolOutcome`, `McpStdioServer`, and the typed
+`McpExportError` hierarchy. See [MCP tool export](./mcp-export.md).
+
 ## `@a2a_agent`
 
 Declared on a class to mark it as an A2A-capable agent.
@@ -250,3 +256,4 @@ components cooperate and where ownership boundaries sit:
 - [Orchestration and delegation](./orchestration-and-delegation.md)
 - [Providers and models](./providers-and-models.md)
 - [Runtime and invocation](./runtime-and-invocation.md)
+- [MCP tool export](./mcp-export.md)

@@ -96,7 +96,10 @@ uv run --no-project --with "$wheel" python scripts\smoke_test.py
 ```
 
 The smoke test fails if `conducto` imports from `sdk-python/src` instead of the
-installed wheel.
+installed wheel. Install the wheel with the optional `mcp` extra
+(`--with "$wheel[mcp]"`) to also drive the exported MCP stdio tools with an
+official MCP SDK client; without the extra that section reports that it was
+skipped.
 
 ## What the example demonstrates
 

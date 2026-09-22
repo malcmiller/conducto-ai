@@ -238,6 +238,7 @@ The communication model in this repository is encoded in the core implementation
 - `sdk-python/src/conducto/core/agent.py` reflects that metadata into A2A cards and parameter schemas
 - `sdk-python/src/conducto/core/orchestrator.py` routes and invokes local capabilities
 - `sdk-python/src/conducto/core/provider.py` defines model-provider contracts and structured routing outputs
+- `sdk-python/src/conducto/mcp/` projects allowlisted capabilities into MCP stdio tools without a second metadata system
 
 Together they form the communication backbone for local orchestration, remote service adoption, and enterprise model plumbing.
 

@@ -40,6 +40,7 @@ flowchart TD
 | `ModelResolver` | Call/run/agent/runtime precedence, policy, provider capability checks | Provider execution |
 | `ModelGateway` | Invocation-scoped provider calls, deadlines, cancellation, typed output, usage | Long-lived provider ownership |
 | `run_delegation` | Bounded model/tool loop and terminal outcome | Discovery authority or direct registry access |
+| `conducto.mcp` | MCP export policy, deterministic tool naming, schema projection, result mapping, stdio lifecycle | Capability declaration, validation, authorization, MCP framing |
 
 The similarly named registries solve different problems:
 `AgentRegistry` indexes callable agents and capabilities, while
@@ -77,6 +78,20 @@ The similarly named registries solve different problems:
    `run_delegation()` validates one terminal response or one tool call.
 4. Any selected capability still executes through the gateway/runtime
    boundaries rather than directly from model output.
+
+### MCP tool export
+
+1. An application configures `McpToolExporter` with a `Runtime`, agents or a
+   registry, and a default-deny `McpExportPolicy`.
+2. The exporter projects allowlisted capability descriptors into immutable MCP
+   tool definitions at construction time, rejecting collisions, bound
+   violations, and unsupported schemas.
+3. `McpStdioServer` publishes those definitions through the official MCP Python
+   SDK for a configured stdio principal.
+4. Each `tools/call` enters the same `Runtime.invoke()` path as a direct or
+   gateway call, and the typed result is mapped to an MCP tool result.
+
+See [MCP tool export](./mcp-export.md).
 
 ## State and concurrency
 

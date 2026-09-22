@@ -23,6 +23,19 @@ distributed locking, authentication, and transport integration. Approval
 payloads intentionally do not contain credentials, raw tokens, claims,
 protected arguments, or tracebacks.
 
+## MCP stdio identity
+
+MCP export never relaxes these rules. An `McpStdioServer` requires an explicit
+`Principal` or principal resolver, so there is no anonymous privileged default
+and protected capabilities fail closed without identity. `tools/list` returns
+only policy-admitted capabilities eligible for that principal, every
+`tools/call` runs through `Runtime.invoke()` with the same authorization,
+approval, and audit behavior, and approval-required results stay non-success
+with a display-safe challenge reference. Mapped MCP failures carry fixed safe
+messages and reason codes, never exceptions, tracebacks, credentials,
+arguments, bindings, or internal endpoints. See
+[MCP tool export](./mcp-export.md).
+
 ## Portable approval tokens
 
 Approval decisions can cross process boundaries as compact RFC 7515 JWS tokens

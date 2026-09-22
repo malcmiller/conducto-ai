@@ -11,8 +11,7 @@ principal selection, and process supervision.
 import asyncio
 
 from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
-from conducto.mcp import McpExportPolicy, McpExportRule, McpToolExporter
-from conducto.mcp.server import McpStdioServer
+from conducto.mcp import McpExportPolicy, McpExportRule, McpStdioServer, McpToolExporter
 from conducto.security import Principal
 
 
