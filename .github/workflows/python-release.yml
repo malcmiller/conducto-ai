@@ -1,0 +1,217 @@
+name: Python release
+
+on:
+  pull_request:
+    paths:
+      - "sdk-python/**"
+      - ".github/workflows/python-release.yml"
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish the selected protected v<version> tag (otherwise rehearse only)"
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-release-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+    working-directory: sdk-python
+
+jobs:
+  validate:
+    name: Validate release commit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout complete history
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: sdk-python/uv.lock
+          python-version: "3.12"
+      - name: Verify clean checkout and exact tag version
+        run: |
+          test -z "$(git status --porcelain)"
+          uv run --locked python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            uv run --locked python -c "import tomllib, os, re; version=tomllib.load(open('pyproject.toml','rb'))['project']['version']; tag=os.environ['GITHUB_REF_NAME']; assert re.fullmatch(r'v'+re.escape(version), tag), f'{tag} does not equal v{version}'"
+            test "$(git tag --points-at HEAD | grep -Fx "$GITHUB_REF_NAME" | wc -l)" -eq 1
+          fi
+      - name: Install locked development environment
+        run: uv sync --locked --group dev
+      - name: Format, lint, type-check, and test
+        run: |
+          uv run ruff format .
+          git diff --exit-code
+          uv run ruff format --check .
+          uv run ruff check .
+          uv run mypy src examples scripts tests/acceptance
+          uv run pytest
+
+  build:
+    name: Build and inspect immutable artifacts
+    needs: validate
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      wheel: ${{ steps.files.outputs.wheel }}
+      sdist: ${{ steps.files.outputs.sdist }}
+      wheel_sha256: ${{ steps.digest.outputs.wheel_sha256 }}
+      sdist_sha256: ${{ steps.digest.outputs.sdist_sha256 }}
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+        with:
+          fetch-depth: 0
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          python-version: "3.12"
+      - name: Build exactly once
+        run: |
+          rm -rf dist release
+          uv build
+      - name: Inspect package contents and generate supply-chain files
+        run: |
+          wheel="$(ls dist/*.whl)"
+          sdist="$(ls dist/*.tar.gz)"
+          uv run --no-project python scripts/release_verify.py --wheel "$wheel" --sdist "$sdist" --output-dir release
+      - name: Verify installed wheel quick start and smoke test
+        run: |
+          wheel="$(ls dist/*.whl)"
+          uv run --no-project --with "$wheel" python examples/quickstart.py
+          uv run --no-project --with "$wheel" python scripts/smoke_test.py
+      - name: Verify sdist rebuilds the same version
+        run: |
+          mkdir isolated
+          tar -xzf dist/*.tar.gz -C isolated
+          (cd isolated/* && uv build --out-dir "$GITHUB_WORKSPACE/rebuilt")
+          test "$(ls rebuilt/*.whl | xargs -n1 basename | sort)" = "$(ls dist/*.whl | xargs -n1 basename | sort)"
+      - name: Record immutable filenames and digests
+        id: files
+        run: |
+          echo "wheel=$(basename "$(ls dist/*.whl)")" >> "$GITHUB_OUTPUT"
+          echo "sdist=$(basename "$(ls dist/*.tar.gz)")" >> "$GITHUB_OUTPUT"
+      - name: Record digests
+        id: digest
+        run: |
+          echo "wheel_sha256=$(sha256sum dist/*.whl | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "sdist_sha256=$(sha256sum dist/*.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Read canonical version
+        id: version
+        run: echo "version=$(uv run --no-project python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
+      - name: Upload exact release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: conducto-ai-release-${{ steps.version.outputs.version }}
+          path: |
+            sdk-python/dist/*
+            sdk-python/release/*
+          if-no-files-found: error
+          retention-days: 90
+
+  optional-extras:
+    name: Installed extra (${{ matrix.extra }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        extra: [mcp, opentelemetry, ollama, openai, microsoft-foundry, test]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: conducto-ai-release-${{ needs.build.outputs.version }}
+          path: release-bundle
+      - name: Install wheel with only one optional extra
+        run: |
+          wheel="$(ls release-bundle/sdk-python/dist/*.whl)"
+          uv run --no-project --with "$wheel[${{ matrix.extra }}]" python -c "import conducto; print(conducto.__file__)"
+          uv run --no-project --with "$wheel[${{ matrix.extra }}]" python sdk-python/scripts/smoke_test.py
+
+  prepublish:
+    name: Check PyPI version availability
+    needs: [build, optional-extras]
+    if: >-
+      github.ref_type == 'tag' &&
+      (github.event_name == 'push' || inputs.publish == true)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Refuse an existing immutable PyPI version
+        run: |
+          status="$(curl --silent --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/conducto-ai/${{ needs.build.outputs.version }}/json")"
+          test "$status" = "404" || { echo "conducto-ai ${{ needs.build.outputs.version }} already exists or PyPI is unavailable ($status)"; exit 1; }
+
+  publish:
+    name: Publish through PyPI Trusted Publishing
+    needs: [build, optional-extras, prepublish]
+    if: >-
+      github.ref_type == 'tag' &&
+      (github.event_name == 'push' || inputs.publish == true)
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/conducto-ai/
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: conducto-ai-release-${{ needs.build.outputs.version }}
+          path: release-bundle
+      - name: Recheck verified artifact digests
+        run: |
+          cd release-bundle/sdk-python/dist
+          sha256sum -c ../release/SHA256SUMS
+      - name: Publish exact verified files
+        uses: pypa/gh-action-pypi-publish@ed0c5390579b4a5c0b6ed5d3d5e9d48f15f6c6f # release/v1
+        with:
+          packages-dir: release-bundle/sdk-python/dist
+          skip-existing: false
+      - name: Attest exact release files
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.2.2
+        with:
+          subject-path: |
+            release-bundle/sdk-python/dist/*.whl
+            release-bundle/sdk-python/dist/*.tar.gz
+
+  github-release:
+    name: Create GitHub Release
+    needs: [build, publish]
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: conducto-ai-release-${{ needs.build.outputs.version }}
+          path: release-bundle
+      - name: Create release with generated notes
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
+        with:
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.build.outputs.version, '-') }}
+          files: |
+            release-bundle/sdk-python/dist/*
+            release-bundle/sdk-python/release/*
