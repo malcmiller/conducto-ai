@@ -114,7 +114,7 @@ jobs:
         run: |
           mkdir isolated
           tar -xzf dist/*.tar.gz -C isolated
-          (cd isolated/* && uv build --out-dir "$GITHUB_WORKSPACE/rebuilt")
+          (cd isolated/* && uv build --out-dir "$GITHUB_WORKSPACE/sdk-python/rebuilt")
           test "$(ls rebuilt/*.whl | xargs -n1 basename | sort)" = "$(ls dist/*.whl | xargs -n1 basename | sort)"
       - name: Record immutable filenames and digests
         id: files
