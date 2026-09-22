@@ -16,6 +16,17 @@
       "url": "https://legacy.conducto.test/a2a",
       "version": "1.0.0"
     },
+    "nonTextPartMessage": {
+      "messageId": "msg-data",
+      "parts": [
+        {
+          "data": {
+            "key": "value"
+          }
+        }
+      ],
+      "role": "ROLE_USER"
+    },
     "overLimitArtifactParts": {
       "artifacts": [
         {
@@ -753,7 +764,7 @@
       ],
       "role": "ROLE_USER"
     },
-    "unsupportedMethod": "message/stream"
+    "unsupportedMethod": "SendStreamingMessage"
   },
   "positive": {
     "agentCard": {
@@ -1340,10 +1351,10 @@
       "text/plain"
     ],
     "supportedMethods": [
-      "message/send",
-      "tasks/get",
-      "tasks/list",
-      "tasks/cancel"
+      "SendMessage",
+      "GetTask",
+      "ListTasks",
+      "CancelTask"
     ]
   }
 }

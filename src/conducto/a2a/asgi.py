@@ -174,7 +174,12 @@ class _ConductoRequestHandler(RequestHandler):
                 raise UnsupportedOperationError(
                     f"Task {task_id} is in terminal state {TaskState.Name(existing.status.state)}"
                 )
-            context_id = message.context_id or existing.context_id
+            if message.context_id and message.context_id != existing.context_id:
+                raise InvalidParamsError(
+                    f"context_id {message.context_id!r} does not match the stored "
+                    f"context {existing.context_id!r} for task {task_id}"
+                )
+            context_id = existing.context_id
             current_state = existing.status.state
         else:
             context_id = message.context_id or self._id_generator.generate(IDGeneratorContext())
@@ -188,6 +193,21 @@ class _ConductoRequestHandler(RequestHandler):
                 raise InvalidRequestError(str(exc)) from exc
             current_state = TaskState.TASK_STATE_SUBMITTED
 
+        # Atomically claim the task before invoking the handler seam so two
+        # concurrent continuations of the same task can never both observe the
+        # same non-terminal state and both invoke the handler: the loser of the
+        # race below fails fast with a typed error instead of racing to persist.
+        try:
+            claimed = await self._task_repository.compare_and_transition(
+                task_id, current_state, TaskState.TASK_STATE_WORKING
+            )
+        except RemoteTaskError as exc:
+            text = str(exc)
+            if "not found" in text:
+                raise TaskNotFoundError(text) from exc
+            raise InvalidRequestError(text) from exc
+        current_state = TaskState.TASK_STATE_WORKING
+
         try:
             result = await self._request_handler.handle_message(
                 message, task_id=task_id, context_id=context_id
@@ -199,19 +219,22 @@ class _ConductoRequestHandler(RequestHandler):
                 )
             raise InternalError("A2A request handler failed") from exc
 
-        final_task = invocation_result_to_task(result, task_id=task_id, context_id=context_id)
-        final_state = final_task.status.state
-        if final_state != current_state:
-            try:
-                await self._task_repository.compare_and_transition(
-                    task_id, current_state, final_state
-                )
-            except RemoteTaskError as exc:
-                text = str(exc)
-                if "not found" in text:
-                    raise TaskNotFoundError(text) from exc
-                raise InternalError(text) from exc
-        return final_task
+        outcome = invocation_result_to_task(result, task_id=task_id, context_id=context_id)
+        final_task = Task()
+        final_task.CopyFrom(claimed)
+        final_task.status.CopyFrom(outcome.status)
+        final_task.artifacts.extend(outcome.artifacts)
+        if len(outcome.metadata):
+            final_task.metadata.update(dict(outcome.metadata.items()))
+        try:
+            return await self._task_repository.compare_and_update(
+                task_id, current_state, final_task
+            )
+        except RemoteTaskError as exc:
+            text = str(exc)
+            if "not found" in text:
+                raise TaskNotFoundError(text) from exc
+            raise InternalError(text) from exc
 
     async def on_message_send_stream(
         self, params: SendMessageRequest, context: ServerCallContext

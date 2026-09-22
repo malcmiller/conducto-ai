@@ -64,28 +64,39 @@ The pinned profile's non-streaming operations are supported end to end
 against the injected `TaskRepository`
 (`conducto.transport.tasks.TaskRepository`):
 
-- `message/send` creates a new task (or continues an existing one when the
+- `SendMessage` creates a new task (or continues an existing one when the
   message carries a `task_id`) and invokes the request-handler seam exactly
   once per accepted message.
-- `tasks/get` returns a persisted task snapshot.
-- `tasks/list` returns one deterministic page, honoring `page_size` and
+- `GetTask` returns a persisted task snapshot.
+- `ListTasks` returns one deterministic page, honoring `page_size` and
   `page_token` exactly as implemented by the repository.
-- `tasks/cancel` cancels a non-terminal task through the repository.
+- `CancelTask` cancels a non-terminal task through the repository.
+
+A2A 1.0 renamed the 0.3 slash-style JSON-RPC method names (for example
+`message/send`) to gRPC-style service method names (for example
+`SendMessage`); the pinned profile and this adapter use only the 1.0 names,
+matching the official SDK's own dispatcher and client transport.
 
 Streaming message send, task subscription, push notification configuration,
 and extended Agent Cards all return the standard A2A
-`UnsupportedOperationError`. Unsupported media types, unknown JSON-RPC
-methods, malformed JSON, and missing or mismatched `A2A-Version` headers all
-return the corresponding pinned protocol error from the official SDK. A
-request that declares a required A2A extension the card does not advertise
-in `capabilities.extensions` is rejected with
-`ExtensionSupportRequiredError`.
+`UnsupportedOperationError`. Unsupported media types (including any message
+part that is not a plain text part), unknown JSON-RPC methods, malformed
+JSON, and missing or mismatched `A2A-Version` headers all return the
+corresponding pinned protocol error from the official SDK. A request that
+declares a required A2A extension the card does not advertise in
+`capabilities.extensions` is rejected with `ExtensionSupportRequiredError`.
 
 Task transitions are atomic and repository-backed: continuing a stale,
-missing, or terminal task is rejected before the request-handler seam runs,
-and a request-handler failure transitions the task to `TASK_STATE_FAILED`
-through the repository's compare-and-transition contract rather than leaking
-an exception to the caller.
+missing, or terminal task is rejected before the request-handler seam runs; a
+continuation whose `context_id` disagrees with the task's stored context is
+rejected without invoking the seam; and every accepted message atomically
+claims the task (transitioning it to `TASK_STATE_WORKING` through the
+repository's compare-and-transition contract) before the seam runs, so
+concurrent continuations of the same task can never both invoke the seam. A
+request-handler failure transitions the task to `TASK_STATE_FAILED` through
+the same contract rather than leaking an exception to the caller, and a
+successful outcome's status, artifacts, and metadata are persisted onto the
+task atomically before it is returned.
 
 ## The request-handler seam
 

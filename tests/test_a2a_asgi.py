@@ -89,12 +89,27 @@ class _FixedIDGenerator(IDGenerator):
         return self._value
 
 
-def _message(text: str = "hello", *, task_id: str = "", media_type: str = "") -> Message:
+def _message(
+    text: str = "hello", *, task_id: str = "", media_type: str = "", context_id: str = ""
+) -> Message:
     """Build a minimal one-part text message for tests."""
     message = Message(message_id="msg-1", role=Role.ROLE_USER)
     part = Part(text=text)
     if media_type:
         part.media_type = media_type
+    message.parts.append(part)
+    if task_id:
+        message.task_id = task_id
+    if context_id:
+        message.context_id = context_id
+    return message
+
+
+def _non_text_message(*, task_id: str = "") -> Message:
+    """Build a message whose only part carries structured data, not text."""
+    message = Message(message_id="msg-data", role=Role.ROLE_USER)
+    part = Part()
+    part.data.struct_value.update({"key": "value"})
     message.parts.append(part)
     if task_id:
         message.task_id = task_id
@@ -198,6 +213,9 @@ def test_message_send_creates_one_task_and_invokes_handler_once() -> None:
     persisted = asyncio.run(fetch())
     assert persisted is not None
     assert persisted.status.state == TaskState.TASK_STATE_COMPLETED
+    assert len(persisted.artifacts) == 1
+    assert persisted.artifacts[0].artifact_id == f"{task_id}-result"
+    assert task["artifacts"][0]["artifactId"] == persisted.artifacts[0].artifact_id
 
 
 def test_get_list_and_cancel_use_the_injected_repository() -> None:
@@ -280,6 +298,157 @@ def test_duplicate_task_creation_is_rejected() -> None:
         return len(tasks)
 
     assert asyncio.run(count()) == 1
+
+
+class _YieldingRepository:
+    """Wraps a repository, yielding once after ``get`` to force deterministic races.
+
+    Real concurrent A2A requests race across a genuine network I/O boundary; an
+    in-process ASGI test has no such boundary by default. This wrapper inserts one
+    scheduling checkpoint (not a wall-clock sleep) immediately after ``get``
+    returns, so two concurrent continuations of the same task both observe the
+    task's state before either attempts to claim it, reproducing the exact race
+    window the atomic claim step must close.
+    """
+
+    def __init__(self, inner: InMemoryTaskRepository) -> None:
+        self._inner = inner
+
+    async def create(self, task: Task) -> Task:
+        return await self._inner.create(task)
+
+    async def get(self, task_id: str) -> Task | None:
+        result = await self._inner.get(task_id)
+        await asyncio.sleep(0)
+        return result
+
+    async def list(
+        self, *, context_id: str = "", page_size: int = 50, page_token: str = ""
+    ) -> tuple[tuple[Task, ...], str]:
+        return await self._inner.list(
+            context_id=context_id, page_size=page_size, page_token=page_token
+        )
+
+    async def compare_and_transition(
+        self, task_id: str, expected_state: TaskState, next_state: TaskState
+    ) -> Task:
+        return await self._inner.compare_and_transition(task_id, expected_state, next_state)
+
+    async def compare_and_update(self, task_id: str, expected_state: TaskState, task: Task) -> Task:
+        return await self._inner.compare_and_update(task_id, expected_state, task)
+
+    async def cancel(self, task_id: str) -> Task:
+        return await self._inner.cancel(task_id)
+
+
+def test_concurrent_continuations_of_the_same_task_never_both_invoke_the_handler() -> None:
+    """Racing continuations of one task serialize through the repository's claim step."""
+    handler = _RecordingHandler(
+        [
+            InvocationApprovalRequired(
+                correlation_id="c",
+                challenge=ApprovalChallenge(
+                    "approval-1",
+                    "agent",
+                    "capability",
+                    "task",
+                    "correlation",
+                    "reason",
+                    "role",
+                    datetime.now(UTC),
+                    datetime.now(UTC) + timedelta(minutes=1),
+                ),
+            ),
+            InvocationSuccess(correlation_id="c", value={"echo": True}),
+        ]
+    )
+    repository = _YieldingRepository(InMemoryTaskRepository())
+    app = A2AASGI(
+        agent=_EchoAgent(),
+        endpoint_url=ENDPOINT_URL,
+        task_repository=repository,
+        request_handler=handler,
+    )
+
+    created = asyncio.run(_post(app, "SendMessage", SendMessageRequest(message=_message())))
+    task_id = created.json()["result"]["task"]["id"]
+
+    async def race() -> tuple[httpx.Response, httpx.Response]:
+        continuation = SendMessageRequest(message=_message("again", task_id=task_id))
+        async with _client(app) as client:
+            headers = _V1_HEADERS
+            first, second = await asyncio.gather(
+                client.post(RPC_PATH, json=_envelope("SendMessage", continuation), headers=headers),
+                client.post(RPC_PATH, json=_envelope("SendMessage", continuation), headers=headers),
+            )
+        return first, second
+
+    first, second = asyncio.run(race())
+    bodies = [first.json(), second.json()]
+    successes = [body for body in bodies if "result" in body]
+    errors = [body for body in bodies if "error" in body]
+
+    assert len(successes) == 1
+    assert len(errors) == 1
+    assert errors[0]["error"]["code"] == -32600  # INVALID_REQUEST
+    # The handler was invoked exactly once for the original send plus exactly
+    # once for whichever continuation won the race, never twice concurrently.
+    assert len(handler.calls) == 2
+
+
+def test_context_id_mismatch_on_continuation_is_rejected() -> None:
+    """A continuation with a context_id that disagrees with the stored task is rejected."""
+    approval_result = InvocationApprovalRequired(
+        correlation_id="c",
+        challenge=ApprovalChallenge(
+            "approval-1",
+            "agent",
+            "capability",
+            "task",
+            "correlation",
+            "reason",
+            "role",
+            datetime.now(UTC),
+            datetime.now(UTC) + timedelta(minutes=1),
+        ),
+    )
+    app, handler, repository = _build_app(handler=_RecordingHandler([approval_result]))
+
+    created = asyncio.run(_post(app, "SendMessage", SendMessageRequest(message=_message())))
+    task_id = created.json()["result"]["task"]["id"]
+    stored_context_id = created.json()["result"]["task"]["contextId"]
+
+    mismatched = asyncio.run(
+        _post(
+            app,
+            "SendMessage",
+            SendMessageRequest(
+                message=_message("again", task_id=task_id, context_id=f"{stored_context_id}-other")
+            ),
+        )
+    )
+
+    assert mismatched.json()["error"]["code"] == -32602  # INVALID_PARAMS
+    assert len(handler.calls) == 1  # the mismatched continuation never invoked the handler
+
+    async def fetch() -> Task | None:
+        return await repository.get(task_id)
+
+    persisted = asyncio.run(fetch())
+    assert persisted is not None
+    assert persisted.context_id == stored_context_id
+
+
+def test_non_text_message_part_is_rejected() -> None:
+    """A message part carrying structured data instead of text is rejected."""
+    app, handler, _ = _build_app()
+
+    response = asyncio.run(
+        _post(app, "SendMessage", SendMessageRequest(message=_non_text_message()))
+    )
+
+    assert response.json()["error"]["code"] == -32005  # CONTENT_TYPE_NOT_SUPPORTED
+    assert handler.calls == []
 
 
 def test_stale_and_missing_task_continuations_are_rejected() -> None:
