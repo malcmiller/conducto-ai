@@ -10,17 +10,21 @@ security, deadline, cancellation, result, and provenance rules.
 ```text
 conducto-ai/
 ├── .github/                  Workflows and path-scoped agent instructions
-├── docs/                     Product, protocol, deployment, and automation docs
-├── sdk-python/               Python reference SDK and implementation docs
+├── docs/                     Product and Python SDK documentation
+├── examples/                 Runnable application examples
+├── scripts/                  Package and release verification
+├── src/conducto/             Python package
+├── tests/                    Unit, acceptance, and golden tests
 ├── AGENTS.md                 Repository-wide agent guidance
-├── README.md                 Product overview and roadmap
+├── pyproject.toml            Package and tool configuration
+├── README.md                 Product and SDK overview
+├── uv.lock                   Reproducible dependency lock
 └── LICENSE
 ```
 
-The repository is intentionally Python-first. The Python SDK establishes
-reference behavior and language-neutral fixtures before .NET parity is added.
-Cross-organization federation follows only after local, remote, and
-cross-language behavior is proven.
+The repository is Python-only. The SDK establishes reference behavior and
+protocol fixtures before cross-organization federation is added. Federation
+follows only after local, remote, container, and Foundry behavior is proven.
 
 ## Product concepts
 
@@ -66,7 +70,6 @@ boundaries.
 
 ## Documentation boundaries
 
-Repository-wide documents in [`docs/`](./README.md) define shared protocols,
-deployment progression, federation, and project automation. Python APIs and
-implementation details are documented beside the package in
-[`sdk-python/docs/`](../sdk-python/docs/README.md).
+Documents in [`docs/`](./README.md) define shared protocols, deployment
+progression, federation, project automation, Python APIs, and implementation
+details.

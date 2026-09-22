@@ -6,7 +6,7 @@ OpenAI-compatible server profile the caller selects. It does not start, stop,
 or configure vLLM or LM Studio, and it does not download model weights: point
 ``--profile`` at a server you already have running locally.
 
-Run from ``sdk-python`` after installing the built wheel and starting a
+Run from the repository root after installing the built wheel and starting a
 matching local server:
 
     python examples/openai_compatible_profiles.py --profile vllm --model my-served-model

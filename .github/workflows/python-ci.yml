@@ -1,26 +1,18 @@
-# Python CI for the `conducto-ai` reference SDK (sdk-python/).
+# Python CI for the `conducto-ai` repository.
 #
 # Every command run here also runs locally with plain `uv` commands from a
-# clean checkout of `sdk-python/` (see sdk-python/README.md), so contributors
+# clean repository checkout (see README.md), so contributors
 # can reproduce any failure without needing GitHub Actions.
 #
 # Design notes:
 #   - Third-party actions are pinned to immutable commit SHAs (not tags) to
 #     resist supply-chain tampering. The `# vX.Y.Z` comment records the
 #     release the SHA corresponds to for humans/renovate-style tooling.
-#   - `changes` detects whether sdk-python/ (or this workflow) was touched,
-#     so documentation-only or unrelated-path PRs still produce the single
-#     required "Python CI (required)" check, just with the heavy jobs
-#     skipped rather than absent.
 #   - The `required` job is the one status check that should be marked
 #     "required" in branch protection / repository rulesets: it always runs
-#     and fails if any dependency failed or was canceled, but succeeds when
-#     dependencies were only skipped (no relevant changes).
+#     and fails if any dependency failed or was canceled.
 #   - No job requests write permissions, and no publishing credentials are
 #     used anywhere in this workflow.
-#   - When .NET parity work begins, add a parallel `dotnet-ci.yml` workflow
-#     (or a `dotnet` job gated by its own `changes` filter) and add it to the
-#     `required` job's `needs:` list; Milestone 1 does not require it yet.
 name: Python CI
 
 on:
@@ -39,42 +31,15 @@ concurrency:
 
 env:
   # Supported/documented Python & OS matrix (kept in sync with the `matrix:`
-  # blocks below and sdk-python/README.md). GitHub Actions cannot expand
+  # blocks below and README.md). GitHub Actions cannot expand
   # `env.*` inside `strategy.matrix`, so the matrix values are duplicated per
   # job rather than referenced from here; update both together.
   PYTHON_VERSIONS: "3.12, 3.13"
   OPERATING_SYSTEMS: "ubuntu-latest, windows-latest"
 
 jobs:
-  changes:
-    name: Detect changed paths
-    runs-on: ubuntu-latest
-    permissions:
-      # dorny/paths-filter falls back to the GitHub REST API (instead of a
-      # local git diff) to list a pull request's changed files, which needs
-      # read access to the pull request. Scoped to only this job.
-      contents: read
-      pull-requests: read
-    outputs:
-      python: ${{ steps.filter.outputs.python }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
-        with:
-          fetch-depth: 0
-      - name: Filter changed paths
-        id: filter
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.3
-        with:
-          filters: |
-            python:
-              - 'sdk-python/**'
-              - '.github/workflows/python-ci.yml'
-
   quality:
     name: Format, lint & type-check (${{ matrix.os }}, py${{ matrix.python-version }})
-    needs: changes
-    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -84,7 +49,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: sdk-python
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
@@ -92,7 +56,7 @@ jobs:
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
-          cache-dependency-glob: sdk-python/uv.lock
+          cache-dependency-glob: uv.lock
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies (locked, reproducible)
         run: uv sync --locked --group dev
@@ -105,8 +69,6 @@ jobs:
 
   test:
     name: Unit & schema/golden tests (${{ matrix.os }}, py${{ matrix.python-version }})
-    needs: changes
-    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -116,7 +78,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: sdk-python
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
@@ -124,7 +85,7 @@ jobs:
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
-          cache-dependency-glob: sdk-python/uv.lock
+          cache-dependency-glob: uv.lock
           python-version: ${{ matrix.python-version }}
       - name: Install dependencies (locked, reproducible)
         run: uv sync --locked --group dev
@@ -139,14 +100,12 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pytest-results-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: sdk-python/reports/pytest-results.xml
+          path: reports/pytest-results.xml
           if-no-files-found: warn
           retention-days: 14
 
   acceptance:
     name: Milestone 1 quick-start acceptance (${{ matrix.os }})
-    needs: changes
-    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -155,7 +114,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: sdk-python
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
@@ -163,7 +121,7 @@ jobs:
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
-          cache-dependency-glob: sdk-python/uv.lock
+          cache-dependency-glob: uv.lock
           python-version: "3.12"
       - name: Install dependencies (locked, reproducible)
         run: uv sync --locked --group dev
@@ -178,14 +136,12 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pytest-acceptance-${{ matrix.os }}
-          path: sdk-python/reports/pytest-acceptance.xml
+          path: reports/pytest-acceptance.xml
           if-no-files-found: warn
           retention-days: 14
 
   package:
     name: Build & installed-wheel smoke test (${{ matrix.os }}, py${{ matrix.python-version }})
-    needs: changes
-    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -195,7 +151,6 @@ jobs:
     defaults:
       run:
         shell: bash
-        working-directory: sdk-python
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
@@ -203,7 +158,7 @@ jobs:
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
         with:
           enable-cache: true
-          cache-dependency-glob: sdk-python/uv.lock
+          cache-dependency-glob: uv.lock
           python-version: ${{ matrix.python-version }}
       - name: Build sdist and wheel
         run: |
@@ -222,23 +177,20 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: sdk-python/dist
+          path: dist
           if-no-files-found: warn
           retention-days: 14
 
   required:
     # This is the single, stable status check to mark as "required" in
-    # branch protection / repository rulesets for the `main` branch. It runs
-    # unconditionally (even when `changes` skipped every other job for a
-    # documentation-only or unrelated-path change) so PRs always report it.
+    # branch protection / repository rulesets for the `main` branch.
     name: Python CI (required)
-    needs: [changes, quality, test, acceptance, package]
+    needs: [quality, test, acceptance, package]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Verify no required job failed or was cancelled
         run: |
-          echo "changes:    ${{ needs.changes.result }}"
           echo "quality:    ${{ needs.quality.result }}"
           echo "test:       ${{ needs.test.result }}"
           echo "acceptance: ${{ needs.acceptance.result }}"

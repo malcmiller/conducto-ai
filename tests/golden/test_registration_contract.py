@@ -1,4 +1,4 @@
-"""Pin language-neutral registration JSON and confidential grant redaction."""
+"""Pin registration wire JSON and confidential grant redaction."""
 
 import json
 from pathlib import Path

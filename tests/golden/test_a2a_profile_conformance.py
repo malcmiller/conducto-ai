@@ -32,7 +32,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "a2a" / "a2a_1_0_conformance.json
 
 @pytest.fixture(scope="module")
 def conformance_fixture() -> dict[str, Any]:
-    """Return the language-neutral A2A 1.0 conformance fixture."""
+    """Return the A2A 1.0 protocol conformance fixture."""
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
 
 

@@ -2,8 +2,8 @@
 
 These tests pin the exact, byte-for-byte serialization of a generated Agent
 Card against a checked-in golden fixture. A diff here signals an unintentional
-(and potentially breaking) change to the public wire schema shared with the
-future .NET SDK and any A2A network consumers.
+(and potentially breaking) change to the public wire schema used by A2A
+network consumers.
 """
 
 from pathlib import Path

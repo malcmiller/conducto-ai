@@ -59,9 +59,9 @@ Agent Card profile. `agent_card.py` owns stable skill IDs, URL and transport
 validation, modes, security schemes, requirements, and canonical JSON
 serialization.
 
-The card is a publication format, not the live execution registry. The
-language-neutral profile and compatibility policy are documented in the
-repository [A2A 1.0 profile](../../docs/a2a-1-profile.md).
+The card is a publication format, not the live execution registry. The wire
+profile and compatibility policy are documented in the repository
+[A2A 1.0 profile](./a2a-1-profile.md).
 
 ## The local `AgentRegistry`
 

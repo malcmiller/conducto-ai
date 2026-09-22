@@ -9,7 +9,7 @@ No network access, model downloads, or credentials are required.
 
 ```bash
 git clone https://github.com/malcmiller/conducto-ai.git
-cd conducto-ai/sdk-python
+cd conducto-ai
 git status --short
 ```
 
@@ -97,7 +97,7 @@ $wheel = (Get-ChildItem dist\*.whl | Select-Object -First 1).FullName
 uv run --no-project --with "$wheel" python scripts\smoke_test.py
 ```
 
-The smoke test fails if `conducto` imports from `sdk-python/src` instead of the
+The smoke test fails if `conducto` imports from the checkout's `src` directory instead of the
 installed wheel. Install the wheel with the optional `mcp` extra
 (`--with "$wheel[mcp]"`) to also drive the exported MCP stdio tools with an
 official MCP SDK client; without the extra that section reports that it was

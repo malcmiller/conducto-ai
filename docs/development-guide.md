@@ -8,7 +8,6 @@ the reference implementation for Conducto contracts.
 From the repository root:
 
 ```bash
-cd sdk-python
 uv sync --locked --group dev
 ```
 
@@ -71,7 +70,7 @@ This gives the project a layered validation strategy: low-level behavior, contra
 2. Keep changes focused and aligned with the public contract.
 3. Update or add tests when behavior changes.
 4. Run the smallest relevant validation command while developing, then the complete applicable
-   validation gate in [`AGENTS.md`](../../AGENTS.md).
+   validation gate in [`AGENTS.md`](../AGENTS.md).
 5. Submit a pull request and ensure CI passes.
 
 ## CI expectations

@@ -1,10 +1,10 @@
 ---
-applyTo: "sdk-python/**"
+applyTo: "**"
 ---
 
-# Python SDK development instructions
+# Python repository development instructions
 
-Apply these instructions to every change under `sdk-python/`.
+Apply these instructions throughout this Python-only repository.
 
 ## Implementation
 
@@ -43,9 +43,9 @@ Apply these instructions to every change under `sdk-python/`.
 
 ## Required validation
 
-These commands are mandatory completion criteria, not suggestions. Run them from `sdk-python/`
-after every Python code change. Do not consider the work complete until all applicable commands
-pass without errors or warnings:
+These commands are mandatory completion criteria, not suggestions. Run them from the repository
+root after every Python code change. Do not consider the work complete until all applicable
+commands pass without errors or warnings:
 
 ```bash
 uv run ruff format .
@@ -76,5 +76,5 @@ When package behavior or exports change, also verify the built artifact:
 uv build
 ```
 
-Run the installed-wheel smoke test documented in `sdk-python/README.md` whenever public imports,
-package metadata, or runtime dependencies change.
+Run the installed-wheel quick start and smoke test documented in `README.md` whenever public
+imports, package metadata, or runtime dependencies change.

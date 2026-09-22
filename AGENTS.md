@@ -1,8 +1,7 @@
 # Repository agent instructions
 
-These instructions apply to the entire repository. More specific instructions, such as
-`.github/instructions/sdk-python.instructions.md`, are additive and take precedence for files in
-their scope.
+These instructions apply to the entire repository. The additive Python rules in
+`.github/instructions/python.instructions.md` apply throughout this Python-only codebase.
 
 ## Product direction
 
@@ -11,16 +10,14 @@ once, expose typed capabilities, and invoke those capabilities through the same 
 whether the target is in-process, behind A2A transport, containerized, or hosted in Microsoft
 Foundry.
 
-Development is intentionally Python-first:
+Development is Python-only:
 
 1. Establish the complete Python reference behavior.
-2. Preserve language-neutral wire contracts and conformance fixtures.
-3. Implement .NET parity from those stable contracts.
-4. Add cross-organization federation only after local, remote, and cross-language behavior is
-   proven.
+2. Preserve stable wire contracts and conformance fixtures.
+3. Prove local, remote, container, and Foundry execution.
+4. Add cross-organization federation only after those deployment paths are proven.
 
-Do not introduce .NET-driven abstractions into unfinished Python contracts or make local Python
-development depend on cloud services.
+Do not make local Python development depend on cloud services.
 
 ## Architecture boundaries
 
@@ -62,7 +59,7 @@ development depend on cloud services.
 Validation is part of implementation, not optional follow-up. An agent must not describe code work
 as complete until every applicable command has run successfully with no errors or warnings.
 
-For any Python code change, run from `sdk-python/`:
+For any Python code change, run from the repository root:
 
 ```bash
 uv run ruff format .
@@ -87,7 +84,7 @@ Additional requirements:
 - Run focused tests during development, then the complete gate above before finishing.
 - If public imports, package metadata, runtime dependencies, examples, or installed behavior change,
   also run `uv build` and the installed-wheel quick start and smoke test documented in
-  `sdk-python/README.md`.
+  `README.md`.
 - Documentation-only changes require `git diff --check` and a manual check that commands, links,
   paths, and claims match the repository; they do not require the Python suite unless executable
   examples or generated documentation are affected.
@@ -100,8 +97,7 @@ Additional requirements:
 
 ## Python-specific rules
 
-For changes under `sdk-python/`, follow
-`.github/instructions/sdk-python.instructions.md` in addition to this file. In particular:
+Follow `.github/instructions/python.instructions.md` in addition to this file. In particular:
 
 - Use Python 3.12 or newer and strict typing.
 - Review and update docstrings after every code change.
@@ -119,4 +115,3 @@ For changes under `sdk-python/`, follow
 - When moving or renumbering stories, update downstream references, native relationships,
   milestone descriptions, and status labels, then verify there are no missing references, cycles,
   or forward-milestone dependencies.
-
