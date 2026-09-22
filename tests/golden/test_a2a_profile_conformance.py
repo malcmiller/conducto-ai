@@ -77,6 +77,7 @@ def test_positive_a2a_conformance_fixtures_parse_with_official_sdk(
         ("legacy03AgentCard", parse_agent_card, "0.3 protocolVersion"),
         ("unknownRequiredExtensionCard", parse_agent_card, "Unsupported required"),
         ("unsupportedMediaMessage", parse_message, "Unsupported media type"),
+        ("nonTextPartMessage", parse_message, "Unsupported media type"),
         ("overLimitMessageParts", parse_message, "Message parts exceed"),
         ("overLimitMetadataMessage", parse_message, "Metadata exceeds"),
         ("overLimitTaskHistory", parse_task, "Task history exceeds"),

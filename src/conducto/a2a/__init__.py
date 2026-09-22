@@ -1,8 +1,14 @@
-"""Public A2A 1.0 contracts and Conducto result mapping helpers."""
+"""Public A2A 1.0 contracts and Conducto result mapping helpers.
+
+Importing this package does not import Starlette or construct an ASGI server;
+the optional ASGI host adapter is resolved lazily and requires the
+``a2a-server`` package extra.
+"""
 
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING, Any
 
 from a2a.types.a2a_pb2 import Artifact, Part, Task, TaskState
 from google.protobuf.struct_pb2 import Struct
@@ -42,6 +48,38 @@ from conducto.core.invocation_results import (
     InvocationSuccess,
     InvocationTimeout,
 )
+
+from .errors import A2ADependencyError, A2AServerError
+from .handler import A2ARequestHandler
+from .profile import A2A_SERVER_EXTRA, require_a2a_server_dependency
+
+if TYPE_CHECKING:
+    from .asgi import A2AASGI
+
+_LAZY_EXPORTS = {
+    "A2AASGI": "conducto.a2a.asgi",
+}
+
+
+def __getattr__(name: str) -> Any:
+    """Resolve the Starlette-backed ASGI host adapter only when it is requested.
+
+    Args:
+        name: Attribute requested from this package.
+
+    Returns:
+        The lazily imported attribute.
+
+    Raises:
+        AttributeError: If ``name`` is not exported by this package.
+        A2ADependencyError: If the optional Starlette dependency is unavailable.
+    """
+    module_name = _LAZY_EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from importlib import import_module
+
+    return getattr(import_module(module_name), name)
 
 
 def invocation_result_to_task(result: InvocationResult, *, task_id: str, context_id: str) -> Task:
@@ -95,9 +133,15 @@ __all__ = [
     "A2A_PROTOCOL_VERSION",
     "A2A_PYTHON_SDK_PACKAGE",
     "A2A_PYTHON_SDK_VERSION",
+    "A2A_SERVER_EXTRA",
+    "A2AASGI",
+    "A2ADependencyError",
     "A2AProtocolError",
+    "A2ARequestHandler",
+    "A2AServerError",
     "CONDUCTO_PARAMETER_EXTENSION_URI",
     "invocation_result_to_task",
+    "require_a2a_server_dependency",
     "MAX_ARTIFACT_PARTS",
     "MAX_HISTORY_MESSAGES",
     "MAX_MESSAGE_PARTS",

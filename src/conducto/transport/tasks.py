@@ -41,6 +41,24 @@ class TaskRepository(Protocol):
     ) -> Task:
         """Atomically transition a task only when its current state matches."""
 
+    async def compare_and_update(self, task_id: str, expected_state: TaskState, task: Task) -> Task:
+        """Atomically persist a complete task snapshot when its current state matches.
+
+        Unlike :meth:`compare_and_transition`, this replaces the full persisted
+        snapshot (status, artifacts, metadata) from ``task`` rather than only the
+        state enum, so a caller can atomically publish invocation results (for
+        example, artifacts produced by a completed capability) alongside the
+        state transition that makes them visible to ``get``/``list``.
+
+        Args:
+            task_id: Existing task identifier being updated.
+            expected_state: Required current persisted state for the update to apply.
+            task: Complete task snapshot to persist; its ``id`` is forced to ``task_id``.
+
+        Returns:
+            The persisted task snapshot.
+        """
+
     async def cancel(self, task_id: str) -> Task:
         """Atomically cancel a non-terminal task."""
 
@@ -143,6 +161,27 @@ class InMemoryTaskRepository:
                 raise RemoteTaskError("duplicate A2A task transition")
             task.status.state = next_state
             return _copy(task)
+
+    async def compare_and_update(self, task_id: str, expected_state: TaskState, task: Task) -> Task:
+        """Compare state then atomically replace the full task snapshot."""
+        async with self._lock:
+            current = self._tasks.get(task_id)
+            if current is None:
+                raise RemoteTaskError(f"A2A task not found: {task_id}")
+            if current.status.state != expected_state:
+                raise RemoteTaskError("stale A2A task transition")
+            current_name = TaskState.Name(expected_state)
+            next_name = TaskState.Name(task.status.state)
+            try:
+                validate_task_transition(current_name, next_name)
+            except ValueError as exc:
+                raise RemoteTaskError(str(exc)) from exc
+            if expected_state == task.status.state:
+                raise RemoteTaskError("duplicate A2A task transition")
+            updated = _copy(task)
+            updated.id = task_id
+            self._tasks[task_id] = updated
+            return _copy(updated)
 
     async def cancel(self, task_id: str) -> Task:
         """Cancel a task unless it has reached a terminal state."""

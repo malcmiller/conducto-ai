@@ -76,6 +76,12 @@ so that importing `conducto` never requires the optional `mcp` extra:
 `McpToolDefinition`, `McpToolOutcome`, `McpStdioServer`, and the typed
 `McpExportError` hierarchy. See [MCP tool export](./mcp-export.md).
 
+The inbound A2A ASGI host is published from `conducto.a2a` instead of the
+package root so that importing `conducto` never requires the optional
+`a2a-server` extra: `A2AASGI`, the `A2ARequestHandler` seam protocol, and the
+typed `A2AServerError`/`A2ADependencyError` hierarchy. See
+[A2A ASGI server host](./a2a-server.md).
+
 ## `@a2a_agent`
 
 Declared on a class to mark it as an A2A-capable agent.

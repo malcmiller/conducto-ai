@@ -22,7 +22,11 @@ CONDUCTO_PARAMETER_EXTENSION_URI = "https://conducto.ai/a2a/extensions/parameter
 
 SUPPORTED_MEDIA_TYPES = frozenset({"text/plain"})
 SUPPORTED_REQUIRED_EXTENSIONS = frozenset({CONDUCTO_PARAMETER_EXTENSION_URI})
-SUPPORTED_JSONRPC_METHODS = frozenset({"message/send", "tasks/get", "tasks/list", "tasks/cancel"})
+# A2A 1.0 renamed the JSON-RPC method names from the 0.3 slash-style form
+# (e.g. "message/send") to gRPC-style service method names; both the official
+# SDK's server dispatcher and client transport send/accept only these names
+# for protocol version 1.0. See docs/whats-new-v1.md in the a2aproject/A2A repo.
+SUPPORTED_JSONRPC_METHODS = frozenset({"SendMessage", "GetTask", "ListTasks", "CancelTask"})
 MAX_MESSAGE_PARTS = 16
 MAX_METADATA_BYTES = 4096
 MAX_HISTORY_MESSAGES = 32
@@ -93,6 +97,10 @@ def parse_message(payload: Mapping[str, Any]) -> Message:
         raise A2AProtocolError(f"Message parts exceed limit {MAX_MESSAGE_PARTS}")
     _validate_metadata_size(payload.get("metadata"))
     for part in message.parts:
+        if part.WhichOneof("content") != "text":
+            raise A2AProtocolError(
+                "Unsupported media type: only text/plain message parts are accepted"
+            )
         if part.media_type and part.media_type not in SUPPORTED_MEDIA_TYPES:
             raise A2AProtocolError(f"Unsupported media type: {part.media_type}")
     return message

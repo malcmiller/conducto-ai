@@ -129,9 +129,9 @@ uv run --no-project --with "$wheel" python scripts/smoke_test.py
 ```
 
 Optional integrations are installed with package extras such as
-`conducto-ai[registration]`, `conducto-ai[mcp]`, `conducto-ai[ollama]`,
-`conducto-ai[openai]`, `conducto-ai[microsoft-foundry]`, and
-`conducto-ai[opentelemetry]`.
+`conducto-ai[registration]`, `conducto-ai[mcp]`, `conducto-ai[a2a-server]`,
+`conducto-ai[ollama]`, `conducto-ai[openai]`, `conducto-ai[microsoft-foundry]`,
+and `conducto-ai[opentelemetry]`.
 
 ## Architecture principles
 
