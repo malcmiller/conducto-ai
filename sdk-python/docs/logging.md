@@ -151,6 +151,72 @@ supported HTTP/A2A boundaries, ignores malformed or oversized remote context,
 and records only the bounded `conducto.invalid_remote_context` attribute.
 Baggage is not forwarded by default.
 
+## OpenTelemetry Logs export
+
+`OpenTelemetryLogBridge` (`conducto.core.otel_logs`) bridges these same
+versioned events to OpenTelemetry Logs and OTLP-compatible backends. It does
+not create a second event taxonomy, and it never replaces or duplicates
+Story 2.3 security audit evidence: audit events remain a separate,
+application-owned durable stream, and accepting an OpenTelemetry log record
+never satisfies mandatory audit delivery.
+
+Constructing the bridge is explicit and requires an application-supplied
+OpenTelemetry `LoggerProvider`. Importing `conducto` never installs a global
+provider, handler, processor, exporter, resource, or environment
+configuration; the application owns exporter endpoints, credentials, TLS,
+headers, resource detectors, sampling/filtering, and provider shutdown.
+
+```python
+import logging
+
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.resources import Resource
+# Any OTLP exporter the application chooses to install, for example:
+# from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+from conducto import OpenTelemetryLogBridge
+
+provider = LoggerProvider(
+    resource=Resource.create({"service.name": "my-service", "deployment.environment": "prod"})
+)
+# provider.add_log_record_processor(BatchLogRecordProcessor(OTLPLogExporter(endpoint=...)))
+
+bridge = OpenTelemetryLogBridge(provider, level=logging.INFO)
+...
+bridge.close(flush=True)  # detaches the handler; never shuts down `provider`
+provider.shutdown()  # the application owns and shuts down its own provider
+```
+
+Console/JSON output from `configure_logging` and the OpenTelemetry bridge can
+both be attached to the `conducto` logger at the same time without
+duplicating event generation: each handler independently receives the same
+underlying event record.
+
+`OpenTelemetryLogBridge` owns only the handler it creates:
+
+- `close()` is idempotent, detaches the owned handler, and never shuts down a
+  caller-owned `LoggerProvider`.
+- `close(flush=True)` additionally performs at most one bounded
+  `force_flush` call against the provider.
+- Translation or export failures are counted on `bridge.dropped_count` and
+  reported only through the local `conducto.otel_logs` diagnostic logger,
+  never by raising back into application code or recursing through the
+  bridge itself.
+
+Each mapped OpenTelemetry log record uses the stable Conducto event name as
+both `body` and `event_name`, a severity derived from the Python logging
+level, and only the bounded, low-cardinality `conducto.*` attributes listed
+in `docs/semantic-fixtures/opentelemetry-logs.v1.json`. Trace/span
+correlation is derived by the OpenTelemetry SDK itself from the active span
+context (see `start_span`/`configure_in_memory_tracing`); an absent span
+simply yields an uncorrelated record. `configure_in_memory_logs()` is a
+documented test helper analogous to `configure_in_memory_tracing()`.
+
+Sampled or disabled diagnostic telemetry never affects authorization,
+approval, mandatory audit acceptance, invocation results, or audit event
+ordering — those remain governed entirely by `conducto.security`.
+
 ## Privacy and sensitive data
 
 Lifecycle events do **not** log prompts, model responses, capability
