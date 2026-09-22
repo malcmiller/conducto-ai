@@ -19,7 +19,7 @@ The Conducto package version is independent from this protocol version.
 The upstream `a2a.proto` for `v1.0.0` is normative. Conducto does not edit
 generated SDK types by hand. Python validation parses Agent Cards, messages,
 and tasks through the pinned official SDK, while language-neutral fixtures in
-`sdk-python/tests/golden/fixtures/a2a/a2a_1_0_conformance.json` preserve the
+`tests/golden/fixtures/a2a/a2a_1_0_conformance.json` preserves the
 observable wire behavior later SDKs must match.
 
 To verify the pinned source artifact:
@@ -36,7 +36,7 @@ generation is done by invoking the checked-in Python Agent Card generator and
 then running the golden suite:
 
 ```bash
-cd sdk-python
+
 uv run python - <<'PY'
 from pathlib import Path
 from tests.golden.test_agent_card_golden import GoldenAgent
@@ -125,7 +125,7 @@ Python or .NET exception objects:
 | Supported media types | `text/plain` |
 
 Positive and negative boundary examples are checked in under
-`sdk-python/tests/golden/fixtures/a2a/`. The fixtures intentionally use example
+`tests/golden/fixtures/a2a/`. The fixtures intentionally use example
 hosts under `.test` and contain no credentials, tokens, private keys, prompts,
 or production endpoints.
 
@@ -145,4 +145,4 @@ To evaluate a later A2A patch or major version:
 4. Document compatibility impact, especially removed fields, new required
    fields, operation support, extension behavior, and media-type changes.
 5. Run the golden, focused protocol tests, and the full Python validation gate
-   from `sdk-python/`.
+   from the repository root.

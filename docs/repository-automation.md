@@ -10,7 +10,7 @@ supports the project but does not define Conducto's product architecture.
 ├── AGENTS.md
 └── .github/
     ├── instructions/
-    │   └── sdk-python.instructions.md
+    │   └── python.instructions.md
     └── workflows/
         └── python-ci.yml
 ```
@@ -25,15 +25,15 @@ Repository-wide requirements live in [`AGENTS.md`](../AGENTS.md). They define:
 - mandatory validation and repository inspection
 - roadmap dependency discipline
 
-The path-scoped
-[`sdk-python.instructions.md`](../.github/instructions/sdk-python.instructions.md) adds Python SDK
-requirements for typing, docstrings, tests, Ruff, mypy, packaging, and installed-wheel validation.
+The path-scoped [`python.instructions.md`](../.github/instructions/python.instructions.md) adds
+Python requirements for typing, docstrings, tests, Ruff, mypy, packaging, and installed-wheel
+validation.
 
 The files are intentionally complementary:
 
 1. `AGENTS.md` applies repository-wide.
-2. `.github/instructions/sdk-python.instructions.md` adds requirements for `sdk-python/**`.
-3. An agent must satisfy both when changing the Python SDK.
+2. `.github/instructions/python.instructions.md` adds Python-specific requirements.
+3. An agent must satisfy both throughout this Python-only repository.
 
 Validation is part of implementation. Agents must not report Python code work as complete without
 running the applicable checks and reporting their outcomes. A tooling or environment failure must
@@ -46,7 +46,6 @@ requests and pushes to `main`.
 
 | Job | Responsibility |
 |---|---|
-| `changes` | Detect whether Python SDK or workflow files changed. |
 | `quality` | Check Ruff formatting and lint plus strict mypy across the supported matrix. |
 | `test` | Run unit and schema/golden tests and publish JUnit diagnostics. |
 | `acceptance` | Run the installed-user-oriented Python acceptance scenarios. |
@@ -56,7 +55,6 @@ requests and pushes to `main`.
 The local equivalent for a Python code change is:
 
 ```bash
-cd sdk-python
 uv sync --locked --group dev
 uv run ruff format .
 uv run ruff format --check .
@@ -72,16 +70,11 @@ uv build
 ```
 
 Run the installed-wheel example and smoke test using the commands documented in
-[`sdk-python/README.md`](../sdk-python/README.md).
+[`README.md`](../README.md).
 
 ## Path filtering
 
-The expensive Python jobs run when `sdk-python/**` or `python-ci.yml` changes. The `required` job
-always runs, including for documentation-only changes, so the protected branch receives a stable
-status check rather than a missing check.
-
-When another path can affect Python execution, packaging, or validation, add it to the `changes`
-filter in the same pull request.
+The repository is Python-only, so all CI jobs run for every pull request and push to `main`.
 
 ## Required status check
 
@@ -96,8 +89,7 @@ In repository settings:
 3. Enable required status checks.
 4. Add `Python CI (required)`.
 
-The aggregate job fails when a required dependency fails or is cancelled and succeeds when
-path-filtered jobs are legitimately skipped.
+The aggregate job fails when a required dependency fails or is cancelled.
 
 ## Workflow security
 

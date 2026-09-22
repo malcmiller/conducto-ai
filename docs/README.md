@@ -1,16 +1,14 @@
 # Conducto repository documentation
 
-This directory contains repository-wide product, protocol, deployment, and
-automation documentation. Implementation-specific Python guides live with the
-package in [`sdk-python/docs/`](../sdk-python/docs/README.md).
+This directory contains product, protocol, deployment, automation, and Python
+SDK documentation for the flattened Python-only repository.
 
 ## What this repository contains
 
 - `README.md` at the repository root introduces the Conducto vision and roadmap.
-- `sdk-python/` contains the shipped Python package (`conducto-ai`).
-- `sdk-python/docs/` documents the Python implementation and public API.
-- `sdk-python/tests/` records expected behavior through unit, golden, and
-  acceptance tests.
+- `src/conducto/` contains the shipped Python package (`conducto-ai`).
+- `docs/` documents the product, implementation, and public API.
+- `tests/` records expected behavior through unit, golden, and acceptance tests.
 
 ## Documentation map
 
@@ -19,9 +17,16 @@ package in [`sdk-python/docs/`](../sdk-python/docs/README.md).
 - [Conducto A2A 1.0 profile](./a2a-1-profile.md) — pinned protocol provenance, feature matrix, compatibility policy, conformance fixtures, and update procedure.
 - [Deployment topologies and federation](./deployment-and-federation.md) — local, container, Foundry, hybrid, and cross-organization scenarios plus ownership, trust, catalog, and workflow orchestration.
 - [Repository automation and agent guidance](./repository-automation.md) — coding-agent instructions, required validation, CI behavior, branch protection, and workflow maintenance.
-- [Python SDK documentation](../sdk-python/docs/README.md) — architecture,
-  registration, gateway, orchestration, provider, runtime, security, API, and
-  development guides.
+- [Architecture](./architecture.md) — component boundaries and end-to-end data flow.
+- [SDK reference](./sdk-reference.md) — supported public imports and API contracts.
+- [Development guide](./development-guide.md) — local validation and contribution workflow.
+- [Releasing](./releasing.md) — trusted publishing, rehearsal, verification, and recovery.
+- [Agents and registration](./agents-and-registration.md)
+- [Gateway and discovery](./gateway-and-discovery.md)
+- [Orchestration and delegation](./orchestration-and-delegation.md)
+- [Providers and models](./providers-and-models.md)
+- [Runtime and invocation](./runtime-and-invocation.md)
+- [Security and governance](./security-and-governance.md)
 
 ## Quick start
 

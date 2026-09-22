@@ -1,6 +1,6 @@
 r"""Deterministic two-agent Conducto quick start.
 
-Run from ``sdk-python`` after installing the built wheel:
+Run from the repository root after installing the built wheel:
 
     python examples/quickstart.py
 """

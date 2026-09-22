@@ -230,7 +230,7 @@ For the details behind each layer, continue with
 
 ## Roadmap order
 
-The repository's [canonical roadmap](../../README.md#roadmap) is Python local
+The repository's [canonical roadmap](../README.md#roadmap) is Python local
 flow (1), security and governance (2), chaining and local gateway (3), A2A
 network transport (4), exporters/observability/packaging (5), model runtimes
 and Microsoft Foundry (6), hybrid deployment and workflows (7), .NET parity

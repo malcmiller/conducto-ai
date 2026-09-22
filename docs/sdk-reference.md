@@ -1,6 +1,6 @@
 # SDK reference
 
-This reference describes the pre-v1 Python APIs implemented in `sdk-python/src/conducto`.
+This reference describes the pre-v1 Python APIs implemented in `src/conducto`.
 
 ## Package root exports
 
@@ -178,7 +178,7 @@ The default card generation requires:
 Conducto rejects A2A 0.3 Agent Cards, unknown required extensions, unsupported
 JSON-RPC methods, unsupported media types, and terminal task-state transitions
 explicitly. The pinned wire profile and update procedure are documented in the repository's
-[A2A 1.0 profile](../../docs/a2a-1-profile.md).
+[A2A 1.0 profile](./a2a-1-profile.md).
 
 ## `OrchestratorAgent`
 

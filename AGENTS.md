@@ -1,8 +1,7 @@
 # Repository agent instructions
 
-These instructions apply to the entire repository. More specific instructions, such as
-`.github/instructions/sdk-python.instructions.md`, are additive and take precedence for files in
-their scope.
+These instructions apply to the entire repository. The additive Python rules in
+`.github/instructions/python.instructions.md` apply throughout this Python-only codebase.
 
 ## Product direction
 
@@ -62,7 +61,7 @@ development depend on cloud services.
 Validation is part of implementation, not optional follow-up. An agent must not describe code work
 as complete until every applicable command has run successfully with no errors or warnings.
 
-For any Python code change, run from `sdk-python/`:
+For any Python code change, run from the repository root:
 
 ```bash
 uv run ruff format .
@@ -87,7 +86,7 @@ Additional requirements:
 - Run focused tests during development, then the complete gate above before finishing.
 - If public imports, package metadata, runtime dependencies, examples, or installed behavior change,
   also run `uv build` and the installed-wheel quick start and smoke test documented in
-  `sdk-python/README.md`.
+  `README.md`.
 - Documentation-only changes require `git diff --check` and a manual check that commands, links,
   paths, and claims match the repository; they do not require the Python suite unless executable
   examples or generated documentation are affected.
@@ -100,8 +99,7 @@ Additional requirements:
 
 ## Python-specific rules
 
-For changes under `sdk-python/`, follow
-`.github/instructions/sdk-python.instructions.md` in addition to this file. In particular:
+Follow `.github/instructions/python.instructions.md` in addition to this file. In particular:
 
 - Use Python 3.12 or newer and strict typing.
 - Review and update docstrings after every code change.
@@ -119,4 +117,3 @@ For changes under `sdk-python/`, follow
 - When moving or renumbering stories, update downstream references, native relationships,
   milestone descriptions, and status labels, then verify there are no missing references, cycles,
   or forward-milestone dependencies.
-

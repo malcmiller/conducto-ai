@@ -61,7 +61,7 @@ serialization.
 
 The card is a publication format, not the live execution registry. The
 language-neutral profile and compatibility policy are documented in the
-repository [A2A 1.0 profile](../../docs/a2a-1-profile.md).
+repository [A2A 1.0 profile](./a2a-1-profile.md).
 
 ## The local `AgentRegistry`
 
