@@ -14,6 +14,10 @@ The package root exports the stable public API from `conducto`:
 - `Runtime`, `RunContext`, and runtime configuration types
 - `AgentRegistry`, `AgentGateway`, discovery queries, descriptors, and typed
   gateway outcomes
+- `AgentCatalog`, `CatalogEntry`, `CatalogProvider`,
+  `InMemoryCatalogProvider`, `StaticFileCatalogProvider`, and related
+  governed remote-agent catalog contracts. See
+  [Remote-agent catalog](./remote-agent-catalog.md).
 - `a2a_agent`
 - `a2a_capability`
 - `tool`
@@ -263,6 +267,7 @@ components cooperate and where ownership boundaries sit:
 
 - [Agents and registration](./agents-and-registration.md)
 - [Gateway and discovery](./gateway-and-discovery.md)
+- [Remote-agent catalog](./remote-agent-catalog.md)
 - [Orchestration and delegation](./orchestration-and-delegation.md)
 - [Providers and models](./providers-and-models.md)
 - [Runtime and invocation](./runtime-and-invocation.md)

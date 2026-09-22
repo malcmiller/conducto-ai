@@ -215,6 +215,37 @@ def validate_card_metadata(
         )
 
 
+def capability_parameter_map(card: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return the Conducto parameter-schema extension, keyed by skill ID.
+
+    Args:
+        card: A validated Agent Card payload.
+
+    Returns:
+        A mapping from A2A skill ID to its JSON parameter schema, or an empty
+        mapping when the card carries no Conducto parameter extension.
+    """
+    capabilities = card.get("capabilities")
+    if not isinstance(capabilities, Mapping):
+        return {}
+    extensions = capabilities.get("extensions", [])
+    if isinstance(extensions, (str, bytes)) or not isinstance(extensions, Sequence):
+        return {}
+    for extension in extensions:
+        if not isinstance(extension, Mapping):
+            continue
+        params = extension.get("params")
+        if not isinstance(params, Mapping):
+            continue
+        conducto = params.get("x-conducto")
+        if not isinstance(conducto, Mapping):
+            continue
+        parameters = conducto.get("parameters")
+        if isinstance(parameters, Mapping):
+            return parameters
+    return {}
+
+
 def is_absolute_http_url(value: Any) -> bool:
     """Check whether a value is an absolute HTTP or HTTPS URL.
 

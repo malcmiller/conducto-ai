@@ -16,6 +16,7 @@ from pydantic import PydanticInvalidForJsonSchema, TypeAdapter
 from conducto.security.guardrails import discover_guardrails
 
 from .agent import BaseAgent
+from .agent_card import capability_parameter_map
 from .gateway_models import (
     AgentDescriptor,
     CapabilityDescriptor,
@@ -327,7 +328,7 @@ class AgentRegistry:
         metadata: list[dict[str, Any]] = []
         for agent in agents:
             card = agent.get_agent_card(card_url_for(agent))
-            parameter_map = _parameter_map_from_card(card)
+            parameter_map = capability_parameter_map(card)
             skills = [
                 {
                     "id": skill.get("id"),
@@ -392,28 +393,6 @@ class AgentRegistry:
         if registration is None:
             raise KeyError(f"Agent '{agent_id}' is not registered")
         return registration
-
-
-def _parameter_map_from_card(card: Mapping[str, Any]) -> Mapping[str, Any]:
-    capabilities = card.get("capabilities")
-    if not isinstance(capabilities, Mapping):
-        return {}
-    extensions = capabilities.get("extensions", [])
-    if isinstance(extensions, (str, bytes)) or not isinstance(extensions, Sequence):
-        return {}
-    for extension in extensions:
-        if not isinstance(extension, Mapping):
-            continue
-        params = extension.get("params")
-        if not isinstance(params, Mapping):
-            continue
-        conducto = params.get("x-conducto")
-        if not isinstance(conducto, Mapping):
-            continue
-        parameters = conducto.get("parameters")
-        if isinstance(parameters, Mapping):
-            return parameters
-    return {}
 
 
 def _primary_interface_url(card: Mapping[str, Any]) -> str | None:
