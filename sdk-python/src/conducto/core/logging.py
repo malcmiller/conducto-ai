@@ -25,6 +25,11 @@ _SENSITIVE_LOGGER_NAME: Final = "conducto.sensitive"
 
 AGENT_REGISTERED: Final = "conducto.agent.registered.v1"
 AGENT_DISCOVERED: Final = "conducto.agent.discovered.v1"
+CATALOG_AGENT_ADMITTED: Final = "conducto.catalog.agent_admitted.v1"
+CATALOG_AGENT_LIFECYCLE_CHANGED: Final = "conducto.catalog.agent_lifecycle_changed.v1"
+CATALOG_INSTANCE_LEASE_RENEWED: Final = "conducto.catalog.instance_lease_renewed.v1"
+CATALOG_INSTANCE_EXPIRED: Final = "conducto.catalog.instance_expired.v1"
+CATALOG_DISCOVERY: Final = "conducto.catalog.discovery.v1"
 MODEL_SELECTED: Final = "conducto.model.selected.v1"
 MODEL_USAGE_RECORDED: Final = "conducto.model.usage_recorded.v1"
 DELEGATION_TURN_STARTED: Final = "conducto.delegation.turn_started.v1"
@@ -80,6 +85,8 @@ _RECORD_FIELDS: Final = (
     "turn",
     "tool_call_id",
     "snapshot_revision",
+    "instance_id",
+    "lifecycle_state",
 )
 _PACKAGE_LOGGER = logging.getLogger(LOGGER_NAME)
 _PACKAGE_LOGGER.addHandler(logging.NullHandler())

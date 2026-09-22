@@ -20,6 +20,9 @@ deployment, roadmap, and automation documentation remains in
   reflection, schemas, Agent Cards, and the local `AgentRegistry`.
 - [Gateway and discovery](./gateway-and-discovery.md) — policy-filtered
   discovery, immutable snapshots, opaque bindings, lifecycle, and invocation.
+- [Remote-agent catalog](./remote-agent-catalog.md) — governed catalog
+  provider contract, capability indexing, lease-based instance health, and
+  quarantine, disablement, revocation, and removal lifecycle transitions.
 - [Orchestration and delegation](./orchestration-and-delegation.md) —
   deterministic routing, model-facing toolboxes, and bounded nested agent
   calls.
