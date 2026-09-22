@@ -45,6 +45,7 @@ def test_domain_packages_publish_contracts_without_umbrella_aliases() -> None:
             "A2AAuthenticatedIdentity",
             "A2ARequestContext",
             "A2ARuntimeHandler",
+            "create_a2a_app",
         ),
         "conducto.testing": ("FakeModel", "FakeModelRequest"),
     }

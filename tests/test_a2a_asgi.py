@@ -693,6 +693,8 @@ def test_importing_conducto_does_not_eagerly_import_the_asgi_adapter() -> None:
     script = (
         "import sys; import conducto; import conducto.transport; import conducto.a2a; "
         "print('conducto.a2a.asgi' in sys.modules); "
+        "assert conducto.a2a.create_a2a_app; "
+        "print('conducto.a2a.asgi' in sys.modules); "
         "conducto.a2a.A2AASGI; "
         "print('conducto.a2a.asgi' in sys.modules)"
     )
@@ -704,8 +706,9 @@ def test_importing_conducto_does_not_eagerly_import_the_asgi_adapter() -> None:
         text=True,
     )
 
-    before, after = completed.stdout.strip().splitlines()
+    before, after_factory, after = completed.stdout.strip().splitlines()
     assert before == "False"
+    assert after_factory == "False"
     assert after == "True"
 
 
@@ -725,6 +728,7 @@ def test_server_dependencies_are_isolated_from_core_and_client_import_paths() ->
         "import conducto\n"
         "import conducto.transport\n"
         "import conducto.a2a\n"
+        "assert conducto.a2a.create_a2a_app\n"
         "print('base-import-ok')\n"
         "try:\n"
         "    conducto.a2a.A2AASGI\n"

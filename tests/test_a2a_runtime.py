@@ -6,8 +6,10 @@ import asyncio
 import json
 from datetime import UTC, datetime
 from typing import Any
+from unittest.mock import patch
 
 import httpx
+import pytest
 from a2a.types.a2a_pb2 import (
     CancelTaskRequest,
     Message,
@@ -26,6 +28,7 @@ from conducto.a2a import (
     A2AAuthenticationRequest,
     A2ARequestContext,
     A2ARuntimeHandler,
+    create_a2a_app,
 )
 from conducto.core.agent_card import stable_skill_id
 from conducto.core.invocation_results import (
@@ -43,6 +46,7 @@ from conducto.core.invocation_results import (
     InvocationValidationFailure,
 )
 from conducto.core.provider import ModelConfiguration, ProviderResult
+from conducto.core.run_context import DelegationBudget
 from conducto.security import (
     ApprovalDecision,
     AuditEmitter,
@@ -64,6 +68,7 @@ APPROVED_SKILL = stable_skill_id(AGENT_ID, "approved")
 FAIL_SKILL = stable_skill_id(AGENT_ID, "fail")
 WAIT_SKILL = stable_skill_id(AGENT_ID, "wait")
 CONTEXT_SKILL = stable_skill_id(AGENT_ID, "context")
+BUDGET_SKILL = stable_skill_id(AGENT_ID, "budget")
 ENDPOINT_URL = "https://agent.example/a2a"
 
 
@@ -133,6 +138,40 @@ class _InboundAgent(BaseAgent):
             "timeout": context.timeout,
         }
 
+    @a2a_capability(name="budget", description="Inspect and reserve delegation budget.")
+    def budget(
+        self,
+        reserve_calls: int = 0,
+        reserve_tokens: int = 0,
+        reserve_cost: float = 0,
+    ) -> dict[str, Any]:
+        """Return request-owned budget state before and after one reservation."""
+        self.calls += 1
+        context = get_run_context()
+        assert context is not None
+        before = context.remaining_delegation_budget
+        reserved = context.delegation_budget.reserve(
+            calls=reserve_calls,
+            tokens=reserve_tokens,
+            cost=reserve_cost,
+        )
+        after = context.remaining_delegation_budget
+        return {
+            "before": {
+                "depth": before.depth,
+                "calls": before.calls,
+                "tokens": before.tokens,
+                "cost": before.cost,
+            },
+            "reserved": reserved,
+            "after": {
+                "depth": after.depth,
+                "calls": after.calls,
+                "tokens": after.tokens,
+                "cost": after.cost,
+            },
+        }
+
 
 class _IdentityResolver:
     """Build authorization from deterministic request headers."""
@@ -142,11 +181,13 @@ class _IdentityResolver:
         *,
         scopes: frozenset[str] = frozenset({"invoke"}),
         allowed_capabilities: frozenset[str] | None = None,
+        delegation_budget: DelegationBudget | None = None,
         decision: ApprovalDecision | None = None,
         error: Exception | None = None,
     ) -> None:
         self.scopes = scopes
         self.allowed_capabilities = allowed_capabilities
+        self.delegation_budget = delegation_budget
         self.decision = decision
         self.error = error
         self.requests: list[A2AAuthenticationRequest] = []
@@ -169,6 +210,7 @@ class _IdentityResolver:
                 correlation_id=request.correlation_id,
             ),
             allowed_capabilities=self.allowed_capabilities,
+            delegation_budget=self.delegation_budget,
             approval_decision=self.decision,
         )
 
@@ -649,6 +691,231 @@ def test_transport_budget_is_capped_by_handler_owned_limits() -> None:
     asyncio.run(run())
 
 
+def test_requested_budget_attenuates_broad_authenticated_budget() -> None:
+    """Every requested budget dimension can reduce authenticated authority."""
+    authenticated = DelegationBudget(
+        max_depth=7,
+        calls=9,
+        tokens=100,
+        cost=20,
+    )
+    handler, _, _, _ = _handler(resolver=_IdentityResolver(delegation_budget=authenticated))
+
+    async def run() -> None:
+        result = await _invoke(
+            handler,
+            _message(
+                BUDGET_SKILL,
+                {},
+                metadata={
+                    "budget": {
+                        "maxDepth": 3,
+                        "calls": 4,
+                        "tokens": 25,
+                        "cost": 5,
+                    }
+                },
+            ),
+        )
+        assert isinstance(result, InvocationSuccess)
+        assert result.value["before"] == {
+            "depth": 2,
+            "calls": 4,
+            "tokens": 25,
+            "cost": 5.0,
+        }
+
+    asyncio.run(run())
+
+
+def test_authenticated_budget_attenuates_broader_request() -> None:
+    """Transport metadata cannot increase stricter authenticated authority."""
+    authenticated = DelegationBudget(
+        max_depth=2,
+        calls=3,
+        tokens=10,
+        cost=2,
+    )
+    handler, _, _, _ = _handler(resolver=_IdentityResolver(delegation_budget=authenticated))
+
+    async def run() -> None:
+        result = await _invoke(
+            handler,
+            _message(
+                BUDGET_SKILL,
+                {},
+                metadata={
+                    "budget": {
+                        "maxDepth": 8,
+                        "calls": 20,
+                        "tokens": 50,
+                        "cost": 10,
+                    }
+                },
+            ),
+        )
+        assert isinstance(result, InvocationSuccess)
+        assert result.value["before"] == {
+            "depth": 1,
+            "calls": 3,
+            "tokens": 10,
+            "cost": 2.0,
+        }
+
+    asyncio.run(run())
+
+
+def test_optional_budget_bounds_use_whichever_side_is_bounded() -> None:
+    """Unbounded token and cost dimensions retain the other side's bound."""
+    request_bounded, _, _, _ = _handler(
+        resolver=_IdentityResolver(delegation_budget=DelegationBudget(tokens=None, cost=None))
+    )
+    identity_bounded, _, _, _ = _handler(
+        resolver=_IdentityResolver(delegation_budget=DelegationBudget(tokens=12, cost=3))
+    )
+
+    async def run() -> None:
+        request_result = await _invoke(
+            request_bounded,
+            _message(
+                BUDGET_SKILL,
+                {},
+                metadata={
+                    "budget": {
+                        "maxDepth": 4,
+                        "calls": 8,
+                        "tokens": 6,
+                        "cost": 1,
+                    }
+                },
+            ),
+        )
+        identity_result = await _invoke(
+            identity_bounded,
+            _message(
+                BUDGET_SKILL,
+                {},
+                message_id="message-2",
+                metadata={"budget": {"maxDepth": 4, "calls": 8}},
+            ),
+            task_id="task-2",
+            request=_request("request-2"),
+        )
+        assert isinstance(request_result, InvocationSuccess)
+        assert isinstance(identity_result, InvocationSuccess)
+        assert request_result.value["before"]["tokens"] == 6
+        assert request_result.value["before"]["cost"] == 1.0
+        assert identity_result.value["before"]["tokens"] == 12
+        assert identity_result.value["before"]["cost"] == 3.0
+
+    asyncio.run(run())
+
+
+def test_effective_budget_uses_remaining_state_without_mutating_authenticated_ledger() -> None:
+    """Reserved authority stays consumed while request-local use remains isolated."""
+    authenticated = DelegationBudget(
+        max_depth=6,
+        calls=5,
+        tokens=100,
+        cost=10,
+    )
+    assert authenticated.reserve(calls=2, tokens=30, cost=3)
+    handler, _, _, _ = _handler(resolver=_IdentityResolver(delegation_budget=authenticated))
+
+    async def run() -> None:
+        result = await _invoke(
+            handler,
+            _message(
+                BUDGET_SKILL,
+                {
+                    "reserve_calls": 1,
+                    "reserve_tokens": 10,
+                    "reserve_cost": 1,
+                },
+                metadata={
+                    "budget": {
+                        "maxDepth": 8,
+                        "calls": 9,
+                        "tokens": 200,
+                        "cost": 20,
+                    }
+                },
+            ),
+        )
+        assert isinstance(result, InvocationSuccess)
+        assert result.value == {
+            "before": {
+                "depth": 5,
+                "calls": 3,
+                "tokens": 70,
+                "cost": 7.0,
+            },
+            "reserved": True,
+            "after": {
+                "depth": 5,
+                "calls": 2,
+                "tokens": 60,
+                "cost": 6.0,
+            },
+        }
+
+    asyncio.run(run())
+    remaining = authenticated.snapshot(current_depth=0, remaining_time=None)
+    assert (remaining.calls, remaining.tokens, remaining.cost) == (3, 70, 7)
+
+
+def test_concurrent_requests_receive_independent_budget_ledgers() -> None:
+    """Concurrent requests cannot share or restore mutable budget state."""
+    authenticated = DelegationBudget(calls=2, tokens=20, cost=2)
+    handler, _, _, _ = _handler(resolver=_IdentityResolver(delegation_budget=authenticated))
+
+    async def run() -> None:
+        first, second = await asyncio.gather(
+            _invoke(
+                handler,
+                _message(
+                    BUDGET_SKILL,
+                    {
+                        "reserve_calls": 1,
+                        "reserve_tokens": 10,
+                        "reserve_cost": 1,
+                    },
+                    message_id="message-a",
+                ),
+                task_id="task-a",
+                request=_request("request-a"),
+            ),
+            _invoke(
+                handler,
+                _message(
+                    BUDGET_SKILL,
+                    {
+                        "reserve_calls": 1,
+                        "reserve_tokens": 10,
+                        "reserve_cost": 1,
+                    },
+                    message_id="message-b",
+                ),
+                task_id="task-b",
+                request=_request("request-b"),
+            ),
+        )
+        assert isinstance(first, InvocationSuccess)
+        assert isinstance(second, InvocationSuccess)
+        assert first.value["before"] == second.value["before"]
+        assert first.value["after"] == second.value["after"]
+        assert first.value["after"] == {
+            "depth": 7,
+            "calls": 1,
+            "tokens": 10,
+            "cost": 1.0,
+        }
+
+    asyncio.run(run())
+    remaining = authenticated.snapshot(current_depth=0, remaining_time=None)
+    assert (remaining.calls, remaining.tokens, remaining.cost) == (2, 20, 2)
+
+
 def test_transport_timeout_and_application_metadata_use_handler_limits() -> None:
     """Runtime context receives bounded timeout and trusted application metadata."""
     runtime = Runtime()
@@ -828,6 +1095,97 @@ def test_in_process_asgi_send_uses_runtime_handler_and_persists_result() -> None
         assert agent.calls == 1
 
     asyncio.run(run())
+
+
+def test_create_a2a_app_composes_runtime_identity_repository_and_agent_card() -> None:
+    """The recommended factory builds a usable canonical-runtime ASGI app."""
+    runtime = Runtime()
+    agent = _InboundAgent()
+    resolver = _IdentityResolver()
+    repository = InMemoryTaskRepository()
+    app = create_a2a_app(
+        agent=agent,
+        runtime=runtime,
+        public_url="https://agent.example/",
+        identity_resolver=resolver,
+        task_repository=repository,
+    )
+
+    async def run() -> None:
+        request = SendMessageRequest(message=_message(ECHO_SKILL, {"value": 9}))
+        envelope = {
+            "jsonrpc": "2.0",
+            "id": "factory-request",
+            "method": "SendMessage",
+            "params": MessageToDict(request),
+        }
+        with patch.object(runtime, "invoke", wraps=runtime.invoke) as invoke:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="https://agent.example",
+            ) as client:
+                card_response = await client.get("/.well-known/agent-card.json")
+                invocation_response = await client.post(
+                    "/a2a",
+                    json=envelope,
+                    headers={
+                        "A2A-Version": "1.0",
+                        "x-test-principal": "factory-principal",
+                    },
+                )
+            assert invoke.await_count == 1
+        card = card_response.json()
+        task = invocation_response.json()["result"]["task"]
+        persisted = await repository.get(task["id"])
+        assert card["supportedInterfaces"][0]["url"] == ENDPOINT_URL
+        assert app.endpoint_url == ENDPOINT_URL
+        assert persisted is not None
+        assert persisted.status.state == TaskState.TASK_STATE_COMPLETED
+        assert agent.calls == 1
+        assert len(resolver.requests) == 1
+        assert resolver.requests[0].headers["x-test-principal"] == "factory-principal"
+
+    asyncio.run(run())
+
+
+def test_create_a2a_app_minimal_factory_builds_asgi_application() -> None:
+    """The required factory arguments produce a callable ASGI application."""
+    app = create_a2a_app(
+        agent=_InboundAgent(),
+        runtime=Runtime(),
+        public_url="https://agent.example",
+        identity_resolver=_IdentityResolver(),
+    )
+
+    assert callable(app)
+    assert app.endpoint_url == ENDPOINT_URL
+
+
+@pytest.mark.parametrize(
+    "public_url",
+    [
+        "",
+        "agent.example",
+        "ftp://agent.example",
+        "https://user@agent.example",
+        "https://agent.example/base",
+        "https://agent.example?query=value",
+        "https://agent.example#fragment",
+        "https://agent.example:invalid",
+        " https://agent.example",
+    ],
+)
+def test_create_a2a_app_rejects_invalid_or_ambiguous_public_urls(
+    public_url: str,
+) -> None:
+    """The recommended factory accepts only an unambiguous HTTP(S) origin."""
+    with pytest.raises(ValueError, match="public_url"):
+        create_a2a_app(
+            agent=_InboundAgent(),
+            runtime=Runtime(),
+            public_url=public_url,
+            identity_resolver=_IdentityResolver(),
+        )
 
 
 def test_asgi_cancel_and_caller_cancellation_leave_tasks_terminal() -> None:

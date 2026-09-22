@@ -143,11 +143,13 @@ records, results, logs, traces, or audit events.
 The resolver returns `A2AAuthenticatedIdentity`, which owns the principal,
 scopes, roles, policy metadata, optional capability allowlist, optional root
 delegation budget, and optional authenticated approval decision. Message
-metadata is intersected with a resolver-owned capability allowlist; a
-message-supplied budget is accepted only when the resolver did not establish
-one. Transport data cannot set a principal, add scopes/roles, or broaden a
-resolver-owned budget, and the returned authorization context must match the
-server-owned task and effective correlation ID.
+metadata is intersected with a resolver-owned capability allowlist. A
+message-supplied budget is intersected with a thread-safe snapshot of the
+authenticated budget's remaining resources, and execution receives a separate
+ledger bounded by both sides. Transport data cannot set a principal, add
+scopes/roles, restore reserved resources, broaden authenticated authority, or
+mutate the resolver-owned ledger. The returned authorization context must
+match the server-owned task and effective correlation ID.
 
 Advertised skills are bound to signed, runtime-scoped `CapabilityBinding`
 snapshots. Each invocation revalidates signature, runtime ownership, expiry,

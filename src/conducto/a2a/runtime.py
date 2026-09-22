@@ -860,17 +860,42 @@ def _attenuate_budget(
     authenticated: DelegationBudget | None,
     requested: tuple[int, int, int | None, float | None] | None,
 ) -> DelegationBudget | None:
-    if authenticated is not None:
-        return authenticated
-    if requested is None:
+    authenticated_snapshot = (
+        authenticated.snapshot(current_depth=0, remaining_time=None)
+        if authenticated is not None
+        else None
+    )
+    if authenticated_snapshot is None and requested is None:
         return None
-    max_depth, calls, tokens, cost = requested
+    if authenticated_snapshot is None:
+        assert requested is not None
+        max_depth, calls, tokens, cost = requested
+    elif requested is None:
+        max_depth = authenticated_snapshot.depth
+        calls = authenticated_snapshot.calls
+        tokens = authenticated_snapshot.tokens
+        cost = authenticated_snapshot.cost
+    else:
+        requested_depth, requested_calls, requested_tokens, requested_cost = requested
+        max_depth = min(authenticated_snapshot.depth, requested_depth)
+        calls = min(authenticated_snapshot.calls, requested_calls)
+        tokens = _minimum_optional(authenticated_snapshot.tokens, requested_tokens)
+        cost = _minimum_optional(authenticated_snapshot.cost, requested_cost)
     return DelegationBudget(
         max_depth=max_depth,
         calls=calls,
         tokens=tokens,
         cost=cost,
     )
+
+
+def _minimum_optional[T: int | float](left: T | None, right: T | None) -> T | None:
+    """Return the stricter optional numeric bound."""
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return min(left, right)
 
 
 __all__ = [

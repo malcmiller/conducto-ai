@@ -1,14 +1,11 @@
 # A2A ASGI server host
 
-`conducto.a2a.A2AASGI` is the smallest complete inbound A2A 1.0 ASGI protocol
-host for one Conducto agent. It owns HTTP/ASGI protocol adaptation, exact
-route matching, Agent Card and mounted endpoint consistency, official A2A SDK
-JSON-RPC dispatch, protocol parsing and standard protocol errors, and task
-repository wiring. It does not own Conducto authorization, approvals, audit,
-model resolution, capability invocation, or authentication. Those concerns
-remain with `Runtime`, `A2ARuntimeHandler`, and the application-owned identity
-resolver. Production hardening and process hosting remain application concerns
-and later roadmap work.
+`conducto.a2a.create_a2a_app()` is the recommended application API for hosting
+one Conducto agent through inbound A2A 1.0. It composes the official-SDK ASGI
+adapter, canonical runtime handler, required application-owned identity
+resolver, and task repository without starting a listener or process.
+`conducto.a2a.A2AASGI` remains the advanced low-level composition API for
+tests and integrations that already construct those pieces.
 
 The optional dependency lives in the `a2a-server` extra:
 
@@ -22,14 +19,45 @@ Importing `conducto` or any client transport module never imports Starlette
 or the official SDK's server routes. Constructing `A2AASGI` without the extra
 raises `A2ADependencyError` with installation guidance.
 
-## Construction
+## Recommended application API
 
 ```python
-from conducto.a2a import A2AASGI
-from conducto.a2a import A2ARuntimeHandler
-from conducto.transport.tasks import InMemoryTaskRepository
+from conducto.a2a import create_a2a_app
 
-runtime_handler = A2ARuntimeHandler(
+app = create_a2a_app(
+    agent=agent,
+    runtime=runtime,
+    public_url="https://agent.example",
+    identity_resolver=resolve_identity,
+)
+```
+
+The factory deterministically derives the canonical JSON-RPC endpoint
+`https://agent.example/a2a`, and the generated Agent Card advertises that exact
+mounted endpoint. `public_url` must be an absolute HTTP(S) origin: paths,
+queries, fragments, user information, malformed ports, and relative URLs fail
+construction with `ValueError`. Authentication is always explicit; the factory
+does not provide an allow-all identity.
+
+By default each application receives an isolated `InMemoryTaskRepository`.
+Applications may inject another `TaskRepository`:
+
+```python
+app = create_a2a_app(
+    agent=agent,
+    runtime=runtime,
+    public_url="https://agent.example",
+    identity_resolver=resolve_identity,
+    task_repository=repository,
+)
+```
+
+## Advanced and testing composition
+
+```python
+from conducto.a2a import A2AASGI, A2ARuntimeHandler
+
+handler = A2ARuntimeHandler(
     runtime=runtime,
     agent=agent,
     identity_resolver=resolve_identity,
@@ -37,16 +65,17 @@ runtime_handler = A2ARuntimeHandler(
 app = A2AASGI(
     agent=agent,
     endpoint_url="https://agent.example/a2a",
-    task_repository=InMemoryTaskRepository(),
-    request_handler=runtime_handler,
+    task_repository=repository,
+    request_handler=handler,
 )
 ```
 
-Constructing `A2AASGI` never starts a listener, event loop, thread, or
-subprocess. The returned object is an ASGI callable; the embedding
-application owns the ASGI server, TLS termination, and process supervision.
-Two instances never share task or lifecycle state, so one process can host
-multiple agents or multiple isolated deployments of the same agent.
+Constructing either API never starts a listener, event loop, thread, or
+subprocess. The returned object is an ASGI callable suitable for
+`uvicorn app:app`; the embedding application owns the ASGI server, TLS
+termination, and process supervision. Neither API imports Uvicorn or FastAPI.
+Two instances never share task or lifecycle state unless the application
+explicitly injects shared state.
 
 `agent.get_agent_card(endpoint_url, ...)` produces the published card, which
 is validated against the pinned A2A 1.0 profile
@@ -153,10 +182,13 @@ validates credentials itself. Raw headers are visible only to that resolver.
 It returns immutable authorization facts, an optional capability allowlist and
 delegation budget, and an optional authenticated approval decision. Request
 metadata is intersected with a resolver-owned capability allowlist. A
-request-supplied budget is used only when the resolver did not establish one,
-and its depth and call counts are capped by handler-owned limits. Transport
-data therefore cannot broaden resolver-owned authority. Transport timeouts are
-also capped by the handler's `max_timeout`.
+request-supplied budget is intersected with an immutable snapshot of the
+authenticated budget's remaining depth, calls, tokens, and cost. The effective
+invocation receives a new ledger, so it cannot restore resources already
+reserved from authenticated authority, broaden either side's limits, or mutate
+the resolver-owned ledger. Requested depth and calls are also capped by
+handler-owned limits. Transport timeouts are capped by the handler's
+`max_timeout`.
 
 ### Invocation envelope
 

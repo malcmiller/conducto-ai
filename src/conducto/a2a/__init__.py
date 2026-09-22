@@ -61,6 +61,7 @@ from conducto.core.invocation_results import (
 )
 
 from .errors import A2ADependencyError, A2AServerError
+from .factory import create_a2a_app
 from .handler import A2ACancellableRequestHandler, A2ARequestContext, A2ARequestHandler
 from .profile import A2A_SERVER_EXTRA, require_a2a_server_dependency
 from .runtime import (
@@ -229,6 +230,7 @@ __all__ = [
     "A2ARuntimeHandler",
     "A2AServerError",
     "CONDUCTO_PARAMETER_EXTENSION_URI",
+    "create_a2a_app",
     "invocation_result_to_task",
     "require_a2a_server_dependency",
     "MAX_ARTIFACT_PARTS",

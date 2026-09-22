@@ -78,8 +78,10 @@ so that importing `conducto` never requires the optional `mcp` extra:
 
 The inbound A2A ASGI host is published from `conducto.a2a` instead of the
 package root so that importing `conducto` never requires the optional
-`a2a-server` extra: `A2AASGI`, the `A2ARequestHandler` seam protocol, and the
-typed `A2AServerError`/`A2ADependencyError` hierarchy. See
+`a2a-server` extra. `create_a2a_app` is the recommended runtime-backed
+application factory; `A2AASGI` and `A2ARequestHandler` provide advanced
+composition, alongside the typed `A2AServerError`/`A2ADependencyError`
+hierarchy. See
 [A2A ASGI server host](./a2a-server.md).
 
 ## `@a2a_agent`
