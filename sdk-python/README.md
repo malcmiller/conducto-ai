@@ -21,6 +21,7 @@ implementation responsibilities:
 - [Gateway and discovery](docs/gateway-and-discovery.md)
 - [Orchestration and delegation](docs/orchestration-and-delegation.md)
 - [Providers and models](docs/providers-and-models.md)
+- [Ollama provider](docs/ollama-provider.md)
 - [Runtime and invocation](docs/runtime-and-invocation.md)
 - [MCP tool export](docs/mcp-export.md)
 - [SDK reference](docs/sdk-reference.md)

@@ -25,6 +25,8 @@ deployment, roadmap, and automation documentation remains in
   calls.
 - [Providers and models](./providers-and-models.md) — provider contracts,
   model precedence, capability checks, and invocation-scoped model access.
+- [Ollama provider](./ollama-provider.md) — local Ollama structured output,
+  native tools, profiles, transport configuration, and opt-in smoke tests.
 - [Runtime and invocation](./runtime-and-invocation.md) — execution context,
   validation, security, deadlines, cancellation, results, and provenance.
 
