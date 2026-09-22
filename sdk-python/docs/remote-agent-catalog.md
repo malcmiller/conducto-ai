@@ -4,9 +4,9 @@
 agents. It owns stable logical and instance identity, ownership, deployment
 type, Agent Card provenance, trust-policy references, capability indexing,
 lease-based instance health, and lifecycle state. It never selects transport
-or invokes a capability; that belongs to a future agent gateway that consumes
-catalog snapshots the same way `LocalAgentGateway` consumes `AgentRegistry`
-snapshots.
+or invokes a capability; `HybridAgentGateway` consumes catalog snapshots the
+same way `LocalAgentGateway` consumes `AgentRegistry` snapshots while the
+runtime-owned transport adapter owns remote dispatch.
 
 Deployment automation uses the authenticated
 [registration control plane](deployment-registration.md), not direct
@@ -45,7 +45,8 @@ Two reference providers are included:
 
 A future hosted registry (for example a Microsoft Entra Agent Registry
 adapter) implements the same protocol without changing `AgentCatalog` or
-gateway code.
+gateway code. See [gateway and discovery](./gateway-and-discovery.md) for how
+the runtime combines catalog facts with local registry facts.
 
 ## Admission
 
@@ -94,6 +95,10 @@ registration when:
 returns the resulting snapshot; it never removes an instance that a
 provider's current list omits; only lease expiration or an explicit lifecycle
 change does that.
+
+Catalog descriptors retain the admitted Agent Card skill identifier for audit
+and transport correlation, while the gateway projects the stable Conducto
+capability name back into the caller-facing `CapabilityDescriptor` contract.
 
 ## Instance health and lease expiration
 

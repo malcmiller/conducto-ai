@@ -11,7 +11,9 @@ flowchart TD
     A[Agent class and decorators] --> R[Method reflection and schemas]
     R --> C[Agent Card and capability descriptors]
     C --> AR[AgentRegistry]
-    AR --> G[LocalAgentGateway]
+    C --> CAT[AgentCatalog admission]
+    AR --> G[Local or Hybrid AgentGateway]
+    CAT --> G
     O[OrchestratorAgent] --> AR
     O --> RT[Runtime]
     G --> RT
@@ -67,7 +69,7 @@ or error path.
 | `core.provider`          | `messages`, `configuration`, `results`, `errors`, `structured`, `tools`, `decisions`, `protocol`, `execution`                                   |
 | `core.provider_registry` | `configuration`, `factories`, `registration`, `bindings`, `availability`, `ownership`, `lifecycle`, `cleanup`, `snapshots`, `state`, `registry` |
 | Runtime composition      | `runtime` facade, `runtime_context` construction/attenuation, `runtime_invocation` authorization/approval wiring, `invocation` execution        |
-| `core.gateway`           | `_contracts`, `_local`, `_discovery`, `_bindings`, `_schema`, `_projection`                                                                     |
+| `core.gateway`           | `_contracts`, `_local`, `_hybrid`, `_discovery`, `_bindings`, `_schema`, `_projection`                                                          |
 | `core.catalog`           | `_models`, `_providers`, `_admission`, `_lifecycle`                                                                                             |
 | `core.delegation`        | `_models`, `_fallback`, `_results`, `_arguments`, `_loop`                                                                                       |
 | `providers`              | Vendor-facing adapters over shared private `_config`, `_http`, `_lifecycle`, `_schema`, `_response`, `_tool_cache`                              |
@@ -90,11 +92,12 @@ leases/retirement/cleanup, and credential-free snapshots. The registry lock
 protects publication and lifecycle decisions; construction, health predicates,
 and shutdown callbacks do not execute while holding it.
 
-Gateway schema compatibility and model-safe projection are distinct from
-binding authorization. Catalog providers load candidate facts; admission
-validates Agent Cards and provenance before lifecycle state becomes visible.
-Delegation models and result mapping are separate from the execution loop;
-fallback is explicit policy, not an exception-swallowing branch.
+Gateway schema compatibility, local/remote selection, transport-neutral binding
+issuance, and model-safe projection are distinct from binding authorization.
+Catalog providers load candidate facts; admission validates Agent Cards and
+provenance before lifecycle state becomes visible. Delegation models and result
+mapping are separate from the execution loop; fallback is explicit policy, not
+an exception-swallowing branch.
 
 No wire contract changes are intended by these Python module moves. Golden
 schemas and result envelopes remain the conformance boundary. Pre-v1 API
@@ -109,7 +112,7 @@ aliases, and agent-owned raw provider configuration. See the
 | `BaseAgent` and decorators | Agent metadata, capability declarations, agent defaults                                                                                             | Global registration, provider clients, transport                       |
 | `registration.py`          | Reflection of decorated methods and registration metadata                                                                                           | Runtime agent discovery                                                |
 | `AgentRegistry`            | Local agent instances, capability indexes, lifecycle, health, immutable snapshots                                                                   | Policy decisions, model calls, capability execution                    |
-| `AgentGateway`             | Caller-aware discovery, deterministic selection, opaque bindings, invocation revalidation                                                           | Mutable registration state, provider construction                      |
+| `AgentGateway`             | Caller-aware discovery, deterministic local/remote selection, opaque bindings, invocation revalidation, and normalized outcome mapping              | Mutable registration state, provider construction                      |
 | `OrchestratorAgent`        | Application-facing local registry facade and optional model-based top-level routing                                                                 | Nested delegation state or provider lifecycle                          |
 | `Runtime`                  | Run context, model resolution, gateway construction, security, invocation, provenance                                                               | Agent metadata declaration                                             |
 | `ProviderRegistry`         | Provider factories, clients, ownership metadata, model-reference bindings                                                                           | Selecting a model for a particular call                                |
@@ -141,11 +144,13 @@ The similarly named registries solve different problems:
 ### Gateway invocation
 
 1. `AgentRegistry.snapshot()` publishes immutable descriptors.
-2. `LocalAgentGateway.discover()` filters candidates by capability, tags,
-   version, schema, lifecycle, health, caller authority, and policy.
+2. `LocalAgentGateway` or `HybridAgentGateway` filters candidates by
+   capability, tags, version, schema, lifecycle, health, caller authority,
+   and policy.
 3. Discovery returns an opaque, runtime-bound `CapabilityBinding`.
-4. `LocalAgentGateway.invoke()` revalidates the binding, lifecycle, schema,
-   authority, path, and shared budget.
+4. Gateway invocation revalidates the binding, lifecycle, schema, authority,
+   path, and shared budget, then dispatches locally or through the configured
+   remote transport adapter.
 5. Dispatch enters the same `Runtime.invoke()` path as a direct call.
 
 ### Model-assisted orchestration

@@ -107,6 +107,7 @@ def _capabilities_from_card(card: Mapping[str, Any]) -> tuple[CatalogCapabilityD
         descriptors.append(
             CatalogCapabilityDescriptor(
                 capability_id=capability_id,
+                name=str(skill.get("name", capability_id)),
                 description=skill.get("description"),
                 tags=frozenset(skill.get("tags", ())),
                 input_schema=parameter_map.get(capability_id, {}),

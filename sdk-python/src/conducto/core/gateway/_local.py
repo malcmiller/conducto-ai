@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..gateway_models import (
     BoundCapability,
     CapabilityBinding,
+    CapabilityDescriptor,
     DiscoveryQuery,
     DiscoveryResult,
     GatewayFailure,
@@ -40,6 +42,11 @@ from ._schema import _UnsupportedSchemaError
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
+
+
+@dataclass(frozen=True, slots=True)
+class _LocalBindingState:
+    source: str = "local"
 
 
 class LocalAgentGateway:
@@ -77,7 +84,21 @@ class LocalAgentGateway:
         self._preferred_agents = dict(
             preferred_agents if preferred_agents is not None else runtime.gateway_preferred_agents
         )
-        self._bindings = BindingAuthority(*runtime.gateway_binding_material(), binding_ttl)
+        (
+            runtime_id,
+            secret,
+            binding_state,
+            binding_state_lock,
+            binding_clock,
+        ) = runtime.gateway_binding_material()
+        self._bindings = BindingAuthority(
+            runtime_id,
+            secret,
+            binding_ttl,
+            state_store=binding_state,
+            state_lock=binding_state_lock,
+            clock=binding_clock,
+        )
         self._max_results = max_results
         self._max_serialized_bytes = max_serialized_bytes
 
@@ -125,7 +146,7 @@ class LocalAgentGateway:
             candidates = tuple(
                 BoundCapability(
                     descriptor,
-                    self._bindings.issue(descriptor, revision, generation),
+                    self._issue_binding(descriptor, revision, generation),
                 )
                 for descriptor, generation in matches[:limit]
             )
@@ -204,7 +225,7 @@ class LocalAgentGateway:
             descriptor, generation = matches[0]
             return SelectionOutcome(
                 SelectionStatus.SELECTED,
-                self._bindings.issue(descriptor, revision, generation),
+                self._issue_binding(descriptor, revision, generation),
                 descriptor,
                 truncated=unsupported,
             )
@@ -222,7 +243,7 @@ class LocalAgentGateway:
                     descriptor, generation = preferred
                     return SelectionOutcome(
                         SelectionStatus.SELECTED,
-                        self._bindings.issue(descriptor, revision, generation),
+                        self._issue_binding(descriptor, revision, generation),
                         descriptor,
                         truncated=unsupported,
                     )
@@ -266,7 +287,7 @@ class LocalAgentGateway:
             self._context.require_active()
             correlation_id = self._context.correlation_id
             metadata = self._context.invocation_metadata()
-            binding_failure = self._bindings.validate(binding)
+            binding_failure, state = self._bindings.resolve(binding)
             if binding_failure is not None:
                 span.set_outcome("binding_failure", reason=binding_failure.value)
                 return InvocationBindingFailure(
@@ -298,109 +319,133 @@ class LocalAgentGateway:
                     tuple((item.agent_id, item.capability_id) for item in path),
                     metadata,
                 )
-
-            (
-                agent,
-                agent_descriptor,
-                lifecycle,
-                healthy,
-                generation_valid,
-                schema_valid,
-            ) = self._registry.accept_binding(
-                agent_id=binding.agent_id,
-                capability_id=binding.capability_id,
-                generation=binding.registration_generation,
-                schema_digest=binding.schema_digest,
-            )
-            if agent is None or not generation_valid:
-                span.set_outcome("stale_binding", reason="stale_binding")
-                return InvocationStaleBinding(
-                    correlation_id,
-                    binding.agent_id,
-                    binding.capability_id,
-                    metadata,
-                )
-            if not schema_valid:
-                span.set_outcome("schema_mismatch", reason="schema_mismatch")
-                return InvocationSchemaMismatch(
-                    correlation_id,
-                    binding.agent_id,
-                    binding.capability_id,
-                    metadata,
-                )
-            if lifecycle is not RegistrationLifecycle.ACTIVE or not healthy:
-                reason = lifecycle.value if lifecycle is not None else "unhealthy"
-                if lifecycle is RegistrationLifecycle.ACTIVE and not healthy:
-                    reason = "unhealthy"
-                span.set_outcome("target_unavailable", reason=reason)
-                return InvocationTargetUnavailable(
-                    correlation_id,
-                    binding.agent_id,
-                    binding.capability_id,
-                    reason,
-                    metadata,
-                )
-            assert agent_descriptor is not None
-            descriptor = next(
-                item
-                for item in agent_descriptor.capabilities
-                if item.capability_id == binding.capability_id
-            )
-            try:
-                authorized = self._authorization.permits(descriptor, check_budget=False)
-            except _GatewayPolicyEvaluationError:
-                span.set_outcome(
-                    "authorization_failure",
-                    reason=GatewayFailureCode.POLICY_EVALUATION_FAILED.value,
-                )
-                return InvocationAuthorizationFailure(
-                    correlation_id,
-                    GatewayFailureCode.POLICY_EVALUATION_FAILED.value,
-                    metadata,
-                )
-            if not authorized:
-                span.set_outcome(
-                    "authorization_failure",
-                    reason=GatewayFailureCode.DISCOVERY_DENIED.value,
-                )
-                return InvocationAuthorizationFailure(
-                    correlation_id,
-                    GatewayFailureCode.DISCOVERY_DENIED.value,
-                    metadata,
-                )
-            try:
-                self._context.remaining_timeout()
-            except TimeoutError:
-                from ..invocation_results import InvocationTimeout
-
-                span.set_outcome("timeout", reason="timeout")
-                return InvocationTimeout(correlation_id, 0.0, metadata)
-            if not self._context.delegation_budget.reserve(
-                calls=1,
-                tokens=token_cost,
-                cost=cost,
-            ):
-                span.set_outcome("budget_exhausted", reason="budget_exhausted")
-                return InvocationBudgetExhausted(
-                    correlation_id,
-                    "calls, tokens, or cost",
-                    metadata,
-                )
-            prior_calls = self._context.model_calls()
-            result = await self._runtime.invoke(
-                agent,
-                binding.capability_id,
+            result = await self._invoke_resolved_binding(
+                binding,
+                state,
                 arguments,
                 timeout=timeout,
-                correlation_id=correlation_id,
+                token_cost=token_cost,
+                cost=cost,
             )
-            if result.metadata is not None and prior_calls:
-                result = dataclasses.replace(
-                    result,
-                    metadata=result.metadata.with_prior_model_calls(prior_calls),
-                )
             if isinstance(result, InvocationSuccess):
                 span.set_outcome("success")
             else:
                 span.set_outcome(type(result).__name__)
             return result
+
+    def _issue_binding(
+        self,
+        descriptor: CapabilityDescriptor,
+        revision: int,
+        generation: int,
+    ) -> CapabilityBinding:
+        """Issue a local binding tied to this runtime's shared authority state."""
+        return self._bindings.issue(
+            descriptor,
+            revision,
+            generation,
+            state=_LocalBindingState(),
+        )
+
+    async def _invoke_resolved_binding(
+        self,
+        binding: CapabilityBinding,
+        state: object | None,
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None,
+        token_cost: int,
+        cost: float,
+    ) -> InvocationResult:
+        """Invoke a validated local binding while preserving the shared contracts."""
+        del state
+        correlation_id = self._context.correlation_id
+        metadata = self._context.invocation_metadata()
+        (
+            agent,
+            agent_descriptor,
+            lifecycle,
+            healthy,
+            generation_valid,
+            schema_valid,
+        ) = self._registry.accept_binding(
+            agent_id=binding.agent_id,
+            capability_id=binding.capability_id,
+            generation=binding.registration_generation,
+            schema_digest=binding.schema_digest,
+        )
+        if agent is None or not generation_valid:
+            return InvocationStaleBinding(
+                correlation_id,
+                binding.agent_id,
+                binding.capability_id,
+                metadata,
+            )
+        if not schema_valid:
+            return InvocationSchemaMismatch(
+                correlation_id,
+                binding.agent_id,
+                binding.capability_id,
+                metadata,
+            )
+        if lifecycle is not RegistrationLifecycle.ACTIVE or not healthy:
+            reason = lifecycle.value if lifecycle is not None else "unhealthy"
+            if lifecycle is RegistrationLifecycle.ACTIVE and not healthy:
+                reason = "unhealthy"
+            return InvocationTargetUnavailable(
+                correlation_id,
+                binding.agent_id,
+                binding.capability_id,
+                reason,
+                metadata,
+            )
+        assert agent_descriptor is not None
+        descriptor = next(
+            item
+            for item in agent_descriptor.capabilities
+            if item.capability_id == binding.capability_id
+        )
+        try:
+            authorized = self._authorization.permits(descriptor, check_budget=False)
+        except _GatewayPolicyEvaluationError:
+            return InvocationAuthorizationFailure(
+                correlation_id,
+                GatewayFailureCode.POLICY_EVALUATION_FAILED.value,
+                metadata,
+            )
+        if not authorized:
+            return InvocationAuthorizationFailure(
+                correlation_id,
+                GatewayFailureCode.DISCOVERY_DENIED.value,
+                metadata,
+            )
+        try:
+            self._context.remaining_timeout()
+        except TimeoutError:
+            from ..invocation_results import InvocationTimeout
+
+            return InvocationTimeout(correlation_id, 0.0, metadata)
+        if not self._context.delegation_budget.reserve(
+            calls=1,
+            tokens=token_cost,
+            cost=cost,
+        ):
+            return InvocationBudgetExhausted(
+                correlation_id,
+                "calls, tokens, or cost",
+                metadata,
+            )
+        prior_calls = self._context.model_calls()
+        result = await self._runtime.invoke(
+            agent,
+            binding.capability_id,
+            arguments,
+            timeout=timeout,
+            correlation_id=correlation_id,
+        )
+        if result.metadata is not None and prior_calls:
+            result = dataclasses.replace(
+                result,
+                metadata=result.metadata.with_prior_model_calls(prior_calls),
+            )
+        return result

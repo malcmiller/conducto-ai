@@ -229,6 +229,7 @@ class GatewayFailureCode(StrEnum):
     FOREIGN_RUNTIME = "foreign_runtime"
     EXPIRED_BINDING = "expired_binding"
     TARGET_UNAVAILABLE = "target_unavailable"
+    NO_ELIGIBLE_INSTANCE = "no_eligible_instance"
     SCHEMA_MISMATCH = "schema_mismatch"
     BUDGET_EXHAUSTED = "budget_exhausted"
     CYCLE_DETECTED = "cycle_detected"

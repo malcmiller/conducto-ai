@@ -58,6 +58,7 @@ class CatalogCapabilityDescriptor:
 
     Attributes:
         capability_id: Stable capability identifier from the Agent Card skill.
+        name: Stable Conducto capability name exposed through the gateway.
         description: Human-readable capability description.
         tags: Capability tags used for discovery filtering.
         input_schema: JSON Schema for capability arguments, if published.
@@ -69,6 +70,7 @@ class CatalogCapabilityDescriptor:
     """
 
     capability_id: str
+    name: str
     description: str | None
     tags: frozenset[str]
     input_schema: Mapping[str, Any]
@@ -106,7 +108,7 @@ class CatalogCapabilityDescriptor:
         return CapabilityDescriptor(
             agent_id=agent_id,
             agent_version=agent_version,
-            capability_id=self.capability_id,
+            capability_id=self.name,
             description=self.description,
             tags=self.tags,
             input_schema=self.input_schema,
