@@ -88,6 +88,12 @@ from .logging import (
     log_context,
 )
 from .orchestrator import OrchestratorAgent
+from .otel_logs import (
+    LOG_MAPPING_SCHEMA_VERSION,
+    InMemoryLogs,
+    OpenTelemetryLogBridge,
+    configure_in_memory_logs,
+)
 from .provider import (
     AcceptanceState,
     AsynchronouslyClosableProvider,
@@ -400,6 +406,10 @@ __all__ = [
     "get_run_context",
     "require_run_context",
     "run_delegation",
+    "LOG_MAPPING_SCHEMA_VERSION",
+    "InMemoryLogs",
+    "OpenTelemetryLogBridge",
+    "configure_in_memory_logs",
     "ExtractedTraceContext",
     "InMemoryTracing",
     "OpenTelemetryNotInstalledError",

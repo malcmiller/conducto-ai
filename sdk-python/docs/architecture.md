@@ -42,6 +42,7 @@ flowchart TD
 | `run_delegation` | Bounded model/tool loop and terminal outcome | Discovery authority or direct registry access |
 | `conducto.mcp` | MCP export policy, deterministic tool naming, schema projection, result mapping, stdio lifecycle | Capability declaration, validation, authorization, MCP framing |
 | `conducto.core.telemetry` | Optional Conducto span names, safe attributes, W3C trace-context helpers, and test tracing helper | Application tracer-provider/exporter lifecycle or auto-instrumentation |
+| `conducto.core.otel_logs` | Optional bridge attaching an application-owned `LoggerProvider` to `conducto` events, bounded/redacted attribute mapping, and test in-memory helper | Global provider/handler/exporter installation, security audit delivery |
 
 The similarly named registries solve different problems:
 `AgentRegistry` indexes callable agents and capabilities, while
@@ -103,6 +104,19 @@ best-effort explicit spans only at SDK-owned boundaries and keeps invocation,
 security, audit, deadline, retry, and cancellation behavior unchanged when
 tracing is absent. W3C `traceparent`/`tracestate` context is propagated at
 supported remote boundaries, while baggage is not forwarded by default.
+
+### Optional OpenTelemetry Logs export
+
+`OpenTelemetryLogBridge` (`conducto.core.otel_logs`) attaches an
+application-supplied OpenTelemetry `LoggerProvider` to the `conducto` logger,
+bridging existing versioned events (never a second event taxonomy) to OTLP
+log records with trace/span correlation from the active context. The
+application owns the provider, exporter, resource, and shutdown; the bridge
+owns only the handler it creates, applies bounded/redacted attribute mapping
+before any record reaches a processor or exporter, and never blocks
+invocation on exporter failures. It is entirely independent from the Story
+2.3 security audit sink: accepting a log record here never satisfies
+mandatory audit delivery. See [Python logging](./logging.md).
 
 ## State and concurrency
 
