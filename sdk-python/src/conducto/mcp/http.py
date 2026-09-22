@@ -11,7 +11,6 @@ from dataclasses import dataclass, replace
 from typing import Any
 from uuid import uuid4
 
-from conducto.security.context import AuthorizationContext
 from conducto.core.telemetry import (
     SPAN_MCP_SERVER,
     SPAN_MCP_TOOLS_CALL,
@@ -19,6 +18,7 @@ from conducto.core.telemetry import (
     extract_trace_context,
     start_span,
 )
+from conducto.security.context import AuthorizationContext
 
 from .errors import McpDependencyError, McpExportError, McpToolNotFoundError
 from .export import McpToolExporter

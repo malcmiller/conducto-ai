@@ -63,6 +63,23 @@ uv run python examples/mcp_stdio_server.py
 Importing `conducto` never imports the MCP SDK. See
 [MCP tool export](docs/mcp-export.md).
 
+## Optional OpenTelemetry tracing
+
+Conducto tracing is opt-in and application-owned. The base package does not
+install or import OpenTelemetry. To enable the documented span contract and W3C
+trace-context propagation helpers, install the optional extra:
+
+```bash
+uv sync --locked --extra opentelemetry --group dev
+```
+
+Applications still own tracer providers, exporters, resources, sampling, and any
+FastAPI/HTTPX auto-instrumentation. Conducto creates explicit spans only at SDK
+boundaries and falls back to deterministic no-op behavior when tracing is not
+installed or configured. See [Python logging](docs/logging.md) for trace/log
+correlation and the semantic fixture in
+[`docs/semantic-fixtures/opentelemetry-spans.v1.json`](docs/semantic-fixtures/opentelemetry-spans.v1.json).
+
 ## Public API example
 
 ```python
