@@ -10,21 +10,23 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from conducto import (
+from conducto.core.provider import (
     ChatMessage,
     GenerationOptions,
     MalformedStructuredOutputError,
     ModelConfiguration,
     ProviderCallContext,
-    ProviderClientConfig,
-    ProviderOwnership,
-    ProviderRegistry,
     ProviderTimeoutError,
     ProviderToolDefinition,
     StructuredOutputRequest,
     ToolResultMessage,
     UnsupportedProviderCapabilityError,
     parse_model_decision,
+)
+from conducto.core.provider_registry import (
+    ProviderClientConfig,
+    ProviderOwnership,
+    ProviderRegistry,
 )
 from conducto.core.runtime_errors import ContradictoryProviderConfigurationError
 from conducto.providers import (
@@ -55,21 +57,22 @@ class _FakeOllamaClient:
         version: str = "0.6.0",
         show_error: Exception | None = None,
         version_error: Exception | None = None,
-        delay: float = 0.0,
+        response_gate: asyncio.Event | None = None,
     ) -> None:
+        """Create a scripted fixture with an optional explicit response gate."""
         self.responses = list(responses)
         self.version_value = version
         self.show_error = show_error
         self.version_error = version_error
-        self.delay = delay
+        self.response_gate = response_gate
         self.chat_calls: list[dict[str, Any]] = []
         self.closed = False
 
     async def chat(self, **kwargs: Any) -> Mapping[str, Any]:
-        """Return the next scripted chat response."""
+        """Return the next scripted chat response after any configured gate opens."""
         self.chat_calls.append(kwargs)
-        if self.delay:
-            await asyncio.sleep(self.delay)
+        if self.response_gate is not None:
+            await self.response_gate.wait()
         if not self.responses:
             raise AssertionError("script exhausted")
         return self.responses.pop(0)
@@ -408,11 +411,12 @@ def test_ollama_provider_rejects_unsupported_schemas_before_dispatch() -> None:
 
 def test_ollama_provider_enforces_call_timeout_and_deadline() -> None:
     async def exercise() -> None:
+        response_gate = asyncio.Event()
         provider = OllamaProvider(
             model="llama3.1:8b",
             client=_FakeOllamaClient(
                 ({"message": {"role": "assistant", "content": '{"value":"ok"}'}},),
-                delay=0.05,
+                response_gate=response_gate,
             ),
         )
         with pytest.raises(ProviderTimeoutError):
@@ -421,6 +425,14 @@ def test_ollama_provider_enforces_call_timeout_and_deadline() -> None:
                 options=GenerationOptions(model="llama3.1:8b", timeout=0.001),
                 structured_output=_schema(),
             )
+
+        response_gate.set()
+        result = await provider.complete(
+            (ChatMessage(role="user", content="answer"),),
+            options=GenerationOptions(model="llama3.1:8b"),
+            structured_output=_schema(),
+        )
+        assert result.structured == {"value": "ok"}
 
         expired = OllamaProvider(model="llama3.1:8b", client=_FakeOllamaClient(()))
         with pytest.raises(ProviderTimeoutError):
@@ -486,7 +498,7 @@ def test_ollama_provider_factory_and_preconstructed_client_paths_are_isolated(
 ) -> None:
     constructed_clients: list[_FakeOllamaClient] = []
 
-    def fake_create_official_client(**kwargs: Any) -> _FakeOllamaClient:
+    def fake_create_bounded_client(**kwargs: Any) -> _FakeOllamaClient:
         assert kwargs["endpoint"] == "http://localhost:11434"
         assert kwargs["auth_token"] == "secret-token"
         assert kwargs["transport_options"]["max_connections"] == 4
@@ -495,7 +507,7 @@ def test_ollama_provider_factory_and_preconstructed_client_paths_are_isolated(
         constructed_clients.append(client)
         return client
 
-    monkeypatch.setattr(ollama_adapter, "_create_official_client", fake_create_official_client)
+    monkeypatch.setattr(ollama_adapter, "_create_bounded_client", fake_create_bounded_client)
     monkeypatch.setenv("CONDUCTO_OLLAMA_TOKEN", "secret-token")
     registry = ProviderRegistry()
     registry.register_provider_type("ollama", OllamaProviderFactory())

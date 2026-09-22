@@ -11,15 +11,9 @@ from mcp import ClientSession
 from mcp.shared.exceptions import MCPError
 from mcp.shared.memory import create_client_server_memory_streams
 
-from conducto import (
-    AgentRegistry,
-    BaseAgent,
-    InvocationSuccess,
-    Runtime,
-    a2a_agent,
-    a2a_capability,
-)
+from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
 from conducto.a2a import invocation_result_to_task
+from conducto.core.invocation_results import InvocationSuccess
 from conducto.mcp import McpExportPolicy, McpExportRule, McpToolExporter
 from conducto.mcp.server import CORRELATION_META_KEY, REASON_META_KEY, McpStdioServer
 from conducto.security import Principal
@@ -35,6 +29,11 @@ CANCELLED: list[str] = []
 class LedgerAgent(BaseAgent):
     """Agent whose single capability is shared by A2A and MCP callers."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_started = asyncio.Event()
+        self.wait_cancelled = asyncio.Event()
+
     @a2a_capability(name="record", description="Records one ledger entry.")
     def record(self, entry: str) -> dict[str, str]:
         """Record an entry and return its stored state."""
@@ -44,10 +43,12 @@ class LedgerAgent(BaseAgent):
     @a2a_capability(name="wait", description="Waits until the caller cancels.")
     async def wait(self, label: str) -> str:
         """Await cancellation so cancellation propagation can be observed."""
+        self.wait_started.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             CANCELLED.append(label)
+            self.wait_cancelled.set()
             raise
         return label  # pragma: no cover - the capability never completes
 
@@ -143,7 +144,7 @@ def test_unknown_tool_names_are_protocol_errors() -> None:
 
 
 def test_client_cancellation_propagates_into_the_invocation() -> None:
-    server, _, _ = _server()
+    server, _, agent = _server()
     CANCELLED.clear()
 
     async def run() -> None:
@@ -151,16 +152,13 @@ def test_client_cancellation_propagates_into_the_invocation() -> None:
             call = asyncio.ensure_future(
                 session.call_tool("ledgeragent__wait", {"label": "cancel-me"})
             )
-            await asyncio.sleep(0.05)
+            await asyncio.wait_for(agent.wait_started.wait(), timeout=1)
             call.cancel()
             try:
                 await call
             except asyncio.CancelledError:
                 pass
-            for _ in range(200):
-                if CANCELLED:
-                    break
-                await asyncio.sleep(0.01)
+            await asyncio.wait_for(agent.wait_cancelled.wait(), timeout=1)
 
     asyncio.run(run())
 

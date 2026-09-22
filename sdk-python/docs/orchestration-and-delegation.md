@@ -4,6 +4,13 @@ Conducto supports three distinct coordination modes. Keeping them separate
 prevents a known target, a top-level routing choice, and a nested model/tool
 loop from collapsing into one ambiguous API.
 
+The `conducto.core.delegation` package owns the public loop and immutable
+configuration/outcome contracts. Its state-machine models, child-result
+mapping, argument validation, and execution coordination have separate
+implementation boundaries. Tool discovery remains in `gateway_tools`;
+provider-native decision parsing remains in `provider`. Neither delegation
+nor a model output owns target authorization.
+
 ## Direct orchestration
 
 Use `OrchestratorAgent.invoke()` when the application already knows the agent
@@ -27,8 +34,15 @@ The orchestrator:
 5. invokes the selected target through the normal runtime path
 6. merges routing-model usage and provenance into the final result
 
-`route()` is a compatibility facade for choosing the first target. It is not
+`route()` is the top-level routing API for choosing the first target. It is not
 the capability gateway and does not manage recursive tool loops.
+
+Register models on `ProviderRegistry`, pass that registry to `Runtime`, and
+construct `OrchestratorAgent(runtime=runtime, model_reference="router")`.
+Neither agents nor routing calls accept raw provider clients or provider model
+configurations. A call selects a different registered model through
+`model_reference` or `RunConfig`, preserving normal policy and provenance.
+Use `invoke()` for direct calls; there is no `invoke_capability()` alias.
 
 ## Nested delegation
 
@@ -59,6 +73,12 @@ decision:
 Malformed, mixed, unknown, stale, foreign, or replayed decisions fail with a
 typed `DelegationOutcome`. Tool calls are sequential and are not implicitly
 retried.
+
+Model-selected arguments are immutable snapshots. Pre-dispatch validation
+normalizes their frozen JSON containers without modifying them, so nested
+arrays retain JSON array semantics. Integer, number, and boolean arguments
+are validated explicitly; numeric bounds and `multipleOf` remain enforced
+before a delegation call is reserved.
 
 ## Budgets and authority
 

@@ -3,25 +3,24 @@ import threading
 
 import pytest
 
-from conducto import (
-    FakeModel,
-    ModelConfiguration,
+from conducto import Runtime
+from conducto.adapters import AdapterDependencyError, require_adapter
+from conducto.adapters import catalog as adapter_catalog
+from conducto.core.provider import ModelConfiguration, ProviderResult
+from conducto.core.provider_registry import (
     ProviderClientConfig,
     ProviderOwnership,
     ProviderRegistry,
-    ProviderShutdownError,
-    Runtime,
-    RuntimeClosedError,
 )
-from conducto.adapters import AdapterDependencyError, require_adapter
-from conducto.adapters import catalog as adapter_catalog
+from conducto.core.runtime_errors import ProviderShutdownError, RuntimeClosedError
+from conducto.testing import FakeModel
 
 
 class _ClosableProvider(FakeModel):
     """Minimal provider fixture that records deterministic cleanup."""
 
     def __init__(self) -> None:
-        super().__init__({})
+        super().__init__(ProviderResult(structured={}, accepted=True))
         self.closes = 0
 
     def close(self) -> None:

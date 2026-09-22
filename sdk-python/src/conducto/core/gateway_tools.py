@@ -1,8 +1,8 @@
 """Model-facing toolbox contracts projected from ``AgentGateway`` discovery.
 
-This module bridges the model-neutral discovery and binding contracts defined
-in ``gateway.py``/``gateway_models.py`` (Story 3.1) and the model/tool
-execution loop delivered by Story 3.3. It lets an agent author declare which
+This module bridges the model-neutral ``conducto.core.gateway`` contract and
+immutable bindings in ``conducto.core.gateway_models`` with the execution
+loop in ``conducto.core.delegation``. It lets an agent author declare which
 capability families an agent may use -- independent of concrete provider
 agent IDs -- and lets the runtime project those declarations into an
 immutable, bounded, schema-valid toolbox for exactly one model decision

@@ -8,7 +8,8 @@ import uuid
 from collections.abc import Iterator, Mapping
 from typing import Any
 
-from conducto.security.context import delegate_context
+from conducto.security.approval import ApprovalDecision
+from conducto.security.context import AuthorizationContext, delegate_context
 
 from .agent import BaseAgent
 from .invocation_results import (
@@ -18,59 +19,41 @@ from .invocation_results import (
     RoutingFailure,
 )
 from .logging import INVOCATION_FAILED, emit_event, log_context
+from .model_config import AgentModelConfig, ModelReference, ModelRequirement, RunConfig
 from .provider import (
     ChatMessage,
     MalformedStructuredOutputError,
-    ModelConfiguration,
-    ModelProvider,
     ProviderError,
     StructuredOutputRequest,
     Usage,
     build_routing_schema,
     parse_routing_selection,
 )
-from .registry import AgentRegistry, card_url_for, routing_prompt_context
-from .runtime import (
-    AgentModelConfig,
-    IncompatibleProviderCapabilitiesError,
-    ModelReference,
-    ModelRequirement,
-    ProviderRegistry,
-    RunConfig,
-    Runtime,
-    get_run_context,
-    use_run_context,
-)
+from .registry import AgentRegistry, routing_prompt_context
+from .run_context import get_run_context, use_run_context
+from .runtime import Runtime
 
-__all__ = ["OrchestratorAgent", "RoutingFailure"]
+__all__ = ["OrchestratorAgent"]
 
 
 class OrchestratorAgent(BaseAgent):
-    """A local registry of reflected agents for deterministic routing."""
+    """Register and invoke local agents, routing with runtime-owned models.
+
+    Model-free capability invocation needs no configuration. Model-based routing
+    requires a runtime with registered providers and a resolvable model reference.
+    """
 
     def __init__(
         self,
         *,
-        model_provider: ModelProvider | None = None,
-        model_config: ModelConfiguration | None = None,
         model_reference: ModelReference | str | None = None,
         runtime: Runtime | None = None,
     ) -> None:
-        if runtime is not None and model_provider is not None:
-            raise ValueError("runtime cannot be combined with model_provider")
-        if model_provider is not None and model_config is None:
-            raise ValueError("model_config is required with model_provider")
-        self._legacy_direct_provider = model_provider is not None
         self._registry = AgentRegistry()
-        # Preserve existing internal attributes for compatible direct integrations.
-        self._registered_agents = self._registry.agents
-        self._registered_capabilities = self._registry.capabilities
-        self._registry_lock = self._registry.lock
-        effective_reference = model_reference or (model_config.model if model_config else None)
+        effective_reference = model_reference
         if isinstance(effective_reference, str):
             effective_reference = ModelReference(effective_reference)
         super().__init__(
-            model_config=model_config,
             model_reference=effective_reference,
             agent_config=AgentModelConfig(
                 default_model=effective_reference,
@@ -78,24 +61,15 @@ class OrchestratorAgent(BaseAgent):
                 required_capabilities=frozenset({"structured_output"}),
             ),
         )
-        if runtime is None:
-            provider_registry = ProviderRegistry()
-            if model_provider is not None and model_config is not None:
-                assert effective_reference is not None
-                provider_registry.register_client(effective_reference, model_provider, model_config)
-            runtime = Runtime(provider_registry=provider_registry)
-        self.runtime = runtime
+        self.runtime = runtime if runtime is not None else Runtime()
 
     async def route(
         self,
         user_input: str,
         *,
-        model_provider: ModelProvider | None = None,
-        model_config: ModelConfiguration | None = None,
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
-        authorization: Any = None,
-        authorization_context: Any = None,
+        authorization: AuthorizationContext | None = None,
         agent_run_config: RunConfig | None = None,
         timeout: float | None = None,
         correlation_id: str = "",
@@ -104,12 +78,9 @@ class OrchestratorAgent(BaseAgent):
 
         Args:
             user_input: Natural-language task description to route.
-            model_provider: Optional provider override for this routing call.
-            model_config: Optional model configuration used with a direct provider.
             model_reference: Optional model name or reference override.
             run_config: Configuration used for the routing run itself.
             authorization: Optional authenticated authorization context.
-            authorization_context: Alias for ``authorization``.
             agent_run_config: Optional run configuration forwarded to the matched
                 agent invocation.
             timeout: Optional per-call timeout override in seconds.
@@ -117,47 +88,29 @@ class OrchestratorAgent(BaseAgent):
 
         Returns:
             Either the routed invocation result or a structured routing failure.
+
+        Raises:
+            ModelResolutionError: If no model resolves or the selected registered
+                provider does not satisfy the routing policy and capabilities.
         """
         correlation_id = correlation_id or str(uuid.uuid4())
-        if model_provider is not None and model_config is None:
-            raise ValueError("model_config is required with model_provider")
-        active_runtime = self.runtime
-        call_override = model_reference
-        if model_provider is not None and model_config is not None:
-            registry = ProviderRegistry()
-            call_override = ModelReference(model_config.model)
-            registry.register_client(call_override, model_provider, model_config)
-            active_runtime = Runtime(
-                provider_registry=registry,
-                config=self.runtime.config,
-                policy=self.runtime.policy,
-                security_pipeline=self.runtime.security_pipeline,
-            )
-        elif model_config is not None:
-            call_override = ModelReference(model_config.model)
-
         effective_run = run_config or RunConfig()
         if timeout is not None:
             effective_run = dataclasses.replace(effective_run, timeout=timeout)
-        try:
-            active_context = get_run_context()
-            effective_authorization = delegate_context(
-                active_context.authorization if active_context is not None else None,
-                authorization if authorization is not None else authorization_context,
-            )
-            context = active_runtime.create_run_context(
-                agent_id=self.agent_metadata.name,
-                agent_config=self.agent_config,
-                run_config=effective_run,
-                call_override=call_override,
-                correlation_id=correlation_id,
-                required_capabilities=frozenset({"structured_output"}),
-                authorization=effective_authorization,
-            )
-        except IncompatibleProviderCapabilitiesError as error:
-            if model_provider is None and not self._legacy_direct_provider:
-                raise
-            return RoutingFailure(str(error), error)
+        active_context = get_run_context()
+        effective_authorization = delegate_context(
+            active_context.authorization if active_context is not None else None,
+            authorization,
+        )
+        context = self.runtime.create_run_context(
+            agent_id=self.agent_metadata.name,
+            agent_config=self.agent_config,
+            run_config=effective_run,
+            call_override=model_reference,
+            correlation_id=correlation_id,
+            required_capabilities=frozenset({"structured_output"}),
+            authorization=effective_authorization,
+        )
 
         assert context.model is not None
         with (
@@ -186,7 +139,7 @@ class OrchestratorAgent(BaseAgent):
             )
             call = None
             try:
-                call = await active_runtime.complete(
+                call = await self.runtime.complete(
                     context,
                     messages,
                     structured_output=request,
@@ -218,7 +171,6 @@ class OrchestratorAgent(BaseAgent):
                 correlation_id=correlation_id,
                 run_config=agent_run_config,
                 authorization=authorization,
-                authorization_context=authorization_context,
             )
             capability_metadata = invocation.metadata
             if capability_metadata is not None:
@@ -245,30 +197,6 @@ class OrchestratorAgent(BaseAgent):
         """
         return self._registry.registered_agents()
 
-    @property
-    def registered_capabilities(self) -> dict[str, BaseAgent]:
-        """Return the live capability-to-agent mapping.
-
-        Returns:
-            A dictionary keyed by capability name.
-        """
-        return self._registry.registered_capabilities()
-
-    @property
-    def agents(self) -> tuple[BaseAgent, ...]:
-        """Alias for the registered agent collection."""
-        return self.registered_agents
-
-    @property
-    def routing_metadata(self) -> list[dict[str, Any]]:
-        """Return structured routing metadata for all registered agents."""
-        return self.get_routing_metadata()
-
-    @property
-    def routing_prompt_context(self) -> str:
-        """Return the textual routing prompt context for the current registry."""
-        return self.get_routing_prompt_context()
-
     def __len__(self) -> int:
         """Return the number of registered agents."""
         return len(self._registry)
@@ -293,7 +221,8 @@ class OrchestratorAgent(BaseAgent):
 
         Args:
             agent: Agent instance to register.
-            replace: Whether to replace an existing agent with the same name.
+            replace: Whether to replace an existing agent with the same name and
+                remove other agents whose capability names conflict.
 
         Returns:
             The previous agent instance that was replaced, if any.
@@ -314,8 +243,7 @@ class OrchestratorAgent(BaseAgent):
         correlation_id: str = "",
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
-        authorization: Any = None,
-        authorization_context: Any = None,
+        authorization: AuthorizationContext | None = None,
     ) -> InvocationResult:
         """Invoke one capability on a registered agent.
 
@@ -328,7 +256,6 @@ class OrchestratorAgent(BaseAgent):
             model_reference: Optional model override for the call.
             run_config: Optional run-level execution configuration.
             authorization: Optional authenticated authorization context.
-            authorization_context: Alias for ``authorization``.
 
         Returns:
             An invocation result envelope describing success or failure.
@@ -356,32 +283,7 @@ class OrchestratorAgent(BaseAgent):
             correlation_id=correlation_id,
             model_reference=model_reference,
             run_config=run_config,
-            authorization=(authorization if authorization is not None else authorization_context),
-        )
-
-    async def invoke_capability(
-        self,
-        agent_id: str,
-        capability_id: str,
-        arguments: Mapping[str, Any],
-        *,
-        timeout: float | None = None,
-        correlation_id: str = "",
-        model_reference: ModelReference | str | None = None,
-        run_config: RunConfig | None = None,
-        authorization: Any = None,
-        authorization_context: Any = None,
-    ) -> InvocationResult:
-        """Alias for :meth: 'invoke` that preserves the capability-oriented API."""
-        return await self.invoke(
-            agent_id,
-            capability_id,
-            arguments,
-            timeout=timeout,
-            correlation_id=correlation_id,
-            model_reference=model_reference,
-            run_config=run_config,
-            authorization=(authorization if authorization is not None else authorization_context),
+            authorization=authorization,
         )
 
     async def resume_approval(
@@ -389,11 +291,22 @@ class OrchestratorAgent(BaseAgent):
         agent_id: str,
         capability_id: str,
         arguments: Mapping[str, Any],
-        decision: Any,
+        decision: ApprovalDecision,
         *,
-        authorization: Any,
+        authorization: AuthorizationContext,
     ) -> InvocationResult:
-        """Resume a persisted approval-bound capability invocation."""
+        """Resume a persisted approval-bound capability invocation.
+
+        Args:
+            agent_id: Name of the target agent.
+            capability_id: Capability bound to the pending approval.
+            arguments: Arguments bound to the pending approval.
+            decision: Authorized decision for the persisted approval challenge.
+            authorization: Authenticated context bound to the invocation.
+
+        Returns:
+            An invocation result envelope describing the resumed execution.
+        """
         agent = self._registry.get(agent_id)
         if agent is None:
             return InvocationTargetNotFound(
@@ -408,17 +321,6 @@ class OrchestratorAgent(BaseAgent):
             decision,
             authorization=authorization,
         )
-
-    def replace_agent(self, agent: BaseAgent) -> BaseAgent | None:
-        """Replace an existing agent using the same registration name.
-
-        Args:
-            agent: Agent instance to register, replacing any previous registration.
-
-        Returns:
-            The previously registered agent, if one existed.
-        """
-        return self.register_agent(agent, replace=True)
 
     def remove_agent(self, agent: BaseAgent | str) -> BaseAgent:
         """Remove a registered agent from the registry.
@@ -454,14 +356,6 @@ class OrchestratorAgent(BaseAgent):
         """
         return self._registry.names()
 
-    def _conflicting_capabilities(self, agent: BaseAgent) -> set[str]:
-        """Return capability names that would conflict with a candidate agent."""
-        return self._registry.conflicting_capabilities(agent)
-
-    def _remove_agent_mapping(self, agent: BaseAgent) -> None:
-        """Remove the internal registry mapping for one agent."""
-        self._registry.remove_mapping(agent)
-
     def get_routing_metadata(self) -> list[dict[str, Any]]:
         """Return routing metadata generated from the live agent registry.
 
@@ -470,23 +364,6 @@ class OrchestratorAgent(BaseAgent):
         """
         return self._registry.routing_metadata()
 
-    def discover_agents(self) -> tuple[BaseAgent, ...]:
-        """Return currently registered agents without re-discovery.
-
-        Returns:
-            Registered agent instances in sorted order.
-        """
-        return self.registered_agents
-
     def get_routing_prompt_context(self) -> str:
         """Return prompt-safe routing context built from the current registry."""
         return routing_prompt_context(self.get_routing_metadata())
-
-    def get_routing_context(self) -> str:
-        """Alias for the prompt-safe routing context."""
-        return self.get_routing_prompt_context()
-
-    @staticmethod
-    def _card_url_for(agent: BaseAgent) -> str:
-        """Return the synthetic local card URL for an agent."""
-        return card_url_for(agent)

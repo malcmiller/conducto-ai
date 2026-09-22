@@ -5,31 +5,29 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from conducto import (
-    ChatMessage,
-    FakeModel,
-    ModelConfiguration,
-    ProviderCapabilities,
-    ProviderRegistry,
-    Runtime,
-    Usage,
-)
-from conducto.core.model_gateway import ModelCallResult as GatewayModelCallResult
+from conducto import Runtime
 from conducto.core.provider import (
+    ChatMessage,
     GenerationOptions,
     MalformedStructuredOutputError,
+    ModelConfiguration,
+    ProviderCapabilities,
     ProviderResult,
     ProviderToolCallRequest,
     ProviderToolDefinition,
     StructuredOutputRequest,
+    TerminalModelDecision,
+    ToolCallModelDecision,
     ToolResultMessage,
     UnsupportedProviderCapabilityError,
-    build_model_decision_schema,
+    Usage,
+    build_terminal_output_request,
     complete_with_retries,
     parse_model_decision,
 )
-from conducto.core.runtime import ModelCallResult, use_run_context
-from conducto.testing import ScriptedProvider, assert_provider_tool_call_conformance
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.core.run_context import use_run_context
+from conducto.testing import FakeModel, ScriptedProvider, assert_provider_tool_call_conformance
 
 
 class Response(BaseModel):
@@ -56,7 +54,7 @@ def _tool_definition(
 
 
 def test_model_decision_contract_separates_terminal_schema_and_native_tool_calls() -> None:
-    schema = build_model_decision_schema(Response).json_schema
+    schema = build_terminal_output_request(Response).json_schema
     assert schema == Response.model_json_schema()
     assert "oneOf" not in schema
 
@@ -64,6 +62,7 @@ def test_model_decision_contract_separates_terminal_schema_and_native_tool_calls
         ProviderResult(structured={"value": "ok"}),
         response_type=Response,
     )
+    assert isinstance(terminal, TerminalModelDecision)
     assert terminal.type == "terminal"
     assert terminal.response == {"value": "ok"}
 
@@ -78,25 +77,23 @@ def test_model_decision_contract_separates_terminal_schema_and_native_tool_calls
         response_type=Response,
         tools=tools,
     )
+    assert isinstance(tool_call, ToolCallModelDecision)
     assert tool_call.type == "tool_call"
     assert tool_call.tool_id == "tool-1"
     assert tool_call.arguments == {"query": "value"}
     assert tool_call.call_id.startswith("tool_")
-    assert (
-        parse_model_decision(
-            ProviderResult(
-                request_id="provider-request",
-                tool_calls=(
-                    ProviderToolCallRequest(
-                        tool_name="lookup_tool_1", arguments={"query": "value"}
-                    ),
-                ),
+    repeated = parse_model_decision(
+        ProviderResult(
+            request_id="provider-request",
+            tool_calls=(
+                ProviderToolCallRequest(tool_name="lookup_tool_1", arguments={"query": "value"}),
             ),
-            response_type=Response,
-            tools=tools,
-        ).call_id
-        == tool_call.call_id
+        ),
+        response_type=Response,
+        tools=tools,
     )
+    assert isinstance(repeated, ToolCallModelDecision)
+    assert repeated.call_id == tool_call.call_id
 
     with pytest.raises(MalformedStructuredOutputError, match="both terminal structured output"):
         parse_model_decision(
@@ -156,16 +153,17 @@ def test_fake_model_records_scripted_tool_aware_requests() -> None:
     async def exercise() -> None:
         model = FakeModel(
             script=(
-                {
-                    "type": "tool_call",
-                    "call_id": "call-1",
-                    "tool_id": "tool-1",
-                    "arguments": {"query": "value"},
-                },
-                {"type": "terminal", "response": {"value": "done"}},
+                ProviderResult(
+                    tool_calls=(
+                        ProviderToolCallRequest(
+                            call_id="call-1", tool_id="tool-1", arguments={"query": "value"}
+                        ),
+                    ),
+                ),
+                ProviderResult(structured={"value": "done"}, accepted=True),
             )
         )
-        request = build_model_decision_schema(Response)
+        request = build_terminal_output_request(Response)
         tools = (_tool_definition(),)
         first = await model.complete(
             (ChatMessage(role="user", content="start"),),
@@ -201,7 +199,7 @@ def test_fake_model_records_scripted_tool_aware_requests() -> None:
 
 def test_effective_deadline_is_forwarded_without_tools() -> None:
     async def exercise() -> None:
-        model = FakeModel({"value": "ok"})
+        model = FakeModel(ProviderResult(structured={"value": "ok"}, accepted=True))
         result = await complete_with_retries(
             model,
             (ChatMessage(role="user", content="respond"),),
@@ -230,7 +228,9 @@ def test_provider_contract_requires_only_terminal_schema_features_for_tool_turns
             if feature.value not in {"oneOf", "anyOf", "allOf"}
         )
         provider = FakeModel(
-            {"type": "tool_call", "call_id": "call-1", "tool_id": "tool-1", "arguments": {}}
+            ProviderResult(
+                tool_calls=(ProviderToolCallRequest(call_id="call-1", tool_id="tool-1"),),
+            )
         )
         provider.capabilities = ProviderCapabilities(
             structured_output=True,
@@ -241,7 +241,7 @@ def test_provider_contract_requires_only_terminal_schema_features_for_tool_turns
             provider,
             (ChatMessage(role="user", content="tool please"),),
             options=GenerationOptions(model="fake"),
-            structured_output=build_model_decision_schema(Response),
+            structured_output=build_terminal_output_request(Response),
             tools=(_tool_definition(),),
         )
 
@@ -301,8 +301,11 @@ def test_model_gateway_records_typed_completion_provenance() -> None:
         registry.register_client(
             "model",
             FakeModel(
-                {"value": "ok"},
-                usage=Usage(input_tokens=2, output_tokens=1, total_tokens=3),
+                ProviderResult(
+                    structured={"value": "ok"},
+                    usage=Usage(input_tokens=2, output_tokens=1, total_tokens=3),
+                    accepted=True,
+                ),
             ),
             ModelConfiguration(provider="fake", model="model"),
         )
@@ -322,5 +325,4 @@ def test_model_gateway_records_typed_completion_provenance() -> None:
         assert [call.purpose for call in metadata.model_calls] == ["capability"]
         assert metadata.usage.total_tokens == 3
 
-    assert ModelCallResult is GatewayModelCallResult
     asyncio.run(exercise())

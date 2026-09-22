@@ -7,6 +7,19 @@ contract over an `AgentRegistry` and the shared `Runtime`.
 The gateway is not a registry alias. The registry publishes facts; the gateway
 applies caller context and policy to those facts.
 
+## Module ownership
+
+Import the gateway protocol, policy, and local implementation from
+`conducto.core.gateway`. Discovery records remain in
+`conducto.core.gateway_models`; toolbox declarations and projection remain in
+`conducto.core.gateway_tools`.
+
+Inside the gateway package, schema compatibility, safe tool projection,
+discovery filtering, and binding issuance/revalidation are separate private
+collaborators. The public gateway coordinates them against the same registry
+snapshot and runtime context. Moving these helpers does not weaken
+authorization or add a shortcut around runtime invocation.
+
 ## Obtaining a gateway
 
 Applications inject the registry into the runtime and define the caller's
@@ -115,4 +128,4 @@ treated as compatible.
 
 Configure binding lifetime, preferred agents, result count, serialized size,
 and application policy on `Runtime`. Keep policy callbacks deterministic,
-side-effect free, and fast.
+side effect free, and fast.

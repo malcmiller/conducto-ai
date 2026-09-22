@@ -11,23 +11,26 @@ import pytest
 
 from conducto import (
     BaseAgent,
-    FakeModel,
+    OrchestratorAgent,
+    RunConfig,
+    Runtime,
+    a2a_agent,
+    a2a_capability,
+    require_run_context,
+)
+from conducto.core.invocation_results import (
     InvocationCancelled,
     InvocationFailure,
     InvocationSuccess,
     InvocationTargetNotFound,
     InvocationTimeout,
     InvocationValidationFailure,
-    ModelConfiguration,
-    OrchestratorAgent,
     RoutingFailure,
-    RunConfig,
-    Usage,
-    a2a_agent,
-    a2a_capability,
-    configure_logging,
-    require_run_context,
 )
+from conducto.core.logging import configure_logging
+from conducto.core.provider import ModelConfiguration, ProviderResult, Usage
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.testing import FakeModel
 
 pytestmark = pytest.mark.acceptance
 
@@ -40,6 +43,8 @@ pytestmark = pytest.mark.acceptance
 class FailureAgent(BaseAgent):
     def __init__(self) -> None:
         self.calls = 0
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
         super().__init__()
 
     @a2a_capability(name="add", description="Adds one to a value.")
@@ -52,10 +57,11 @@ class FailureAgent(BaseAgent):
         self.calls += 1
         raise ValueError("private diagnostic detail")
 
-    @a2a_capability(name="slow", description="Sleeps longer than the timeout.")
-    async def slow(self, delay: float) -> str:
+    @a2a_capability(name="slow", description="Waits for an explicit release.")
+    async def slow(self) -> str:
         self.calls += 1
-        await asyncio.sleep(delay)
+        self.started.set()
+        await self.release.wait()
         return "finished"
 
     @a2a_capability(name="cancel", description="Cooperatively cancels the invocation.")
@@ -66,12 +72,21 @@ class FailureAgent(BaseAgent):
 
 
 def _orchestrator(selection: dict[str, Any] | str) -> tuple[OrchestratorAgent, FailureAgent]:
-    orchestrator = OrchestratorAgent(
-        model_provider=FakeModel(
-            selection,
-            usage=Usage(input_tokens=2, output_tokens=1, total_tokens=3),
+    registry = ProviderRegistry()
+    registry.register_client(
+        "failure-router",
+        FakeModel(
+            ProviderResult(
+                structured=selection if isinstance(selection, dict) else None,
+                content=selection if isinstance(selection, str) else "",
+                usage=Usage(input_tokens=2, output_tokens=1, total_tokens=3),
+            ),
         ),
-        model_config=ModelConfiguration(provider="fake", model="failure-router"),
+        ModelConfiguration(provider="fake", model="failure-router"),
+    )
+    orchestrator = OrchestratorAgent(
+        model_reference="failure-router",
+        runtime=Runtime(provider_registry=registry),
     )
     agent = FailureAgent()
     orchestrator.register_agent(agent)
@@ -88,12 +103,17 @@ async def _route_with_logs(
     stream = io.StringIO()
     configure_logging(format="json", stream=stream)
     orchestrator, agent = _orchestrator(selection)
-    result = await orchestrator.route(
-        "Exercise failure path.",
-        correlation_id=correlation_id,
-        timeout=timeout,
-        agent_run_config=RunConfig(timeout=agent_timeout) if agent_timeout is not None else None,
-    )
+    try:
+        result = await orchestrator.route(
+            "Exercise failure path.",
+            correlation_id=correlation_id,
+            timeout=timeout,
+            agent_run_config=RunConfig(timeout=agent_timeout)
+            if agent_timeout is not None
+            else None,
+        )
+    finally:
+        agent.release.set()
     events = [
         event
         for line in stream.getvalue().splitlines()
@@ -193,7 +213,7 @@ def test_timeout_preserves_correlation_id_and_returns_timeout_envelope() -> None
             {
                 "agent_id": "FailureAgent",
                 "capability_id": "slow",
-                "arguments": {"delay": 0.05},
+                "arguments": {},
             },
             correlation_id="failure-timeout",
             # Keep this focused on the selected capability deadline. The route-wide
@@ -242,21 +262,22 @@ def test_external_caller_task_cancellation_is_propagated() -> None:
             {
                 "agent_id": "FailureAgent",
                 "capability_id": "slow",
-                "arguments": {"delay": 1.0},
+                "arguments": {},
             }
         )
         task = asyncio.create_task(
             orchestrator.route("Cancel externally.", correlation_id="failure-external-cancel")
         )
-        for _ in range(10):
-            if agent.calls:
-                break
-            await asyncio.sleep(0)
-        task.cancel()
-
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert agent.calls == 1
+        try:
+            await asyncio.wait_for(agent.started.wait(), timeout=5)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert agent.calls == 1
+        finally:
+            agent.release.set()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(exercise())
 

@@ -16,23 +16,19 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
-from conducto import (
+from conducto import BaseAgent, OrchestratorAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.invocation_results import InvocationApprovalRequired, InvocationSuccess
+from conducto.core.logging import configure_logging
+from conducto.core.provider import ModelConfiguration, ProviderResult, Usage
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.security import (
     ApprovalDecision,
     AuthorizationContext,
-    BaseAgent,
-    FakeModel,
-    InvocationApprovalRequired,
-    InvocationSuccess,
-    ModelConfiguration,
-    OrchestratorAgent,
     Principal,
-    Usage,
-    a2a_agent,
-    a2a_capability,
-    configure_logging,
     require_approval,
     require_scope,
 )
+from conducto.testing import FakeModel
 
 CARD_BASE_URL = "https://local.conducto.invalid/a2a"
 QUICKSTART_CORRELATION_ID = "quickstart-local-001"
@@ -113,12 +109,20 @@ def create_agent_cards() -> tuple[dict[str, Any], dict[str, Any]]:
 
 def build_orchestrator(selection: dict[str, Any]) -> OrchestratorAgent:
     """Create a local orchestrator whose model deterministically returns ``selection``."""
-    orchestrator = OrchestratorAgent(
-        model_provider=FakeModel(
-            selection,
-            usage=Usage(input_tokens=9, output_tokens=4, total_tokens=13),
+    registry = ProviderRegistry()
+    registry.register_client(
+        "quickstart-router",
+        FakeModel(
+            ProviderResult(
+                structured=selection,
+                usage=Usage(input_tokens=9, output_tokens=4, total_tokens=13),
+            ),
         ),
-        model_config=ModelConfiguration(provider="fake", model="quickstart-router"),
+        ModelConfiguration(provider="fake", model="quickstart-router"),
+    )
+    orchestrator = OrchestratorAgent(
+        model_reference="quickstart-router",
+        runtime=Runtime(provider_registry=registry),
     )
     for agent in create_agents():
         orchestrator.register_agent(agent)

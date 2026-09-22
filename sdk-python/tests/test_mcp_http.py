@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator, MutableMapping
+from contextlib import asynccontextmanager
 from typing import Any, cast
 
+import httpx
 import pytest
-from starlette.testclient import TestClient
 
 from conducto import BaseAgent, Runtime, a2a_agent, a2a_capability
 from conducto.mcp import (
@@ -18,6 +21,33 @@ from conducto.mcp import (
 from conducto.security import AuthorizationContext, Principal, require_scope
 
 CALLS: list[int] = []
+
+
+@pytest.fixture
+def anyio_backend() -> str:
+    """Run the existing AnyIO test plugin against the SDK's asyncio runtime."""
+    return "asyncio"
+
+
+@asynccontextmanager
+async def _client() -> AsyncIterator[httpx.AsyncClient]:
+    """Drive public ASGI lifespan and HTTP in-process without deprecated portals."""
+    app = _app()
+    incoming: asyncio.Queue[MutableMapping[str, Any]] = asyncio.Queue()
+    outgoing: asyncio.Queue[MutableMapping[str, Any]] = asyncio.Queue()
+    async with asyncio.TaskGroup() as tasks:
+        tasks.create_task(app({"type": "lifespan"}, incoming.get, outgoing.put))
+        await incoming.put({"type": "lifespan.startup"})
+        assert await outgoing.get() == {"type": "lifespan.startup.complete"}
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+            ) as client:
+                yield client
+        finally:
+            await incoming.put({"type": "lifespan.shutdown"})
+            assert await outgoing.get() == {"type": "lifespan.shutdown.complete"}
 
 
 @a2a_agent(name="HttpLedger", version="1.0", description="HTTP MCP test agent.")
@@ -80,9 +110,9 @@ def _app() -> McpHttpServer:
     )
 
 
-def _initialize(client: TestClient, subject: str, *, scope: str = "") -> str:
+async def _initialize(client: httpx.AsyncClient, subject: str, *, scope: str = "") -> str:
     """Initialize one official-protocol session and return its opaque identifier."""
-    response = client.post(
+    response = await client.post(
         "/mcp",
         headers={"x-subject": subject, "x-scope": scope},
         json={
@@ -98,7 +128,7 @@ def _initialize(client: TestClient, subject: str, *, scope: str = "") -> str:
     )
     assert response.status_code == 200
     session_id = response.headers.get("mcp-session-id")
-    assert session_id is not None
+    assert isinstance(session_id, str)
     return session_id
 
 
@@ -112,22 +142,23 @@ def _request_headers(session_id: str, subject: str, *, scope: str = "") -> dict[
     }
 
 
-def test_http_sessions_filter_tools_and_cannot_be_exchanged() -> None:
+@pytest.mark.anyio
+async def test_http_sessions_filter_tools_and_cannot_be_exchanged() -> None:
     """Session identity filters discovery and rejects cross-principal reuse."""
-    with TestClient(_app()) as client:
-        reader_session = _initialize(client, "reader")
-        writer_session = _initialize(client, "writer", scope="write")
-        reader_tools = client.post(
+    async with _client() as client:
+        reader_session = await _initialize(client, "reader")
+        writer_session = await _initialize(client, "writer", scope="write")
+        reader_tools = await client.post(
             "/mcp",
             headers=_request_headers(reader_session, "reader"),
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
-        writer_tools = client.post(
+        writer_tools = await client.post(
             "/mcp",
             headers=_request_headers(writer_session, "writer", scope="write"),
             json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
         )
-        exchanged = client.post(
+        exchanged = await client.post(
             "/mcp",
             headers=_request_headers(reader_session, "writer", scope="write"),
             json={"jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {}},
@@ -143,7 +174,8 @@ def test_http_sessions_filter_tools_and_cannot_be_exchanged() -> None:
     assert exchanged.status_code == 404
 
 
-def test_http_calls_use_exporter_and_reject_replay_before_business_logic() -> None:
+@pytest.mark.anyio
+async def test_http_calls_use_exporter_and_reject_replay_before_business_logic() -> None:
     """A canonical call executes once when its JSON-RPC request identity is replayed."""
     CALLS.clear()
     request = {
@@ -152,11 +184,11 @@ def test_http_calls_use_exporter_and_reject_replay_before_business_logic() -> No
         "method": "tools/call",
         "params": {"name": "httpledger__record", "arguments": {"value": 4}},
     }
-    with TestClient(_app()) as client:
-        session_id = _initialize(client, "operator")
+    async with _client() as client:
+        session_id = await _initialize(client, "operator")
         headers = _request_headers(session_id, "operator")
-        first = client.post("/mcp", headers=headers, json=request)
-        replay = client.post("/mcp", headers=headers, json=request)
+        first = await client.post("/mcp", headers=headers, json=request)
+        replay = await client.post("/mcp", headers=headers, json=request)
 
     assert first.status_code == 200
     assert first.json()["result"]["structuredContent"] == {"result": {"value": 4}}
@@ -165,19 +197,20 @@ def test_http_calls_use_exporter_and_reject_replay_before_business_logic() -> No
     assert CALLS == [4]
 
 
-def test_http_authentication_and_transport_failures_do_not_invoke_tools() -> None:
+@pytest.mark.anyio
+async def test_http_authentication_and_transport_failures_do_not_invoke_tools() -> None:
     """Unauthenticated and unsafe requests fail before canonical invocation."""
     CALLS.clear()
-    with TestClient(_app()) as client:
-        missing_identity = client.post(
+    async with _client() as client:
+        missing_identity = await client.post(
             "/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize"}
         )
-        invalid_host = client.post(
+        invalid_host = await client.post(
             "/mcp",
             headers={"host": "attacker.invalid", "x-subject": "operator"},
             json={"jsonrpc": "2.0", "id": 1, "method": "initialize"},
         )
-        forwarded = client.post(
+        forwarded = await client.post(
             "/mcp",
             headers={"x-subject": "operator", "x-forwarded-host": "attacker.invalid"},
             json={"jsonrpc": "2.0", "id": 1, "method": "initialize"},

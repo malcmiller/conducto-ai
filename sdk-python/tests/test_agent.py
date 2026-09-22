@@ -1,16 +1,35 @@
+import inspect
 import json
 
 import pytest
 
 from conducto import (
-    A2A_AGENT_CARD_SPEC_VERSION,
-    A2A_JSONRPC_BINDING,
-    A2A_PROTOCOL_VERSION,
+    AgentModelConfig,
     BaseAgent,
+    ModelReference,
+    ModelRequirement,
     a2a_agent,
     a2a_capability,
     tool,
 )
+from conducto.a2a import A2A_JSONRPC_BINDING, A2A_PROTOCOL_VERSION
+from conducto.core.agent_card import A2A_AGENT_CARD_SPEC_VERSION
+
+
+def test_agent_declares_models_without_provider_configuration() -> None:
+    configuration = AgentModelConfig(
+        default_model=ModelReference("reasoning"),
+        requirement=ModelRequirement.REQUIRED,
+    )
+    agent = BaseAgent(agent_config=configuration)
+
+    assert agent.agent_config is configuration
+    assert BaseAgent(model_reference="reasoning").agent_config.default_model == ModelReference(
+        "reasoning"
+    )
+    assert not hasattr(agent, "model_config")
+
+    assert "model_config" not in inspect.signature(BaseAgent).parameters
 
 
 def test_base_agent_registers_decorated_methods() -> None:

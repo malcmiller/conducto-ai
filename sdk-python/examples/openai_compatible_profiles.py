@@ -22,13 +22,13 @@ from dataclasses import dataclass
 
 from pydantic import BaseModel
 
-from conducto import (
+from conducto.core.provider import (
     ChatMessage,
     GenerationOptions,
     ModelConfiguration,
-    ProviderRegistry,
     StructuredOutputRequest,
 )
+from conducto.core.provider_registry import ProviderRegistry
 from conducto.providers import (
     LM_STUDIO_DEFAULT_PROFILE,
     VLLM_DEFAULT_PROFILE,

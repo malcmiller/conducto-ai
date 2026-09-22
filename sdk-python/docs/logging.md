@@ -12,7 +12,7 @@ handlers to `conducto`, or use the SDK's opt-in helper for local development.
 ## Quick start
 
 ```python
-from conducto import configure_logging
+from conducto.core.logging import configure_logging
 
 configure_logging(format="json")
 ```
@@ -37,7 +37,7 @@ calling `configure_logging()`:
 ```python
 import logging
 
-from conducto import JsonFormatter
+from conducto.core.logging import JsonFormatter
 
 handler = logging.StreamHandler()
 handler.setFormatter(JsonFormatter())
@@ -123,7 +123,7 @@ Application code can bind additional non-sensitive context around Conducto
 work:
 
 ```python
-from conducto import log_context
+from conducto.core.logging import log_context
 
 with log_context(request_id="request-123", tenant_id="tenant-a"):
     result = await orchestrator.invoke("AuditAgent", "review", {}, correlation_id="corr-123")
@@ -175,7 +175,7 @@ from opentelemetry.sdk.resources import Resource
 # Any OTLP exporter the application chooses to install, for example:
 # from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
-from conducto import OpenTelemetryLogBridge
+from conducto.core.otel_logs import OpenTelemetryLogBridge
 
 provider = LoggerProvider(
     resource=Resource.create({"service.name": "my-service", "deployment.environment": "prod"})
@@ -231,7 +231,7 @@ The low-level `emit_event()` API supports a payload only when both safeguards
 are explicitly enabled:
 
 ```python
-from conducto import configure_logging, emit_event
+from conducto.core.logging import configure_logging, emit_event
 
 configure_logging(format="json", include_sensitive_data=True)
 emit_event(

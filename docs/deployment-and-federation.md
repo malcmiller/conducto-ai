@@ -229,8 +229,9 @@ Each deployment exposes:
 
 An orchestrator registers a validated URL rather than importing the networked
 agent. The endpoint can be a local container, remote container, or adapter for
-a Foundry-hosted agent. Milestone 3 adds Python and .NET hosting, remote
-discovery, and cross-language conformance.
+a Foundry-hosted agent. Milestone 3 establishes Python agent chaining and the
+local gateway; Milestone 4 adds Python A2A network transport. .NET hosting and
+cross-language conformance follow in Milestone 8.
 
 ### 4. Configure deployment-specific identity and trust
 
@@ -280,17 +281,18 @@ propose a plan, but the runtime validates the plan and controls execution.
 
 ### 7. Operate and deploy independently
 
-Milestone 4 provides W3C trace propagation, correlated logs, security audit
-events, and optional MCP export. Milestone 5 packages immutable container and
-Microsoft Foundry deployments with externally supplied model and trust
-configuration. Milestone 6 brings .NET to contract parity.
+Milestone 5 provides exporters, observability, and packaging, including W3C
+trace propagation, correlated logs, and optional MCP export. Security audit
+remains part of Milestone 2. Milestone 6 establishes Python model runtimes and
+Microsoft Foundry with externally supplied model and trust configuration.
 
 Milestone 7 connects local, container, and Foundry agents through a governed
 remote catalog and policy-aware workflow runtime. It applies whether all
 agents belong to one organization or a workflow uses a mixture of deployment
 types.
 
-Milestone 8 adds the optional cross-organization federation control plane:
+Milestone 8 establishes .NET SDK parity and cross-language conformance.
+Milestone 9 adds the optional cross-organization federation control plane:
 global identity, signed discovery metadata, external trust onboarding, and an
 end-to-end multi-organization Azure verification. The local, container, and
 single-organization Foundry scenarios do not depend on federation merely to
@@ -318,22 +320,18 @@ exist.
 
 ```mermaid
 flowchart LR
-    M1[Milestone 1<br/>Local contracts] --> M2[Milestone 2<br/>Guardrails]
-    M1 --> M3[Milestone 3<br/>A2A transport]
-    M2 --> M3
-    M3 --> M4[Milestone 4<br/>Operations]
-    M1 --> M5[Milestone 5<br/>Model runtimes and deployment]
-    M3 --> M5
-    M3 --> M7[Milestone 7<br/>Hybrid orchestration]
-    M4 --> M7
-    M5 --> M7
-    M6[Milestone 6<br/>.NET parity] --> M3
-    M6 --> M7
-    M2 --> M8[Milestone 8<br/>Cross-org federation]
-    M7 --> M8
-    M6 --> M8
+    M1[1. Python local agent flow] --> M2[2. Python security and governance]
+    M2 --> M3[3. Python agent chaining and local gateway]
+    M3 --> M4[4. Python A2A network transport]
+    M4 --> M5[5. Python exporters, observability, and packaging]
+    M5 --> M6[6. Python model runtimes and Microsoft Foundry]
+    M6 --> M7[7. Python hybrid deployment and workflow orchestration]
+    M7 --> M8[8. .NET SDK parity and cross-language conformance]
+    M8 --> M9[9. Cross-organization federation]
 ```
 
 The practical delivery order is strict: one-machine contracts and execution,
 local containers and A2A transport, same-organization Azure deployment, hybrid
-orchestration, then optional cross-organization federation.
+orchestration, .NET parity and cross-language conformance, then optional
+cross-organization federation. This is the canonical milestone order, not a
+claim that every story in an earlier milestone is already complete.

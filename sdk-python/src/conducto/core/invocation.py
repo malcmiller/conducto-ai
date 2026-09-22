@@ -46,21 +46,7 @@ from .runtime import Runtime
 from .serialization import freeze_mapping, serialize_result
 from .telemetry import SPAN_CAPABILITY_INVOKE, start_span
 
-__all__ = [
-    "InvocationCancelled",
-    "InvocationFailure",
-    "InvocationResult",
-    "InvocationSuccess",
-    "InvocationTargetNotFound",
-    "InvocationTimeout",
-    "InvocationValidationFailure",
-    "UnsupportedReturnValueError",
-    "invoke_agent",
-]
-
-# Retain private names used by older internal integrations.
-_serialize_result = serialize_result
-_freeze_mapping = freeze_mapping
+__all__ = ["invoke_agent"]
 
 
 class _CapabilityExecutionError(Exception):
@@ -128,7 +114,6 @@ async def invoke_agent(
     model_reference: ModelReference | str | None = None,
     run_config: RunConfig | None = None,
     authorization: AuthorizationContext | None = None,
-    authorization_context: AuthorizationContext | None = None,
     security_pipeline: SecurityPipeline | None = None,
     approved_approval_id: str | None = None,
     allowed_capabilities: frozenset[str] | None = None,
@@ -199,7 +184,7 @@ async def invoke_agent(
         run_config=effective_run,
         call_override=model_reference,
         correlation_id=correlation_id,
-        authorization=(authorization if authorization is not None else authorization_context),
+        authorization=authorization,
         allowed_capabilities=allowed_capabilities,
         delegation_budget=delegation_budget,
         delegation_frame=DelegationFrame(agent_id, capability_name),
@@ -325,14 +310,14 @@ async def invoke_agent(
             assert current is not None
             cancelled_by_state = False
 
-            async def observe_cancellation() -> None:
+            async def observe_cancellation(task: asyncio.Task[Any]) -> None:
                 nonlocal cancelled_by_state
                 while not context.cancellation.cancelled:
                     await asyncio.sleep(0.01)
                 cancelled_by_state = True
-                current.cancel()
+                task.cancel()
 
-            cancellation = asyncio.create_task(observe_cancellation())
+            cancellation = asyncio.create_task(observe_cancellation(current))
             try:
                 return await execute()
             except asyncio.CancelledError:

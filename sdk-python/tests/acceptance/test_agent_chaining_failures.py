@@ -7,28 +7,30 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from conducto import (
-    AgentRegistry,
-    BaseAgent,
-    CapabilityUse,
-    CapabilityUseRequirement,
-    ChatMessage,
+from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.delegation import (
     DelegationConfig,
     DelegationOutcome,
     DelegationOutcomeCode,
-    FakeModel,
-    ModelConfiguration,
-    ProviderError,
-    ProviderRegistry,
-    Runtime,
-    ToolboxPolicy,
-    Usage,
-    a2a_agent,
-    a2a_capability,
-    build_toolbox,
     run_delegation,
 )
-from conducto.core.runtime import use_run_context
+from conducto.core.gateway_tools import (
+    CapabilityUse,
+    CapabilityUseRequirement,
+    ToolboxPolicy,
+    build_toolbox,
+)
+from conducto.core.provider import (
+    ChatMessage,
+    ModelConfiguration,
+    ProviderError,
+    ProviderResult,
+    ProviderToolCallRequest,
+    Usage,
+)
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.core.run_context import use_run_context
+from conducto.testing import FakeModel
 
 pytestmark = pytest.mark.acceptance
 
@@ -87,7 +89,7 @@ async def _tool_id(runtime: Runtime) -> str:
 
 def test_malformed_required_capability_and_invalid_terminal_are_typed_failures() -> None:
     async def exercise() -> None:
-        malformed_runtime = _runtime(FakeModel("prose only"))
+        malformed_runtime = _runtime(FakeModel(ProviderResult(content="prose only", accepted=True)))
         malformed_context = malformed_runtime.create_run_context(
             agent_id="Parent",
             call_override="test-model",
@@ -101,9 +103,7 @@ def test_malformed_required_capability_and_invalid_terminal_are_typed_failures()
             )
         assert malformed.code is DelegationOutcomeCode.MALFORMED_DECISION
 
-        required_runtime = _runtime(
-            FakeModel({"type": "terminal", "response": {"answer": "unused"}})
-        )
+        required_runtime = _runtime(FakeModel(ProviderResult(structured={"answer": "unused"})))
         required_context = required_runtime.create_run_context(
             agent_id="Parent",
             call_override="test-model",
@@ -125,7 +125,7 @@ def test_malformed_required_capability_and_invalid_terminal_are_typed_failures()
             )
         assert required.code is DelegationOutcomeCode.REQUIRED_CAPABILITY_UNAVAILABLE
 
-        terminal_runtime = _runtime(FakeModel({"type": "terminal", "response": {"wrong": "shape"}}))
+        terminal_runtime = _runtime(FakeModel(ProviderResult(structured={"wrong": "shape"})))
         terminal_context = terminal_runtime.create_run_context(
             agent_id="Parent",
             call_override="test-model",
@@ -144,7 +144,7 @@ def test_malformed_required_capability_and_invalid_terminal_are_typed_failures()
 
 def test_optional_unknown_replayed_and_invalid_tools_stop_without_duplicate_execution() -> None:
     async def exercise() -> None:
-        optional_runtime = _runtime(FakeModel({"type": "terminal", "response": {"answer": "ok"}}))
+        optional_runtime = _runtime(FakeModel(ProviderResult(structured={"answer": "ok"})))
         optional, optional_model = await _outcome(optional_runtime, DelegationConfig())
         assert optional.code is DelegationOutcomeCode.SUCCESS
         assert optional_model.requests[0].tools == ()
@@ -152,19 +152,16 @@ def test_optional_unknown_replayed_and_invalid_tools_stop_without_duplicate_exec
         registry = AgentRegistry()
         registry.register(_Documentation())
         probe = _runtime(
-            FakeModel({"type": "terminal", "response": {"answer": "unused"}}), registry=registry
+            FakeModel(ProviderResult(structured={"answer": "unused"})), registry=registry
         )
         tool_id = await _tool_id(probe)
 
         _Documentation.calls = 0
         unknown_runtime = _runtime(
             FakeModel(
-                {
-                    "type": "tool_call",
-                    "call_id": "unknown",
-                    "tool_id": "forged-tool",
-                    "arguments": {},
-                }
+                ProviderResult(
+                    tool_calls=(ProviderToolCallRequest(call_id="unknown", tool_id="forged-tool"),),
+                )
             ),
             registry=registry,
         )
@@ -179,12 +176,13 @@ def test_optional_unknown_replayed_and_invalid_tools_stop_without_duplicate_exec
         assert unknown.code is DelegationOutcomeCode.MALFORMED_DECISION
         assert _Documentation.calls == 0
 
-        replay = {
-            "type": "tool_call",
-            "call_id": "once",
-            "tool_id": tool_id,
-            "arguments": {"query": "one"},
-        }
+        replay = ProviderResult(
+            tool_calls=(
+                ProviderToolCallRequest(
+                    call_id="once", tool_id=tool_id, arguments={"query": "one"}
+                ),
+            ),
+        )
         replay_runtime = _runtime(FakeModel(script=(replay, replay)), registry=registry)
         replay_outcome, _ = await _outcome(
             replay_runtime,
@@ -199,12 +197,9 @@ def test_optional_unknown_replayed_and_invalid_tools_stop_without_duplicate_exec
 
         invalid_runtime = _runtime(
             FakeModel(
-                {
-                    "type": "tool_call",
-                    "call_id": "invalid",
-                    "tool_id": tool_id,
-                    "arguments": {},
-                }
+                ProviderResult(
+                    tool_calls=(ProviderToolCallRequest(call_id="invalid", tool_id=tool_id),),
+                )
             ),
             registry=registry,
         )
@@ -231,19 +226,22 @@ def test_provider_and_budget_boundaries_are_typed_failures() -> None:
         registry = AgentRegistry()
         registry.register(_Documentation())
         probe = _runtime(
-            FakeModel({"type": "terminal", "response": {"answer": "unused"}}), registry=registry
+            FakeModel(ProviderResult(structured={"answer": "unused"})), registry=registry
         )
         tool_id = await _tool_id(probe)
         turn_runtime = _runtime(
             FakeModel(
                 script=(
-                    {
-                        "type": "tool_call",
-                        "call_id": "only-turn",
-                        "tool_id": tool_id,
-                        "arguments": {"query": "question"},
-                    },
-                    {"type": "terminal", "response": {"answer": "unreachable"}},
+                    ProviderResult(
+                        tool_calls=(
+                            ProviderToolCallRequest(
+                                call_id="only-turn",
+                                tool_id=tool_id,
+                                arguments={"query": "question"},
+                            ),
+                        ),
+                    ),
+                    ProviderResult(structured={"answer": "unreachable"}),
                 )
             ),
             registry=registry,
@@ -260,17 +258,14 @@ def test_provider_and_budget_boundaries_are_typed_failures() -> None:
         assert turns.code is DelegationOutcomeCode.TURN_LIMIT_EXHAUSTED
 
         token_runtime = _runtime(
-            FakeModel(
-                {"type": "terminal", "response": {"answer": "ok"}}, usage=Usage(total_tokens=2)
-            )
+            FakeModel(ProviderResult(structured={"answer": "ok"}, usage=Usage(total_tokens=2)))
         )
         tokens, _ = await _outcome(token_runtime, DelegationConfig(token_budget=1))
         assert tokens.code is DelegationOutcomeCode.TOKEN_BUDGET_EXHAUSTED
 
         cost_runtime = _runtime(
             FakeModel(
-                {"type": "terminal", "response": {"answer": "ok"}},
-                usage=Usage(cost=2.0),
+                ProviderResult(structured={"answer": "ok"}, usage=Usage(cost=2.0)),
             )
         )
         cost, _ = await _outcome(cost_runtime, DelegationConfig(cost_budget=1.0))

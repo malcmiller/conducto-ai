@@ -4,7 +4,10 @@ Conducto composes local agents through one `Runtime`, its `AgentGateway`, and
 the bounded `run_delegation` loop. The runnable reference is
 [`examples/agent_chaining.py`](../examples/agent_chaining.py). It uses a
 deterministic local model, requires neither credentials nor network access, and
-imports only public names from `conducto`.
+uses the `conducto` application facade and explicit public contracts from
+`conducto.core.provider`, `conducto.core.provider_registry`,
+`conducto.core.delegation`, and `conducto.core.gateway_tools`. Deterministic
+request recording lives in `conducto.testing`.
 
 ```bash
 uv build

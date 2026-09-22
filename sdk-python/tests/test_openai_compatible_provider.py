@@ -10,16 +10,13 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from conducto import (
+from conducto.core.provider import (
     ChatMessage,
     GenerationOptions,
     MalformedStructuredOutputError,
     ModelConfiguration,
     ProviderAuthenticationError,
     ProviderCallContext,
-    ProviderClientConfig,
-    ProviderOwnership,
-    ProviderRegistry,
     ProviderTimeoutError,
     ProviderToolDefinition,
     SchemaFeature,
@@ -27,6 +24,11 @@ from conducto import (
     ToolResultMessage,
     UnsupportedProviderCapabilityError,
     parse_model_decision,
+)
+from conducto.core.provider_registry import (
+    ProviderClientConfig,
+    ProviderOwnership,
+    ProviderRegistry,
 )
 from conducto.core.runtime_errors import ContradictoryProviderConfigurationError
 from conducto.providers import (
@@ -56,10 +58,10 @@ class _FakeChatCompletions:
         self._outer = outer
 
     async def create(self, **kwargs: Any) -> Mapping[str, Any]:
-        """Return the next scripted chat completion response."""
+        """Return the next scripted completion after any configured gate opens."""
         self._outer.chat_calls.append(kwargs)
-        if self._outer.delay:
-            await asyncio.sleep(self._outer.delay)
+        if self._outer.response_gate is not None:
+            await self._outer.response_gate.wait()
         if not self._outer.responses:
             raise AssertionError("script exhausted")
         return self._outer.responses.pop(0)
@@ -100,9 +102,9 @@ class _FakeOpenAICompatibleClient:
         models_payload: Mapping[str, Any] | None = None,
         models_error: Exception | None = None,
         version_error: Exception | None = None,
-        delay: float = 0.0,
+        response_gate: asyncio.Event | None = None,
     ) -> None:
-        """Create a scripted fixture with the given response queue and metadata."""
+        """Create a scripted fixture with metadata and an optional response gate."""
         self.responses = list(responses)
         self.version_value = version
         self.models_error = models_error
@@ -110,7 +112,7 @@ class _FakeOpenAICompatibleClient:
         self.models_payload = (
             models_payload if models_payload is not None else {"data": [{"id": "test-model"}]}
         )
-        self.delay = delay
+        self.response_gate = response_gate
         self.chat_calls: list[dict[str, Any]] = []
         self.closed = False
         self.chat: openai_compatible_adapter._ChatClient = _FakeChat(self)
@@ -559,12 +561,13 @@ def test_openai_compatible_provider_rejects_unsupported_schemas_before_dispatch(
 
 def test_openai_compatible_provider_enforces_call_timeout_and_deadline() -> None:
     async def exercise() -> None:
+        response_gate = asyncio.Event()
         provider = OpenAICompatibleProvider(
             model="test-model",
             profile="vllm-terminal-json",
             client=_FakeOpenAICompatibleClient(
                 ({"choices": [{"message": {"role": "assistant", "content": '{"value":"ok"}'}}]},),
-                delay=0.05,
+                response_gate=response_gate,
             ),
         )
         with pytest.raises(ProviderTimeoutError):
@@ -573,6 +576,14 @@ def test_openai_compatible_provider_enforces_call_timeout_and_deadline() -> None
                 options=GenerationOptions(model="test-model", timeout=0.001),
                 structured_output=_schema(),
             )
+
+        response_gate.set()
+        result = await provider.complete(
+            (ChatMessage(role="user", content="answer"),),
+            options=GenerationOptions(model="test-model"),
+            structured_output=_schema(),
+        )
+        assert result.structured == {"value": "ok"}
 
         expired = OpenAICompatibleProvider(
             model="test-model",
@@ -644,7 +655,7 @@ def test_openai_compatible_provider_factory_and_preconstructed_client_paths_are_
 ) -> None:
     constructed_clients: list[_FakeOpenAICompatibleClient] = []
 
-    def fake_create_official_client(**kwargs: Any) -> _FakeOpenAICompatibleClient:
+    def fake_create_bounded_client(**kwargs: Any) -> _FakeOpenAICompatibleClient:
         assert kwargs["endpoint"] == "http://localhost:8000/v1"
         assert kwargs["api_key"] == "secret-token"
         assert kwargs["transport_options"]["max_connections"] == 4
@@ -654,7 +665,7 @@ def test_openai_compatible_provider_factory_and_preconstructed_client_paths_are_
         return client
 
     monkeypatch.setattr(
-        openai_compatible_adapter, "_create_official_client", fake_create_official_client
+        openai_compatible_adapter, "_create_bounded_client", fake_create_bounded_client
     )
     monkeypatch.setenv("CONDUCTO_OPENAI_COMPATIBLE_TOKEN", "secret-token")
     registry = ProviderRegistry()

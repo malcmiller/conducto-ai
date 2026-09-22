@@ -10,17 +10,11 @@ from typing import Any, cast
 
 import pytest
 
-from conducto import (
-    BaseAgent,
-    FakeModel,
-    JsonFormatter,
-    ModelConfiguration,
-    OrchestratorAgent,
-    a2a_agent,
-    a2a_capability,
-    configure_logging,
-    emit_event,
-)
+from conducto import BaseAgent, OrchestratorAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.logging import JsonFormatter, configure_logging, emit_event
+from conducto.core.provider import ModelConfiguration, ProviderResult
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.testing import FakeModel
 
 
 def _event_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -213,19 +207,26 @@ def test_concurrent_model_overrides_keep_provenance_isolated(
             return "pong"
 
     async def exercise() -> None:
-        orchestrator = OrchestratorAgent()
+        registry = ProviderRegistry()
+        for provider, reference in (("first", "model-one"), ("second", "model-two")):
+            registry.register_client(
+                reference,
+                FakeModel(
+                    ProviderResult(structured={"agent_id": "ModelAgent", "capability_id": "ping"})
+                ),
+                ModelConfiguration(provider=provider, model=reference),
+            )
+        orchestrator = OrchestratorAgent(runtime=Runtime(provider_registry=registry))
         orchestrator.register_agent(ModelAgent())
         await asyncio.gather(
             orchestrator.route(
                 "ping",
-                model_provider=FakeModel({"agent_id": "ModelAgent", "capability_id": "ping"}),
-                model_config=ModelConfiguration(provider="first", model="model-one"),
+                model_reference="model-one",
                 correlation_id="first-correlation",
             ),
             orchestrator.route(
                 "ping",
-                model_provider=FakeModel({"agent_id": "ModelAgent", "capability_id": "ping"}),
-                model_config=ModelConfiguration(provider="second", model="model-two"),
+                model_reference="model-two",
                 correlation_id="second-correlation",
             ),
         )

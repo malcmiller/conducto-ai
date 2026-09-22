@@ -48,7 +48,7 @@ capabilities.
 
 ## Current status
 
-The repository currently ships the **Python reference SDK** in [`sdk-python/`](./sdk-python/).
+The repository currently develops the **pre-v1 Python reference SDK** in [`sdk-python/`](./sdk-python/).
 Implemented foundations include:
 
 - `@a2a_agent`, `@a2a_capability`, and `@tool` metadata
@@ -59,10 +59,14 @@ Implemented foundations include:
 - provider-neutral model configuration and per-run model isolation
 - authorization scopes and approval challenges
 - structured, correlation-safe runtime logging
+- pinned A2A 1.0 transport and governed remote-agent catalog contracts
+- bounded Ollama and OpenAI-compatible provider adapters
+- optional MCP export and OpenTelemetry integration
 
-A2A 1.0 network transport, concrete provider adapters, containers, Foundry integration, durable
-workflow orchestration, .NET parity, and federation are roadmap work. The README avoids presenting
-those planned capabilities as already released.
+Container deployment, Foundry integration, durable workflow orchestration, .NET parity, and
+federation remain roadmap work. No v1 API has shipped: common application entry points live in
+`conducto`, specialized contracts in their owning `conducto.core` packages, and deterministic
+test providers in `conducto.testing`.
 
 ## Intended execution model
 

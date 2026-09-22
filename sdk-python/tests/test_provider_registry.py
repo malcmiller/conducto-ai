@@ -1,17 +1,18 @@
 """Focused contracts for runtime-owned provider registration."""
 
 import threading
-import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from conducto import FakeModel, ModelConfiguration
+from conducto.core.provider import ModelConfiguration, ProviderResult
 from conducto.core.provider_registry import (
     ProviderClientConfig,
     ProviderOwnership,
+    ProviderRegistration,
+    ProviderRegistry,
 )
-from conducto.core.provider_registry import ProviderRegistry as RegistryProviderRegistry
-from conducto.core.runtime import (
+from conducto.core.runtime_errors import (
     ContradictoryProviderConfigurationError,
     DuplicateModelReferenceError,
     DuplicateProviderTypeError,
@@ -19,23 +20,21 @@ from conducto.core.runtime import (
     ProviderClientValidationError,
     ProviderConstructionError,
     ProviderFactoryValidationError,
-    ProviderRegistration,
-    ProviderRegistry,
     ProviderTypeMismatchError,
     ProviderUnavailableError,
     StaleProviderConstructionError,
     UnknownModelReferenceError,
     UnknownProviderTypeError,
 )
+from conducto.testing import FakeModel
 
 
 def test_provider_registry_replaces_only_when_requested() -> None:
     registry = ProviderRegistry()
-    first = FakeModel({})
-    second = FakeModel({})
+    first = FakeModel(ProviderResult(structured={}, accepted=True))
+    second = FakeModel(ProviderResult(structured={}, accepted=True))
     configuration = ModelConfiguration(provider="fake", model="test")
 
-    assert ProviderRegistry is RegistryProviderRegistry
     registry.register_client("model", first, configuration)
     registration = registry.resolve("model")
     assert isinstance(registration, ProviderRegistration)
@@ -53,7 +52,7 @@ def test_provider_registry_evaluates_availability_on_each_lookup() -> None:
     registry = ProviderRegistry()
     registry.register_client(
         "model",
-        FakeModel({}),
+        FakeModel(ProviderResult(structured={}, accepted=True)),
         ModelConfiguration(provider="fake", model="test"),
         available=lambda: available,
     )
@@ -64,23 +63,41 @@ def test_provider_registry_evaluates_availability_on_each_lookup() -> None:
         registry.resolve("model")
 
 
-def test_legacy_register_delegates_to_register_client_and_warns() -> None:
-    registry = ProviderRegistry()
-    client = FakeModel({})
-    configuration = ModelConfiguration(provider="fake", model="test")
+def test_registry_package_owns_its_api_without_legacy_registration() -> None:
+    from conducto.core import provider_registry
+    from conducto.core.provider_registry.configuration import (
+        ProviderClientConfig as Configuration,
+    )
+    from conducto.core.provider_registry.ownership import ProviderOwnership as Ownership
+    from conducto.core.provider_registry.registry import ProviderRegistry as Registry
 
-    with pytest.deprecated_call():
-        registry.register("model", client, configuration)
-
-    registration = registry.resolve("model")
-    assert registration.client is client
-    assert registration.ownership is ProviderOwnership.CALLER_OWNED
+    assert provider_registry.ProviderRegistry is Registry
+    assert ProviderClientConfig is Configuration
+    assert ProviderOwnership is Ownership
+    assert not hasattr(ProviderRegistry, "register")
+    assert not hasattr(ProviderRegistry(), "register")
+    assert set(provider_registry.__all__) == {
+        "DEFAULT_AVAILABILITY_TIMEOUT_SECONDS",
+        "ModelBindingSnapshot",
+        "ProviderCleanupFailure",
+        "ProviderCleanupReport",
+        "ProviderClientConfig",
+        "ProviderFactory",
+        "ProviderLease",
+        "ProviderOwnership",
+        "ProviderRegistration",
+        "ProviderRegistry",
+        "ProviderRegistrySnapshot",
+        "ProviderTypeRegistration",
+    }
 
 
 def test_deregister_model_prevents_later_resolution_only() -> None:
     registry = ProviderRegistry()
     configuration = ModelConfiguration(provider="fake", model="test")
-    registry.register_client("model", FakeModel({}), configuration)
+    registry.register_client(
+        "model", FakeModel(ProviderResult(structured={}, accepted=True)), configuration
+    )
 
     accepted = registry.resolve("model")
     registry.deregister_model("model")
@@ -100,7 +117,7 @@ class _RecordingFactory:
 
     def create(self, configuration: ProviderClientConfig) -> FakeModel:
         self.calls.append(configuration)
-        return FakeModel({})
+        return FakeModel(ProviderResult(structured={}, accepted=True))
 
 
 class _FailingFactory:
@@ -196,7 +213,7 @@ def test_register_client_rejects_contradictory_connection_config() -> None:
     with pytest.raises(ContradictoryProviderConfigurationError):
         registry.register_client(
             "model",
-            FakeModel({}),
+            FakeModel(ProviderResult(structured={}, accepted=True)),
             ModelConfiguration(provider="fake", model="test"),
             connection_config=ProviderClientConfig(endpoint="https://example.test"),
         )
@@ -218,10 +235,14 @@ def test_snapshot_is_immutable_deterministic_and_safe() -> None:
     registry = ProviderRegistry()
     registry.register_provider_type("fake", _RecordingFactory())
     registry.register_client(
-        "b-model", FakeModel({}), ModelConfiguration(provider="fake", model="b")
+        "b-model",
+        FakeModel(ProviderResult(structured={}, accepted=True)),
+        ModelConfiguration(provider="fake", model="b"),
     )
     registry.register_client(
-        "a-model", FakeModel({}), ModelConfiguration(provider="fake", model="a")
+        "a-model",
+        FakeModel(ProviderResult(structured={}, accepted=True)),
+        ModelConfiguration(provider="fake", model="a"),
     )
 
     snapshot = registry.snapshot()
@@ -244,7 +265,12 @@ def test_concurrent_register_resolve_replace_deregister_stay_isolated() -> None:
     def worker(index: int) -> None:
         reference = f"model-{index % 4}"
         try:
-            registry.register_client(reference, FakeModel({}), configuration, replace=True)
+            registry.register_client(
+                reference,
+                FakeModel(ProviderResult(structured={}, accepted=True)),
+                configuration,
+                replace=True,
+            )
             registry.resolve(reference)
             if index % 7 == 0:
                 registry.deregister_model(reference)
@@ -269,7 +295,7 @@ def test_register_client_rejects_contradictory_model_configuration_endpoint() ->
     with pytest.raises(ContradictoryProviderConfigurationError):
         registry.register_client(
             "model",
-            FakeModel({}),
+            FakeModel(ProviderResult(structured={}, accepted=True)),
             ModelConfiguration(provider="fake", model="test", endpoint="https://example.test"),
         )
     with pytest.raises(UnknownModelReferenceError):
@@ -302,23 +328,35 @@ def test_register_provider_duplicate_rejected_before_factory_runs() -> None:
 
 def test_available_predicate_that_hangs_is_bounded_and_treated_as_unavailable() -> None:
     registry = ProviderRegistry()
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
 
-    def hangs_forever() -> bool:
-        time.sleep(5)
-        return True
+    def blocked_health_check() -> bool:
+        entered.set()
+        try:
+            release.wait()
+            return True
+        finally:
+            finished.set()
 
     registry.register_client(
         "model",
-        FakeModel({}),
+        FakeModel(ProviderResult(structured={}, accepted=True)),
         ModelConfiguration(provider="fake", model="test"),
-        available=hangs_forever,
+        available=blocked_health_check,
         available_timeout=0.05,
     )
 
-    started = time.monotonic()
-    with pytest.raises(ProviderUnavailableError):
-        registry.resolve("model")
-    assert time.monotonic() - started < 2.0
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        resolution = executor.submit(registry.resolve, "model")
+        try:
+            assert entered.wait(timeout=2)
+            with pytest.raises(ProviderUnavailableError):
+                resolution.result(timeout=2)
+        finally:
+            release.set()
+            assert finished.wait(timeout=2)
 
 
 def test_available_predicate_that_raises_is_treated_as_unavailable() -> None:
@@ -329,7 +367,7 @@ def test_available_predicate_that_raises_is_treated_as_unavailable() -> None:
 
     registry.register_client(
         "model",
-        FakeModel({}),
+        FakeModel(ProviderResult(structured={}, accepted=True)),
         ModelConfiguration(provider="fake", model="test"),
         available=explodes,
     )
@@ -344,14 +382,18 @@ def test_replace_during_slow_factory_construction_discards_stale_result() -> Non
     release = threading.Event()
 
     class _SlowFactory:
-        def create(self, configuration: ProviderClientConfig) -> FakeModel:
+        @staticmethod
+        def create(configuration: ProviderClientConfig) -> FakeModel:
+            del configuration
             started.set()
             release.wait(timeout=5)
-            return FakeModel({})
+            return FakeModel(ProviderResult(structured={}, accepted=True))
 
     registry.register_provider_type("fake", _SlowFactory())
     registry.register_client(
-        "model", FakeModel({}), ModelConfiguration(provider="fake", model="test")
+        "model",
+        FakeModel(ProviderResult(structured={}, accepted=True)),
+        ModelConfiguration(provider="fake", model="test"),
     )
 
     outcome: list[BaseException] = []

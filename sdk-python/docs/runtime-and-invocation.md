@@ -5,6 +5,19 @@ collaborators and creates invocation-scoped state; it is not the home for
 agent reflection, registry indexing, provider implementations, or workflow
 business logic.
 
+Import `Runtime` from `conducto`. Specialized configuration and execution
+contracts live in `core.model_config`, `core.run_context`,
+`core.model_gateway`, `core.provider_registry`, and `core.runtime_errors`;
+`core.runtime` no longer re-exports them. Invocation outcomes belong to
+`core.invocation_results`, and serialization belongs to `core.serialization`,
+not private aliases on the invocation facade.
+
+`runtime_context` constructs and attenuates run state; `runtime_invocation`
+owns authorization and approval-resumption wiring. The `Runtime` facade
+retains the public lifecycle and invocation operations while delegating
+these lower-level responsibilities. Use the single `authorization` parameter
+for invocations; the `authorization_context` spelling is removed.
+
 ## Runtime-owned collaborators
 
 A runtime composes:

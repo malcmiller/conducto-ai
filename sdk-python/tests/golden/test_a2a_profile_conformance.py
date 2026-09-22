@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from conducto import (
+from conducto.core.a2a_profile import (
     A2A_JSONRPC_BINDING,
     A2A_NORMATIVE_COMMIT,
     A2A_NORMATIVE_PROTO_SHA256,

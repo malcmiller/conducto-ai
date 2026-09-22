@@ -7,36 +7,45 @@ import pytest
 from conducto import (
     AgentModelConfig,
     BaseAgent,
-    ChatMessage,
-    FakeModel,
-    IncompatibleProviderCapabilitiesError,
-    InvocationSuccess,
-    MissingModelDefaultError,
-    ModelConfiguration,
-    ModelOverrideDeniedError,
     ModelReference,
     ModelRequirement,
-    ModelResolutionSource,
     OrchestratorAgent,
-    ProviderCapabilities,
-    ProviderRegistry,
-    ProviderUnavailableError,
     RunConfig,
     Runtime,
     RuntimeConfig,
-    StructuredOutputRequest,
-    UnknownModelReferenceError,
     a2a_agent,
     a2a_capability,
     get_run_context,
 )
+from conducto.core.invocation_results import InvocationSuccess
+from conducto.core.model_config import ModelResolutionSource
+from conducto.core.provider import (
+    ChatMessage,
+    ModelConfiguration,
+    ProviderCapabilities,
+    ProviderResult,
+    StructuredOutputRequest,
+)
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.core.runtime_errors import (
+    IncompatibleProviderCapabilitiesError,
+    MissingModelDefaultError,
+    ModelOverrideDeniedError,
+    ProviderUnavailableError,
+    UnknownModelReferenceError,
+)
+from conducto.testing import FakeModel
 
 
 def _runtime(*references: str, default: str | None = None) -> tuple[Runtime, dict[str, FakeModel]]:
     registry = ProviderRegistry()
     providers: dict[str, FakeModel] = {}
     for reference in references:
-        provider = FakeModel({"agent_id": "unused", "capability_id": "unused"})
+        provider = FakeModel(
+            ProviderResult(
+                structured={"agent_id": "unused", "capability_id": "unused"}, accepted=True
+            )
+        )
         providers[reference] = provider
         registry.register_client(
             reference,
@@ -152,7 +161,9 @@ def test_call_override_does_not_mutate_enclosing_run_context() -> None:
 
 def test_orchestrator_and_selected_agent_use_different_models() -> None:
     runtime, _ = _runtime("orchestrator", "worker")
-    routing_provider = FakeModel({"agent_id": "Worker", "capability_id": "work"})
+    routing_provider = FakeModel(
+        ProviderResult(structured={"agent_id": "Worker", "capability_id": "work"}, accepted=True)
+    )
     runtime.provider_registry.register_client(
         "orchestrator",
         routing_provider,
@@ -213,14 +224,14 @@ def test_deterministic_capability_runs_without_a_model() -> None:
 
 def test_resolution_failures_happen_before_capability_or_provider_calls() -> None:
     registry = ProviderRegistry()
-    incompatible = FakeModel({})
+    incompatible = FakeModel(ProviderResult(structured={}, accepted=True))
     incompatible.capabilities = ProviderCapabilities()
     registry.register_client(
         "incompatible",
         incompatible,
         ModelConfiguration(provider="fake", model="incompatible"),
     )
-    unavailable = FakeModel({})
+    unavailable = FakeModel(ProviderResult(structured={}, accepted=True))
     registry.register_client(
         "unavailable",
         unavailable,
@@ -233,7 +244,7 @@ def test_resolution_failures_happen_before_capability_or_provider_calls() -> Non
     )
     registry.register_client(
         "denied",
-        FakeModel({}),
+        FakeModel(ProviderResult(structured={}, accepted=True)),
         ModelConfiguration(provider="fake", model="denied"),
     )
 

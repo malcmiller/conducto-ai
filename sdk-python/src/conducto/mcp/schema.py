@@ -254,7 +254,7 @@ def _resolve_reference(
 
 
 def _validate_node(node: Mapping[str, Any], *, label: str) -> None:
-    """Validate the declared type of a projected node."""
+    """Validate the declared type of projected node."""
     declared = node.get("type")
     if declared is None:
         if "anyOf" in node or "enum" in node or "const" in node:

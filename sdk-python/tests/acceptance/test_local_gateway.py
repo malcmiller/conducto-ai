@@ -7,13 +7,13 @@ import pytest
 from conducto import (
     AgentRegistry,
     BaseAgent,
-    DiscoveryQuery,
-    InvocationSuccess,
     Runtime,
     a2a_agent,
     a2a_capability,
     require_run_context,
 )
+from conducto.core.gateway_models import DiscoveryQuery
+from conducto.core.invocation_results import InvocationSuccess
 
 pytestmark = pytest.mark.acceptance
 

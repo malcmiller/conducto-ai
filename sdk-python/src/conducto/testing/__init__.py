@@ -1,5 +1,6 @@
-"""Provider conformance helpers with no network or optional SDK dependencies."""
+"""Deterministic model doubles and provider conformance helpers."""
 
+from .fake_model import FakeModel, FakeModelRequest
 from .provider_conformance import (
     MANDATORY_FIXTURES,
     PROVIDER_FIXTURE_VERSION,
@@ -15,6 +16,8 @@ __all__ = [
     "PROVIDER_FIXTURE_VERSION",
     "MANDATORY_FIXTURES",
     "ConformanceFixture",
+    "FakeModel",
+    "FakeModelRequest",
     "ScriptedProvider",
     "ScriptedProviderCall",
     "assert_provider_conformance",

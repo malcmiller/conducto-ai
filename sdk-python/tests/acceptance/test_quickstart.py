@@ -20,12 +20,10 @@ from examples.quickstart import (
     route_once,
 )
 
-from conducto import (
-    A2A_AGENT_CARD_SPEC_VERSION,
-    A2A_JSONRPC_BINDING,
-    InvocationSuccess,
-    OrchestratorAgent,
-)
+from conducto import OrchestratorAgent
+from conducto.core.a2a_profile import A2A_JSONRPC_BINDING
+from conducto.core.agent_card import A2A_AGENT_CARD_SPEC_VERSION
+from conducto.core.invocation_results import InvocationSuccess
 
 pytestmark = pytest.mark.acceptance
 

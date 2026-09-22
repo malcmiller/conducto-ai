@@ -1,4 +1,4 @@
-"""Stable Runtime facade and compatibility re-exports."""
+"""Runtime facade composing model resolution, contexts, invocation, and lifecycle."""
 
 from __future__ import annotations
 
@@ -9,33 +9,23 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from conducto.security import (
     ApprovalDecision,
-    AuditDeliveryError,
     AuthorizationContext,
     InMemoryApprovalStore,
     SecurityPipeline,
 )
-from conducto.security.context import delegate_context
-from conducto.security.errors import SecurityError
 
-from .logging import MODEL_SELECTED, MODEL_USAGE_RECORDED, emit_event, log_context
 from .model_config import (
     AgentModelConfig,
     ModelReference,
-    ModelRequirement,
-    ModelResolutionSource,
-    ProviderType,
     RunConfig,
     RuntimeConfig,
 )
 from .model_gateway import (
     ModelCallResult,
-    ModelGateway,
-    ModelGatewayCollection,
-    ModelResponseT,
     complete_model_call,
 )
 from .model_resolution import (
@@ -45,69 +35,29 @@ from .model_resolution import (
 )
 from .provider import (
     ChatMessage,
-    GenerationOptions,
-    MalformedStructuredOutputError,
-    ModelConfiguration,
-    ModelProvider,
     ProviderCapabilities,
-    ProviderResult,
     ProviderToolDefinition,
     StructuredOutputRequest,
     ToolResultMessage,
-    Usage,
-    complete_with_retries,
 )
 from .provider_registry import (
-    DEFAULT_AVAILABILITY_TIMEOUT_SECONDS,
-    ModelBindingSnapshot,
-    ProviderCleanupFailure,
     ProviderCleanupReport,
-    ProviderClientConfig,
-    ProviderFactory,
-    ProviderOwnership,
-    ProviderRegistration,
     ProviderRegistry,
-    ProviderRegistrySnapshot,
-    ProviderTypeRegistration,
 )
 from .run_context import (
-    CancellationState,
     DelegationBudget,
     DelegationFrame,
-    InvocationMetadata,
-    ModelCallProvenance,
     ModelPolicy,
-    ModelPolicyContext,
-    RemainingDelegationBudget,
     RunContext,
     activate_run_context,
     deactivate_run_context,
-    get_run_context,
-    require_run_context,
-    use_run_context,
 )
-from .runtime_errors import (
-    ConductoError,
-    ContradictoryProviderConfigurationError,
-    DuplicateModelReferenceError,
-    DuplicateProviderTypeError,
-    IncompatibleProviderCapabilitiesError,
-    MissingModelDefaultError,
-    ModelOverrideDeniedError,
-    ModelResolutionError,
-    NoActiveRunContextError,
-    ProviderClientValidationError,
-    ProviderConstructionError,
-    ProviderFactoryValidationError,
-    ProviderOwnershipError,
-    ProviderRegistrationError,
-    ProviderShutdownError,
-    ProviderTypeMismatchError,
-    ProviderUnavailableError,
-    RuntimeClosedError,
-    StaleProviderConstructionError,
-    UnknownModelReferenceError,
-    UnknownProviderTypeError,
+from .runtime_context import build_run_context
+from .runtime_errors import MissingModelDefaultError, RuntimeClosedError
+from .runtime_invocation import (
+    invoke_capability,
+    resume_approved_capability,
+    resume_token_capability,
 )
 
 if TYPE_CHECKING:
@@ -116,79 +66,7 @@ if TYPE_CHECKING:
     from .invocation_results import InvocationResult
     from .registry import AgentRegistry
 
-__all__ = [
-    "AgentModelConfig",
-    "CancellationState",
-    "ContradictoryProviderConfigurationError",
-    "DEFAULT_AVAILABILITY_TIMEOUT_SECONDS",
-    "DelegationBudget",
-    "DelegationFrame",
-    "ConductoError",
-    "DuplicateModelReferenceError",
-    "DuplicateProviderTypeError",
-    "GenerationOptions",
-    "IncompatibleProviderCapabilitiesError",
-    "InvocationMetadata",
-    "MODEL_SELECTED",
-    "MODEL_USAGE_RECORDED",
-    "MalformedStructuredOutputError",
-    "MissingModelDefaultError",
-    "ModelBindingSnapshot",
-    "ModelCallProvenance",
-    "ModelCallResult",
-    "ModelConfiguration",
-    "ModelGateway",
-    "ModelGatewayCollection",
-    "ModelOverrideDeniedError",
-    "ModelPolicy",
-    "ModelPolicyContext",
-    "ModelProvider",
-    "ModelResponseT",
-    "ModelReference",
-    "ModelRequirement",
-    "ModelResolutionError",
-    "ModelResolutionSource",
-    "NoActiveRunContextError",
-    "ProviderCapabilities",
-    "ProviderClientConfig",
-    "ProviderCleanupReport",
-    "ProviderCleanupFailure",
-    "ProviderClientValidationError",
-    "ProviderConstructionError",
-    "ProviderFactory",
-    "ProviderFactoryValidationError",
-    "ProviderOwnership",
-    "ProviderOwnershipError",
-    "ProviderRegistration",
-    "ProviderRegistrationError",
-    "ProviderShutdownError",
-    "RuntimeClosedError",
-    "ProviderRegistry",
-    "ProviderRegistrySnapshot",
-    "ProviderResult",
-    "ProviderType",
-    "ProviderTypeMismatchError",
-    "ProviderTypeRegistration",
-    "ProviderUnavailableError",
-    "RemainingDelegationBudget",
-    "ResolvedModel",
-    "RunConfig",
-    "RunContext",
-    "Runtime",
-    "RuntimeConfig",
-    "StaleProviderConstructionError",
-    "StructuredOutputRequest",
-    "UnknownModelReferenceError",
-    "UnknownProviderTypeError",
-    "Usage",
-    "complete_with_retries",
-    "emit_event",
-    "get_run_context",
-    "log_context",
-    "require_run_context",
-    "use_run_context",
-    "ChatMessage",
-]
+__all__ = ["Runtime"]
 
 
 class Runtime:
@@ -234,6 +112,10 @@ class Runtime:
         if self._provider_registry.closed:
             raise RuntimeClosedError("Runtime is shut down")
 
+    def gateway_binding_material(self) -> tuple[str, bytes]:
+        """Return the runtime-scoped material used to issue gateway bindings."""
+        return self._gateway_runtime_id, self._gateway_secret
+
     async def aclose(
         self,
         *,
@@ -254,7 +136,9 @@ class Runtime:
                     max_concurrency=max_concurrency,
                 )
             )
-        return await asyncio.shield(self._shutdown_task)
+        shutdown_task = self._shutdown_task
+        assert shutdown_task is not None
+        return await asyncio.shield(shutdown_task)
 
     async def __aenter__(self) -> Runtime:
         """Enter an async runtime scope."""
@@ -312,7 +196,6 @@ class Runtime:
         model_reference: ModelReference | str | None = None,
         run_config: RunConfig | None = None,
         authorization: Any = None,
-        authorization_context: Any = None,
         allowed_capabilities: frozenset[str] | None = None,
         delegation_budget: DelegationBudget | None = None,
     ) -> InvocationResult:
@@ -327,56 +210,26 @@ class Runtime:
             model_reference: Optional model override for the invocation.
             run_config: Optional run configuration.
             authorization: Optional authenticated authorization context.
-            authorization_context: Alias for ``authorization``.
+            allowed_capabilities: Optional attenuated set of callable capabilities.
+            delegation_budget: Optional root delegation limits inherited by child calls.
 
         Returns:
             A normalized invocation result envelope.
         """
         self._ensure_open()
-        from .invocation import invoke_agent
-
-        active_context = get_run_context()
-        try:
-            effective_authorization = delegate_context(
-                active_context.authorization if active_context is not None else None,
-                authorization if authorization is not None else authorization_context,
-            )
-        except SecurityError as error:
-            from .invocation_results import InvocationAuthorizationFailure
-
-            return InvocationAuthorizationFailure(
-                correlation_id or self.new_correlation_id(),
-                error.reason_code,
-            )
-        try:
-            return await invoke_agent(
-                self,
-                agent,
-                capability,
-                arguments,
-                timeout=timeout,
-                correlation_id=correlation_id,
-                model_reference=model_reference,
-                run_config=run_config,
-                authorization=effective_authorization,
-                security_pipeline=self.security_pipeline,
-                allowed_capabilities=allowed_capabilities,
-                delegation_budget=delegation_budget,
-            )
-        except AuditDeliveryError as error:
-            from .invocation_results import InvocationAuditFailure
-
-            return InvocationAuditFailure(
-                correlation_id or self.new_correlation_id(),
-                error.reason_code,
-            )
-        except SecurityError as error:
-            from .invocation_results import InvocationAuthorizationFailure
-
-            return InvocationAuthorizationFailure(
-                correlation_id or self.new_correlation_id(),
-                error.reason_code,
-            )
+        return await invoke_capability(
+            self,
+            agent,
+            capability,
+            arguments,
+            timeout=timeout,
+            correlation_id=correlation_id,
+            model_reference=model_reference,
+            run_config=run_config,
+            authorization=authorization,
+            allowed_capabilities=allowed_capabilities,
+            delegation_budget=delegation_budget,
+        )
 
     async def resume_approval(
         self,
@@ -388,54 +241,9 @@ class Runtime:
         authorization: AuthorizationContext,
     ) -> InvocationResult:
         """Resume one persisted approval-bound invocation exactly once."""
-        from .invocation import invoke_agent
-        from .invocation_results import InvocationResult
-
-        async def execute() -> InvocationResult:
-            return await invoke_agent(
-                self,
-                agent,
-                capability,
-                arguments,
-                correlation_id=authorization.correlation_id,
-                authorization=authorization,
-                security_pipeline=self.security_pipeline,
-                approved_approval_id=decision.approval_id,
-            )
-
-        capability_name = capability if isinstance(capability, str) else ""
-        if not isinstance(capability, str):
-            requested = getattr(capability, "__func__", capability)
-            for name, registered in agent.capabilities.items():
-                candidate = getattr(registered.callable, "__func__", registered.callable)
-                if candidate is requested:
-                    capability_name = name
-                    break
-        try:
-            return cast(
-                InvocationResult,
-                await self.security_pipeline.resume(
-                    decision,
-                    execute,
-                    agent_id=agent.agent_metadata.name,
-                    capability_id=capability_name,
-                    context=authorization,
-                ),
-            )
-        except SecurityError as error:
-            from .invocation_results import (
-                InvocationApprovalRequired,
-                InvocationAuthorizationFailure,
-            )
-
-            if error.reason_code == "approval_required":
-                assert self.security_pipeline.store is not None
-                challenge = self.security_pipeline.store.get(decision.approval_id)
-                return InvocationApprovalRequired(authorization.correlation_id, challenge)
-            return InvocationAuthorizationFailure(
-                authorization.correlation_id,
-                error.reason_code,
-            )
+        return await resume_approved_capability(
+            self, agent, capability, arguments, decision, authorization=authorization
+        )
 
     async def resume_approval_token(
         self,
@@ -447,45 +255,9 @@ class Runtime:
         authorization: AuthorizationContext,
     ) -> InvocationResult:
         """Verify a portable approval token before resuming one invocation."""
-        from .invocation import invoke_agent
-
-        if self.security_pipeline.token_service is None:
-            from .invocation_results import InvocationAuthorizationFailure
-
-            return InvocationAuthorizationFailure(
-                authorization.correlation_id,
-                "invalid_state_transition",
-            )
-        claims = self.security_pipeline.token_service.verifier.verify(token)
-
-        async def execute() -> InvocationResult:
-            return await invoke_agent(
-                self,
-                agent,
-                capability,
-                arguments,
-                correlation_id=authorization.correlation_id,
-                authorization=authorization,
-                security_pipeline=self.security_pipeline,
-                approved_approval_id=claims["challenge_id"],
-            )
-
-        try:
-            return cast(
-                InvocationResult,
-                await self.security_pipeline.resume_token(
-                    token,
-                    execute,
-                    context=authorization,
-                ),
-            )
-        except SecurityError as error:
-            from .invocation_results import InvocationAuthorizationFailure
-
-            return InvocationAuthorizationFailure(
-                authorization.correlation_id,
-                error.reason_code,
-            )
+        return await resume_token_capability(
+            self, agent, capability, arguments, token, authorization=authorization
+        )
 
     def create_run_context(
         self,
@@ -513,6 +285,9 @@ class Runtime:
             run_id: Optional explicit run identifier.
             required_capabilities: Provider capabilities required by the run.
             authorization: Optional authenticated authorization context.
+            allowed_capabilities: Optional capability set bounded by the parent context.
+            delegation_budget: Root delegation limits when there is no parent context.
+            delegation_frame: Optional frame appended to the parent's delegation path.
 
         Returns:
             A task-local run context associated with this runtime.
@@ -527,77 +302,17 @@ class Runtime:
             call_override=call_override,
             required_capabilities=required_capabilities or agent.required_capabilities,
         )
-        active_context = get_run_context()
-        parent = (
-            active_context
-            if active_context is not None and active_context.belongs_to(self)
-            else None
-        )
-        effective_timeout: float | None = run.timeout
-        requested_deadline = (
-            time.monotonic() + effective_timeout if effective_timeout is not None else None
-        )
-        deadline: float | None
-        if parent is not None and parent.deadline is not None:
-            deadline = (
-                min(requested_deadline, parent.deadline)
-                if requested_deadline is not None
-                else parent.deadline
-            )
-            effective_timeout = max(0.0, deadline - time.monotonic())
-        else:
-            deadline = requested_deadline
-        effective_run_id = run_id or (
-            str(uuid.uuid4())
-            if parent is not None
-            else (
-                authorization.task_id
-                if isinstance(authorization, AuthorizationContext)
-                else str(uuid.uuid4())
-            )
-        )
-        if isinstance(authorization, AuthorizationContext) and authorization.correlation_id != (
-            correlation_id or authorization.correlation_id
-        ):
-            raise SecurityError("authorization correlation_id does not match run context")
-        parent_allowed = parent.allowed_capabilities if parent is not None else None
-        effective_allowed: frozenset[str] | None
-        if parent_allowed is not None:
-            if allowed_capabilities is None:
-                effective_allowed = parent_allowed
-            elif not allowed_capabilities.issubset(parent_allowed):
-                raise SecurityError("delegated capabilities are broader than their caller")
-            else:
-                effective_allowed = frozenset(allowed_capabilities)
-        else:
-            effective_allowed = (
-                frozenset(allowed_capabilities) if allowed_capabilities is not None else None
-            )
-        path = parent.delegation_path if parent is not None else ()
-        if delegation_frame is not None:
-            path += (delegation_frame,)
-        return RunContext(
-            run_id=effective_run_id,
-            correlation_id=correlation_id or str(uuid.uuid4()),
-            model=binding.model if binding is not None else None,
-            timeout=effective_timeout,
-            deadline=deadline,
-            cancellation=parent.cancellation if parent is not None else CancellationState(),
-            metadata=run.metadata,
+        return build_run_context(
+            self,
             agent_id=agent_id,
-            parent_run_id=parent.run_id if parent is not None else None,
-            delegation_path=path,
-            allowed_capabilities=effective_allowed,
-            delegation_budget=(
-                parent.delegation_budget
-                if parent is not None
-                else (delegation_budget or DelegationBudget())
-            ),
-            policy_context=run,
-            _runtime=self,
-            _agent_registry=self.agent_registry,
-            _binding=binding,
+            run=run,
+            binding=binding,
+            correlation_id=correlation_id,
+            run_id=run_id,
             authorization=authorization,
+            allowed_capabilities=allowed_capabilities,
+            delegation_budget=delegation_budget,
+            delegation_frame=delegation_frame,
         )
 
     def resolve_model(
@@ -707,6 +422,7 @@ class Runtime:
             required_capabilities: Additional provider capabilities required by this call.
             effective_deadline: Optional monotonic deadline, capped by the run deadline.
             purpose: Logical purpose name recorded on the call provenance.
+            clock: Monotonic clock used for model-call timing.
 
         Returns:
             The provider result and invocation metadata.

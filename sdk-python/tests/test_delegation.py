@@ -1,39 +1,57 @@
 import asyncio
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any
 
 from pydantic import BaseModel
 
-from conducto import (
-    AgentRegistry,
-    BaseAgent,
-    CapabilityUse,
-    CapabilityUseRequirement,
-    ChatMessage,
-    DelegationBudget,
+from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.delegation import (
     DelegationConfig,
     DelegationFallbackPolicy,
     DelegationOutcome,
     DelegationOutcomeCode,
     DelegationRequirement,
-    FakeModel,
+    ToolResultStatus,
+    run_delegation,
+)
+from conducto.core.gateway_tools import (
+    CapabilityUse,
+    CapabilityUseRequirement,
+    ToolboxPolicy,
+    build_toolbox,
+)
+from conducto.core.provider import (
+    ChatMessage,
     ModelConfiguration,
     ProviderCapabilities,
     ProviderError,
-    ProviderRegistry,
-    Runtime,
-    ToolboxPolicy,
-    ToolResultStatus,
+    ProviderResult,
+    ProviderToolCallRequest,
     Usage,
-    a2a_agent,
-    a2a_capability,
-    build_toolbox,
-    run_delegation,
 )
-from conducto.core.runtime import use_run_context
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.core.run_context import DelegationBudget, use_run_context
+from conducto.testing import FakeModel
 
 
 class Answer(BaseModel):
     value: str
+
+
+def _terminal(value: str, *, usage: Usage | None = None) -> ProviderResult:
+    return ProviderResult(structured={"value": value}, usage=usage or Usage(), accepted=True)
+
+
+def _call(
+    tool_id: str, call_id: str, arguments: Mapping[str, Any], *, usage: Usage | None = None
+) -> ProviderResult:
+    return ProviderResult(
+        tool_calls=(
+            ProviderToolCallRequest(tool_id=tool_id, call_id=call_id, arguments=arguments),
+        ),
+        usage=usage or Usage(),
+        accepted=True,
+    )
 
 
 @a2a_agent(name="Worker", version="1.0.0", description="Test worker.")
@@ -136,7 +154,7 @@ async def _run(
 def test_no_tool_terminal_response_does_not_invoke_gateway() -> None:
     async def exercise() -> None:
         Worker.calls = 0
-        runtime, model = _runtime(FakeModel({"type": "terminal", "response": {"value": "done"}}))
+        runtime, model = _runtime(FakeModel(_terminal("done")))
         outcome = await _run(runtime, DelegationConfig())
         assert outcome.code is DelegationOutcomeCode.SUCCESS
         assert outcome.value == Answer(value="done")
@@ -148,7 +166,7 @@ def test_no_tool_terminal_response_does_not_invoke_gateway() -> None:
 
 def test_required_capability_unavailable_fails_before_model_call() -> None:
     async def exercise() -> None:
-        runtime, model = _runtime(FakeModel({"type": "terminal", "response": {"value": "unused"}}))
+        runtime, model = _runtime(FakeModel(_terminal("unused")))
         outcome = await _run(
             runtime,
             DelegationConfig(toolbox=_policy("missing", required=True)),
@@ -169,28 +187,15 @@ def test_one_tool_result_is_matched_and_terminal_output_is_validated() -> None:
         runtime, model = _runtime(
             FakeModel(
                 script=(
-                    {
-                        "type": "tool_call",
-                        "call_id": "call-1",
-                        "tool_id": tool_id,
-                        "arguments": {"value": "hello"},
-                    },
-                    {"type": "terminal", "response": {"value": "complete"}},
+                    _call(tool_id, "call-1", {"value": "hello"}),
+                    _terminal("complete"),
                 )
             ),
             registry=agents,
         )
         # Tool IDs are registry-derived and stable across runtime-bound snapshots.
         runtime_tool_id = await _tool_id(runtime, _policy())
-        model._script = (
-            {
-                "type": "tool_call",
-                "call_id": "call-1",
-                "tool_id": runtime_tool_id,
-                "arguments": {"value": "hello"},
-            },
-            {"type": "terminal", "response": {"value": "complete"}},
-        )
+        assert runtime_tool_id == tool_id
 
         outcome = await _run(runtime, DelegationConfig(toolbox=_policy()))
 
@@ -215,21 +220,25 @@ def test_missing_provider_call_id_is_synthesized_once_and_round_tripped() -> Non
         Worker.calls = 0
         agents = AgentRegistry()
         agents.register(Worker())
+        probe = Runtime(agent_registry=agents)
+        tool_id = await _tool_id(probe, _policy())
+        tool_name = await _tool_name(probe, _policy())
         runtime, model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+            FakeModel(
+                script=(
+                    ProviderResult(
+                        tool_calls=(
+                            ProviderToolCallRequest(
+                                tool_name=tool_name, arguments={"value": "hello"}
+                            ),
+                        ),
+                        accepted=True,
+                    ),
+                    _terminal("complete"),
+                )
+            ),
             registry=agents,
         )
-        tool_id = await _tool_id(runtime, _policy())
-        tool_name = await _tool_name(runtime, _policy())
-        model._script = (
-            {
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "arguments": {"value": "hello"},
-            },
-            {"type": "terminal", "response": {"value": "complete"}},
-        )
-        model.selection = None
 
         outcome = await _run(runtime, DelegationConfig(toolbox=_policy()))
 
@@ -250,24 +259,14 @@ def test_sequential_tool_calls_preserve_all_results_and_ordered_provenance() -> 
         agents.register(Worker())
         probe = Runtime(agent_registry=agents)
         tool_id = await _tool_id(probe, _policy())
+        usage = Usage(input_tokens=2, output_tokens=1, total_tokens=3, cost=0.25)
         runtime, model = _runtime(
             FakeModel(
                 script=(
-                    {
-                        "type": "tool_call",
-                        "call_id": "call-1",
-                        "tool_id": tool_id,
-                        "arguments": {"value": "first"},
-                    },
-                    {
-                        "type": "tool_call",
-                        "call_id": "call-2",
-                        "tool_id": tool_id,
-                        "arguments": {"value": "second"},
-                    },
-                    {"type": "terminal", "response": {"value": "complete"}},
+                    _call(tool_id, "call-1", {"value": "first"}, usage=usage),
+                    _call(tool_id, "call-2", {"value": "second"}, usage=usage),
+                    _terminal("complete", usage=usage),
                 ),
-                usage=Usage(input_tokens=2, output_tokens=1, total_tokens=3, cost=0.25),
             ),
             registry=agents,
         )
@@ -303,14 +302,7 @@ def test_unknown_invalid_and_replayed_calls_never_reexecute_business_logic() -> 
         agents.register(Worker())
 
         unknown_runtime, _ = _runtime(
-            FakeModel(
-                {
-                    "type": "tool_call",
-                    "call_id": "unknown",
-                    "tool_id": "foreign-snapshot-tool",
-                    "arguments": {},
-                }
-            ),
+            FakeModel(_call("foreign-snapshot-tool", "unknown", {})),
             registry=agents,
         )
         unknown = await _run(
@@ -320,33 +312,19 @@ def test_unknown_invalid_and_replayed_calls_never_reexecute_business_logic() -> 
         assert unknown.code is DelegationOutcomeCode.MALFORMED_DECISION
         assert Worker.calls == 0
 
-        invalid_runtime, invalid_model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy())
+        invalid_runtime, _ = _runtime(
+            FakeModel(_call(tool_id, "invalid", {})),
             registry=agents,
         )
-        invalid_id = await _tool_id(invalid_runtime, _policy())
-        invalid_model.selection = {
-            "type": "tool_call",
-            "call_id": "invalid",
-            "tool_id": invalid_id,
-            "arguments": {},
-        }
         invalid = await _run(invalid_runtime, DelegationConfig(toolbox=_policy()))
         assert invalid.code is DelegationOutcomeCode.INVALID_ARGUMENTS
 
-        replay_runtime, replay_model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+        call = _call(tool_id, "duplicate", {"value": "once"})
+        replay_runtime, _ = _runtime(
+            FakeModel(script=(call, call)),
             registry=agents,
         )
-        replay_id = await _tool_id(replay_runtime, _policy())
-        call = {
-            "type": "tool_call",
-            "call_id": "duplicate",
-            "tool_id": replay_id,
-            "arguments": {"value": "once"},
-        }
-        replay_model._script = (call, call)
-        replay_model.selection = None
         replay = await _run(replay_runtime, DelegationConfig(toolbox=_policy()))
         assert replay.code is DelegationOutcomeCode.REPLAYED_TOOL_CALL
         assert len(replay.provenance.tool_results) == 1
@@ -360,21 +338,16 @@ def test_explicit_eligible_fallback_retains_child_failure() -> None:
         Worker.calls = 0
         agents = AgentRegistry()
         agents.register(Worker())
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy("fail"))
         runtime, model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+            FakeModel(
+                script=(
+                    _call(tool_id, "failed-child", {}),
+                    _terminal("fallback"),
+                )
+            ),
             registry=agents,
         )
-        tool_id = await _tool_id(runtime, _policy("fail"))
-        model._script = (
-            {
-                "type": "tool_call",
-                "call_id": "failed-child",
-                "tool_id": tool_id,
-                "arguments": {},
-            },
-            {"type": "terminal", "response": {"value": "fallback"}},
-        )
-        model.selection = None
         outcome = await _run(
             runtime,
             DelegationConfig(
@@ -395,33 +368,24 @@ def test_independent_loop_limits_are_typed_and_deterministic() -> None:
     async def exercise() -> None:
         agents = AgentRegistry()
         agents.register(Worker())
-        runtime, model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy())
+        runtime, _ = _runtime(
+            FakeModel(_call(tool_id, "limited", {"value": "x"})),
             registry=agents,
         )
-        tool_id = await _tool_id(runtime, _policy())
-        tool_call = {
-            "type": "tool_call",
-            "call_id": "limited",
-            "tool_id": tool_id,
-            "arguments": {"value": "x"},
-        }
-
-        model.selection = tool_call
         calls = await _run(
             runtime,
             DelegationConfig(toolbox=_policy(), max_tool_calls=0),
         )
         assert calls.code is DelegationOutcomeCode.TOOL_CALL_LIMIT_EXHAUSTED
 
-        model.selection = {**tool_call, "call_id": "depth"}
         depth = await _run(
             runtime,
             DelegationConfig(toolbox=_policy(), max_depth=0),
         )
         assert depth.code is DelegationOutcomeCode.DEPTH_LIMIT_EXHAUSTED
 
-        model.selection = {"type": "terminal", "response": {"value": "again"}}
+        runtime, _ = _runtime(FakeModel(_terminal("again")), registry=agents)
         turns = await _run(
             runtime,
             DelegationConfig(
@@ -448,8 +412,7 @@ def test_token_cost_and_result_size_limits_are_enforced() -> None:
         agents.register(Worker())
         token_runtime, _ = _runtime(
             FakeModel(
-                {"type": "terminal", "response": {"value": "unused"}},
-                usage=Usage(total_tokens=2),
+                _terminal("unused", usage=Usage(total_tokens=2)),
             ),
             registry=agents,
         )
@@ -458,25 +421,18 @@ def test_token_cost_and_result_size_limits_are_enforced() -> None:
 
         cost_runtime, _ = _runtime(
             FakeModel(
-                {"type": "terminal", "response": {"value": "unused"}},
-                usage=Usage(cost=2.0),
+                _terminal("unused", usage=Usage(cost=2.0)),
             ),
             registry=agents,
         )
         cost = await _run(cost_runtime, DelegationConfig(cost_budget=1.0))
         assert cost.code is DelegationOutcomeCode.COST_BUDGET_EXHAUSTED
 
-        size_runtime, size_model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy())
+        size_runtime, _ = _runtime(
+            FakeModel(_call(tool_id, "large", {"value": "large"})),
             registry=agents,
         )
-        tool_id = await _tool_id(size_runtime, _policy())
-        size_model.selection = {
-            "type": "tool_call",
-            "call_id": "large",
-            "tool_id": tool_id,
-            "arguments": {"value": "large"},
-        }
         size = await _run(
             size_runtime,
             DelegationConfig(toolbox=_policy(), max_result_bytes=8),
@@ -488,7 +444,7 @@ def test_token_cost_and_result_size_limits_are_enforced() -> None:
 
 def test_parent_cancellation_is_not_reported_as_success_or_generic_failure() -> None:
     async def exercise() -> None:
-        runtime, model = _runtime(FakeModel({"type": "terminal", "response": {"value": "unused"}}))
+        runtime, model = _runtime(FakeModel(_terminal("unused")))
         context = runtime.create_run_context(agent_id="Caller", call_override="model")
         context.cancellation.cancel()
         with use_run_context(context):
@@ -509,17 +465,11 @@ def test_parent_cancellation_stops_active_child_work() -> None:
         BlockingWorker.started = asyncio.Event()
         agents = AgentRegistry()
         agents.register(BlockingWorker())
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy("block"))
         runtime, model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+            FakeModel(_call(tool_id, "blocking", {})),
             registry=agents,
         )
-        tool_id = await _tool_id(runtime, _policy("block"))
-        model.selection = {
-            "type": "tool_call",
-            "call_id": "blocking",
-            "tool_id": tool_id,
-            "arguments": {},
-        }
         context = runtime.create_run_context(agent_id="Caller", call_override="model")
 
         async def invoke() -> DelegationOutcome[Answer]:
@@ -547,7 +497,7 @@ def test_agent_facade_and_fallback_safety_are_explicit() -> None:
     async def exercise() -> None:
         config = DelegationConfig()
         agent = Worker(delegation_config=config)
-        runtime, _ = _runtime(FakeModel({"type": "terminal", "response": {"value": "facade"}}))
+        runtime, _ = _runtime(FakeModel(_terminal("facade")))
         context = runtime.create_run_context(agent_id="Worker", call_override="model")
         with use_run_context(context):
             outcome = await agent.run_delegation(
@@ -575,7 +525,9 @@ def test_agent_facade_and_fallback_safety_are_explicit() -> None:
 
 def test_malformed_provider_and_incompatible_model_fail_with_typed_outcomes() -> None:
     async def exercise() -> None:
-        malformed_runtime, _ = _runtime(FakeModel("prose only"))
+        malformed_runtime, _ = _runtime(
+            FakeModel(ProviderResult(content="prose only", accepted=True))
+        )
         malformed = await _run(malformed_runtime, DelegationConfig())
         assert malformed.code is DelegationOutcomeCode.MALFORMED_DECISION
 
@@ -585,7 +537,7 @@ def test_malformed_provider_and_incompatible_model_fail_with_typed_outcomes() ->
 
         agents = AgentRegistry()
         agents.register(Worker())
-        incompatible_model = FakeModel({"type": "terminal", "response": {"value": "unused"}})
+        incompatible_model = FakeModel(_terminal("unused"))
         incompatible_model.capabilities = ProviderCapabilities(structured_output=True)
         incompatible_runtime, _ = _runtime(incompatible_model, registry=agents)
         incompatible = await _run(
@@ -602,31 +554,24 @@ def test_deadline_before_dispatch_does_not_execute_or_reserve_child_budget() -> 
         Worker.calls = 0
         agents = AgentRegistry()
         agents.register(Worker())
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy())
         runtime, model = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+            FakeModel(_call(tool_id, "deadline", {"value": "never"})),
             registry=agents,
         )
-        tool_id = await _tool_id(runtime, _policy())
-        model.selection = {
-            "type": "tool_call",
-            "call_id": "deadline",
-            "tool_id": tool_id,
-            "arguments": {"value": "never"},
-        }
         budget = DelegationBudget(calls=1)
         context = runtime.create_run_context(
             agent_id="Caller",
             call_override="model",
             delegation_budget=budget,
         )
-        times: Iterator[float] = iter((0.0, 0.0, 0.0, 0.0, 2.0))
         with use_run_context(context):
             outcome = await run_delegation(
                 context,
                 (ChatMessage(role="user", content="deadline"),),
                 config=DelegationConfig(toolbox=_policy(), timeout=1.0),
                 response_type=Answer,
-                clock=lambda: next(times),
+                clock=lambda: 2.0 if model.calls else 0.0,
             )
         assert outcome.code is DelegationOutcomeCode.DEADLINE_EXHAUSTED
         assert budget.snapshot(current_depth=0, remaining_time=None).calls == 1
@@ -640,36 +585,25 @@ def test_concurrent_loops_isolate_replay_state_and_share_atomic_budget() -> None
         Worker.calls = 0
         agents = AgentRegistry()
         agents.register(Worker())
-        runtime_a, model_a = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy())
+        runtime_a, _ = _runtime(
+            FakeModel(
+                script=(
+                    _call(tool_id, "same-call-id", {"value": "a"}),
+                    _terminal("a"),
+                )
+            ),
             registry=agents,
         )
-        runtime_b, model_b = _runtime(
-            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+        runtime_b, _ = _runtime(
+            FakeModel(
+                script=(
+                    _call(tool_id, "same-call-id", {"value": "b"}),
+                    _terminal("b"),
+                )
+            ),
             registry=agents,
         )
-        tool_id_a = await _tool_id(runtime_a, _policy())
-        tool_id_b = await _tool_id(runtime_b, _policy())
-        model_a._script = (
-            {
-                "type": "tool_call",
-                "call_id": "same-call-id",
-                "tool_id": tool_id_a,
-                "arguments": {"value": "a"},
-            },
-            {"type": "terminal", "response": {"value": "a"}},
-        )
-        model_a.selection = None
-        model_b._script = (
-            {
-                "type": "tool_call",
-                "call_id": "same-call-id",
-                "tool_id": tool_id_b,
-                "arguments": {"value": "b"},
-            },
-            {"type": "terminal", "response": {"value": "b"}},
-        )
-        model_b.selection = None
         shared = DelegationBudget(calls=1)
 
         async def invoke(runtime: Runtime) -> DelegationOutcome[Answer]:
@@ -694,5 +628,43 @@ def test_concurrent_loops_isolate_replay_state_and_share_atomic_budget() -> None
         }
         assert first.provenance.loop_id != second.provenance.loop_id
         assert Worker.calls == 1
+
+    asyncio.run(exercise())
+
+
+def test_eligible_fallback_allows_only_a_terminal_turn_not_another_child() -> None:
+    async def exercise() -> None:
+        Worker.calls = 0
+        agents = AgentRegistry()
+        agents.register(Worker())
+        tool_id = await _tool_id(Runtime(agent_registry=agents), _policy("fail"))
+        runtime, model = _runtime(
+            FakeModel(
+                script=(
+                    _call(tool_id, "first-failure", {}),
+                    _call(tool_id, "must-not-execute", {}),
+                    _terminal("must-not-succeed"),
+                )
+            ),
+            registry=agents,
+        )
+        outcome = await _run(
+            runtime,
+            DelegationConfig(
+                toolbox=_policy("fail"),
+                fallback=DelegationFallbackPolicy(frozenset({ToolResultStatus.EXECUTION_FAILURE})),
+            ),
+        )
+        assert outcome.code is DelegationOutcomeCode.CHILD_FAILURE
+        assert outcome.failure_code == "fallback_must_be_terminal"
+        assert Worker.calls == 1
+        assert model.calls == 2
+        assert [result.to_dict() for result in outcome.provenance.tool_results] == [
+            {
+                "call_id": "first-failure",
+                "status": "execution_failure",
+                "reason_code": "execution_failure",
+            }
+        ]
 
     asyncio.run(exercise())

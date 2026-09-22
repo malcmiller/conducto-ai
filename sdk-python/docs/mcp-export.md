@@ -61,8 +61,8 @@ construction with `McpSchemaProjectionError` instead of silently broadening.
 
 ## Stdio identity and invocation
 
-A stdio session must be constructed with an explicit immutable `Principal` or
-a principal resolver. There is no anonymous privileged default, so protected
+An stdio session must be constructed with an explicit immutable `Principal` or
+a principal resolver. There is no anonymous-privileged default, so protected
 capabilities fail closed without identity, and `tools/list` exposes only
 policy-admitted capabilities that the configured principal may call.
 
