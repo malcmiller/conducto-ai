@@ -16,7 +16,7 @@ from .invocation_results import (
     InvocationResult,
 )
 from .model_config import ModelReference, RunConfig
-from .run_context import DelegationBudget, get_run_context
+from .run_context import CancellationState, DelegationBudget, get_run_context
 
 if TYPE_CHECKING:
     from .agent import BaseAgent
@@ -36,6 +36,7 @@ async def invoke_capability(
     authorization: Any,
     allowed_capabilities: frozenset[str] | None,
     delegation_budget: DelegationBudget | None,
+    cancellation: CancellationState | None,
 ) -> InvocationResult:
     """Attenuate inherited authorization and normalize security failures."""
     from .invocation import invoke_agent
@@ -64,6 +65,7 @@ async def invoke_capability(
             security_pipeline=runtime.security_pipeline,
             allowed_capabilities=allowed_capabilities,
             delegation_budget=delegation_budget,
+            cancellation=cancellation,
         )
     except AuditDeliveryError as error:
         return InvocationAuditFailure(
@@ -83,6 +85,12 @@ async def resume_approved_capability(
     decision: ApprovalDecision,
     *,
     authorization: AuthorizationContext,
+    timeout: float | None,
+    model_reference: ModelReference | str | None,
+    run_config: RunConfig | None,
+    allowed_capabilities: frozenset[str] | None,
+    delegation_budget: DelegationBudget | None,
+    cancellation: CancellationState | None,
 ) -> InvocationResult:
     """Resume a persisted approval through the same invocation pipeline."""
     from .invocation import invoke_agent
@@ -93,10 +101,16 @@ async def resume_approved_capability(
             agent,
             capability,
             arguments,
+            timeout=timeout,
             correlation_id=authorization.correlation_id,
+            model_reference=model_reference,
+            run_config=run_config,
             authorization=authorization,
             security_pipeline=runtime.security_pipeline,
             approved_approval_id=decision.approval_id,
+            allowed_capabilities=allowed_capabilities,
+            delegation_budget=delegation_budget,
+            cancellation=cancellation,
         )
 
     capability_name = capability if isinstance(capability, str) else ""

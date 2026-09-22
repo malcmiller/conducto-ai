@@ -9,6 +9,7 @@ from ..invocation_results import (
     InvocationCancelled,
     InvocationDelegationFailure,
     InvocationFailure,
+    InvocationInternalFailure,
     InvocationResult,
     InvocationSchemaMismatch,
     InvocationStaleBinding,
@@ -80,7 +81,7 @@ def _to_tool_result(call_id: str, result: InvocationResult) -> ToolResultEnvelop
             else ToolResultStatus.DEPTH_REJECTED
         )
         return ToolResultEnvelope(call_id, status, reason_code=result.reason_code)
-    if isinstance(result, InvocationFailure):
+    if isinstance(result, InvocationFailure | InvocationInternalFailure):
         return ToolResultEnvelope(
             call_id,
             ToolResultStatus.EXECUTION_FAILURE,

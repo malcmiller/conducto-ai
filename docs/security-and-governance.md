@@ -131,6 +131,35 @@ RFC 8693 exchange request for a nested call. Supplying an `AuditEmitter` records
 token-exchange, token-validation, mTLS, and delegation outcomes without logging
 protected material.
 
+## Inbound A2A identity and replay boundary
+
+`conducto.a2a.A2ARuntimeHandler` composes with these contracts through an
+injected `A2AIdentityResolver`. The resolver receives immutable task, context,
+message, JSON-RPC request, correlation, header, and safe metadata facts and may
+call `authenticate_incoming_request(...)`. The adapter never acquires
+credentials and never copies authorization headers into run metadata, task
+records, results, logs, traces, or audit events.
+
+The resolver returns `A2AAuthenticatedIdentity`, which owns the principal,
+scopes, roles, policy metadata, optional capability allowlist, optional root
+delegation budget, and optional authenticated approval decision. Message
+metadata is intersected with a resolver-owned capability allowlist. A
+message-supplied budget is intersected with a thread-safe snapshot of the
+authenticated budget's remaining resources, and execution receives a separate
+ledger bounded by both sides. Transport data cannot set a principal, add
+scopes/roles, restore reserved resources, broaden authenticated authority, or
+mutate the resolver-owned ledger. The returned authorization context must
+match the server-owned task and effective correlation ID.
+
+Advertised skills are bound to signed, runtime-scoped `CapabilityBinding`
+snapshots. Each invocation revalidates signature, runtime ownership, expiry,
+registration generation, schema digest, lifecycle, and health before entering
+`Runtime`. Duplicate JSON-RPC request IDs and A2A message IDs share one
+in-flight result when their request fingerprint matches; conflicting reuse is
+rejected as replay without invoking the capability. This execution
+idempotency is independent of W3C trace IDs, which remain diagnostic parentage
+only.
+
 These contracts are deterministic, local-fixture reference implementations:
 tests build local RSA/EC keys and sign fixture JWTs directly, without Azure,
 MSAL, Authlib, or internet access. Provider-specific flows (Azure Identity,

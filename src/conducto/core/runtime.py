@@ -45,6 +45,7 @@ from .provider_registry import (
     ProviderRegistry,
 )
 from .run_context import (
+    CancellationState,
     DelegationBudget,
     DelegationFrame,
     ModelPolicy,
@@ -245,6 +246,7 @@ class Runtime:
         authorization: Any = None,
         allowed_capabilities: frozenset[str] | None = None,
         delegation_budget: DelegationBudget | None = None,
+        cancellation: CancellationState | None = None,
     ) -> InvocationResult:
         """Invoke a capability through the runtime-owned execution pipeline.
 
@@ -259,6 +261,7 @@ class Runtime:
             authorization: Optional authenticated authorization context.
             allowed_capabilities: Optional attenuated set of callable capabilities.
             delegation_budget: Optional root delegation limits inherited by child calls.
+            cancellation: Optional application-owned cooperative cancellation state.
 
         Returns:
             A normalized invocation result envelope.
@@ -276,6 +279,7 @@ class Runtime:
             authorization=authorization,
             allowed_capabilities=allowed_capabilities,
             delegation_budget=delegation_budget,
+            cancellation=cancellation,
         )
 
     async def resume_approval(
@@ -286,10 +290,44 @@ class Runtime:
         decision: ApprovalDecision,
         *,
         authorization: AuthorizationContext,
+        timeout: float | None = None,
+        model_reference: ModelReference | str | None = None,
+        run_config: RunConfig | None = None,
+        allowed_capabilities: frozenset[str] | None = None,
+        delegation_budget: DelegationBudget | None = None,
+        cancellation: CancellationState | None = None,
     ) -> InvocationResult:
-        """Resume one persisted approval-bound invocation exactly once."""
+        """Resume one persisted approval through the canonical invocation pipeline.
+
+        Args:
+            agent: Agent instance that owns the approved capability.
+            capability: Capability name or callable reference.
+            arguments: Arguments bound to the approved invocation.
+            decision: Authenticated approval decision.
+            authorization: Authorization context bound to the challenge.
+            timeout: Optional execution timeout override.
+            model_reference: Optional model override for the resumed run.
+            run_config: Optional immutable run configuration.
+            allowed_capabilities: Optional attenuated capability allowlist.
+            delegation_budget: Optional root delegation limits.
+            cancellation: Optional cooperative cancellation state.
+
+        Returns:
+            A normalized invocation result envelope.
+        """
         return await resume_approved_capability(
-            self, agent, capability, arguments, decision, authorization=authorization
+            self,
+            agent,
+            capability,
+            arguments,
+            decision,
+            authorization=authorization,
+            timeout=timeout,
+            model_reference=model_reference,
+            run_config=run_config,
+            allowed_capabilities=allowed_capabilities,
+            delegation_budget=delegation_budget,
+            cancellation=cancellation,
         )
 
     async def resume_approval_token(
@@ -320,6 +358,7 @@ class Runtime:
         allowed_capabilities: frozenset[str] | None = None,
         delegation_budget: DelegationBudget | None = None,
         delegation_frame: DelegationFrame | None = None,
+        cancellation: CancellationState | None = None,
     ) -> RunContext:
         """Create a new run context for an invocation.
 
@@ -335,6 +374,7 @@ class Runtime:
             allowed_capabilities: Optional capability set bounded by the parent context.
             delegation_budget: Root delegation limits when there is no parent context.
             delegation_frame: Optional frame appended to the parent's delegation path.
+            cancellation: Optional cancellation state for a root invocation.
 
         Returns:
             A task-local run context associated with this runtime.
@@ -360,6 +400,7 @@ class Runtime:
             allowed_capabilities=allowed_capabilities,
             delegation_budget=delegation_budget,
             delegation_frame=delegation_frame,
+            cancellation=cancellation,
         )
 
     def resolve_model(

@@ -16,6 +16,7 @@ from conducto.core.invocation_results import (
     InvocationCancelled,
     InvocationDelegationFailure,
     InvocationFailure,
+    InvocationInternalFailure,
     InvocationResult,
     InvocationSchemaMismatch,
     InvocationStaleBinding,
@@ -38,6 +39,7 @@ _FAILURE_MESSAGES: Mapping[str, str] = {
     "timeout": "The capability exceeded its execution deadline.",
     "cancelled": "The capability invocation was cancelled.",
     "capability_failure": "The capability failed during execution.",
+    "internal_error": "The capability invocation failed internally.",
     "unsupported_result": "The capability result cannot be represented as MCP content.",
     "approval_required": "The capability requires approval before it can execute.",
     "authorization_denied": "The caller is not authorized to invoke this capability.",
@@ -108,6 +110,8 @@ def invocation_result_to_tool_outcome(result: InvocationResult) -> McpToolOutcom
                 else "capability_failure"
             )
             return _failure(reason, result.correlation_id)
+        case InvocationInternalFailure():
+            return _failure("internal_error", result.correlation_id)
         case InvocationApprovalRequired():
             return _failure(
                 "approval_required",

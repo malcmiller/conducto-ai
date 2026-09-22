@@ -1,0 +1,122 @@
+{
+  "profile": {
+    "protocolVersion": "1.0",
+    "successArtifactName": "result",
+    "statusMessageRole": "ROLE_AGENT"
+  },
+  "correlationId": "correlation-1",
+  "outcomes": [
+    {
+      "result": "InvocationSuccess",
+      "state": "TASK_STATE_COMPLETED",
+      "reason": "ok",
+      "message": "The capability invocation completed.",
+      "hasArtifact": true
+    },
+    {
+      "result": "InvocationValidationFailure",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "invalid_arguments",
+      "message": "The arguments did not match the capability schema.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationTargetNotFound",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "target_not_found",
+      "message": "The requested capability is not available.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationTimeout",
+      "state": "TASK_STATE_FAILED",
+      "reason": "timeout",
+      "message": "The capability exceeded its execution deadline.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationCancelled",
+      "state": "TASK_STATE_CANCELED",
+      "reason": "cancelled",
+      "message": "The capability invocation was cancelled.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationFailure",
+      "state": "TASK_STATE_FAILED",
+      "reason": "capability_failure",
+      "message": "The capability failed during execution.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationInternalFailure",
+      "state": "TASK_STATE_FAILED",
+      "reason": "internal_error",
+      "message": "The capability invocation failed internally.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationApprovalRequired",
+      "state": "TASK_STATE_INPUT_REQUIRED",
+      "reason": "approval_required",
+      "message": "The capability requires approval before it can execute.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationAuthorizationFailure",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "authorization_denied",
+      "message": "The caller is not authorized to invoke this capability.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationAuditFailure",
+      "state": "TASK_STATE_FAILED",
+      "reason": "audit_unavailable",
+      "message": "Mandatory audit evidence could not be recorded.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationBindingFailure",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "binding_rejected",
+      "message": "The capability binding was rejected.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationStaleBinding",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "binding_stale",
+      "message": "The capability binding is no longer valid.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationTargetUnavailable",
+      "state": "TASK_STATE_FAILED",
+      "reason": "target_unavailable",
+      "message": "The capability target is not currently available.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationSchemaMismatch",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "schema_mismatch",
+      "message": "The capability schema changed after publication.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationBudgetExhausted",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "budget_exhausted",
+      "message": "The invocation budget is exhausted.",
+      "hasArtifact": false
+    },
+    {
+      "result": "InvocationDelegationFailure",
+      "state": "TASK_STATE_REJECTED",
+      "reason": "delegation_rejected",
+      "message": "The delegation request was rejected.",
+      "hasArtifact": false
+    }
+  ]
+}

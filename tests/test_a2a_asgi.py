@@ -34,6 +34,7 @@ from conducto.a2a import (
     A2A_SERVER_EXTRA,
     A2AASGI,
     A2ADependencyError,
+    A2ARequestContext,
     require_a2a_server_dependency,
 )
 from conducto.core.a2a_profile import parse_agent_card
@@ -69,13 +70,38 @@ class _RecordingHandler:
         self._results = list(results) if results else None
 
     async def handle_message(
-        self, message: Message, *, task_id: str, context_id: str
+        self,
+        message: Message,
+        *,
+        task_id: str,
+        context_id: str,
+        request_context: A2ARequestContext,
     ) -> InvocationResult:
         """Record the call and return the next configured (or default) result."""
+        del request_context
         self.calls.append((message, task_id, context_id))
         if self._results is not None:
             return self._results.pop(0)
         return InvocationSuccess(correlation_id=task_id, value={"echo": True})
+
+
+class _LegacyRecordingHandler:
+    """Story 4.4 handler implementation without request-context support."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def handle_message(
+        self,
+        message: Message,
+        *,
+        task_id: str,
+        context_id: str,
+    ) -> InvocationResult:
+        """Record a context-free invocation."""
+        del message, context_id
+        self.calls += 1
+        return InvocationSuccess(correlation_id=task_id, value={"legacy": True})
 
 
 class _FixedIDGenerator(IDGenerator):
@@ -177,6 +203,23 @@ def test_agent_card_route_serves_the_reflected_agent_card() -> None:
     assert len(body["supportedInterfaces"]) == 1
     assert body["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
     assert body["supportedInterfaces"][0]["protocolVersion"] == "1.0"
+
+
+def test_story_44_request_handler_remains_usable() -> None:
+    """The low-level adapter accepts the original context-free handler seam."""
+    handler = _LegacyRecordingHandler()
+    app = A2AASGI(
+        agent=_EchoAgent(),
+        endpoint_url=ENDPOINT_URL,
+        task_repository=InMemoryTaskRepository(),
+        request_handler=handler,
+    )
+
+    response = asyncio.run(_post(app, "SendMessage", SendMessageRequest(message=_message())))
+
+    assert response.status_code == 200
+    assert response.json()["result"]["task"]["status"]["state"] == "TASK_STATE_COMPLETED"
+    assert handler.calls == 1
 
 
 def test_advertised_jsonrpc_url_equals_mounted_endpoint_configuration() -> None:
@@ -686,6 +729,8 @@ def test_importing_conducto_does_not_eagerly_import_the_asgi_adapter() -> None:
     script = (
         "import sys; import conducto; import conducto.transport; import conducto.a2a; "
         "print('conducto.a2a.asgi' in sys.modules); "
+        "assert conducto.a2a.create_a2a_app; "
+        "print('conducto.a2a.asgi' in sys.modules); "
         "conducto.a2a.A2AASGI; "
         "print('conducto.a2a.asgi' in sys.modules)"
     )
@@ -697,20 +742,22 @@ def test_importing_conducto_does_not_eagerly_import_the_asgi_adapter() -> None:
         text=True,
     )
 
-    before, after = completed.stdout.strip().splitlines()
+    before, after_factory, after = completed.stdout.strip().splitlines()
     assert before == "False"
+    assert after_factory == "False"
     assert after == "True"
 
 
 def test_server_dependencies_are_isolated_from_core_and_client_import_paths() -> None:
-    """Blocking Starlette and the SDK's route factories does not break base imports."""
+    """Blocking server and HTTP client dependencies does not break base imports."""
     script = (
         "import builtins\n"
         "_original_import = builtins.__import__\n"
-        "_blocked = {'starlette.applications'}\n"
+        "_blocked = {'httpx', 'starlette.applications'}\n"
         "\n"
         "def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):\n"
-        "    if name in _blocked or name.startswith('a2a.server.routes'):\n"
+        "    if name in _blocked or name.startswith('httpx.') or "
+        "name.startswith('a2a.server.routes'):\n"
         "        raise ImportError(f'blocked: {name}')\n"
         "    return _original_import(name, globals, locals, fromlist, level)\n"
         "\n"
@@ -718,6 +765,7 @@ def test_server_dependencies_are_isolated_from_core_and_client_import_paths() ->
         "import conducto\n"
         "import conducto.transport\n"
         "import conducto.a2a\n"
+        "assert conducto.a2a.create_a2a_app\n"
         "print('base-import-ok')\n"
         "try:\n"
         "    conducto.a2a.A2AASGI\n"
