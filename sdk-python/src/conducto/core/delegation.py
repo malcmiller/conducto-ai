@@ -378,7 +378,7 @@ async def run_delegation(
                 model_call = await context.models.require(config.model).complete(
                     history,
                     structured_output=build_model_decision_schema(response_type),
-                    tools=snapshot.as_model_payload(),
+                    tools=snapshot.as_provider_tools(),
                     tool_results=tuple(
                         ToolResultMessage(
                             call_id=result.call_id,
@@ -436,7 +436,11 @@ async def run_delegation(
                 return finish(DelegationOutcomeCode.COST_BUDGET_EXHAUSTED)
 
             try:
-                decision = parse_model_decision(model_call.result, response_type=response_type)
+                decision = parse_model_decision(
+                    model_call.result,
+                    response_type=response_type,
+                    tools=snapshot.as_provider_tools(),
+                )
             except MalformedStructuredOutputError:
                 return finish(DelegationOutcomeCode.MALFORMED_DECISION)
 

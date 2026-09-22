@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
@@ -20,6 +20,7 @@ from .provider import (
     ModelProvider,
     ProviderCallContext,
     ProviderResult,
+    ProviderToolDefinition,
     StructuredOutputRequest,
     ToolResultMessage,
     complete_with_retries,
@@ -95,7 +96,7 @@ class ModelGateway:
         messages: Sequence[ChatMessage],
         *,
         structured_output: StructuredOutputRequest,
-        tools: Sequence[Mapping[str, Any]] = (),
+        tools: Sequence[ProviderToolDefinition] = (),
         tool_results: Sequence[ToolResultMessage] = (),
         required_capabilities: frozenset[str] = frozenset(),
         effective_deadline: float | None = None,
@@ -172,7 +173,7 @@ async def complete_model_call(
     messages: Sequence[ChatMessage],
     *,
     structured_output: StructuredOutputRequest,
-    tools: Sequence[Mapping[str, Any]] = (),
+    tools: Sequence[ProviderToolDefinition] = (),
     tool_results: Sequence[ToolResultMessage] = (),
     effective_deadline: float | None = None,
     purpose: str = "model_call",

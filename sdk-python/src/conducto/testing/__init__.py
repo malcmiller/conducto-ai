@@ -7,6 +7,7 @@ from .provider_conformance import (
     ScriptedProvider,
     ScriptedProviderCall,
     assert_provider_conformance,
+    assert_provider_tool_call_conformance,
     run_provider_conformance,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "ScriptedProvider",
     "ScriptedProviderCall",
     "assert_provider_conformance",
+    "assert_provider_tool_call_conformance",
     "run_provider_conformance",
 ]

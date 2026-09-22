@@ -87,6 +87,14 @@ async def _tool_id(runtime: Runtime, policy: ToolboxPolicy) -> str:
     return result.snapshot.tools[0].tool_id
 
 
+async def _tool_name(runtime: Runtime, policy: ToolboxPolicy) -> str:
+    context = runtime.create_run_context(agent_id="Inspector")
+    with use_run_context(context):
+        result = await build_toolbox(context.gateway, policy)
+    assert result.snapshot is not None
+    return result.snapshot.tools[0].name
+
+
 def _runtime(
     model: FakeModel,
     *,
@@ -198,6 +206,39 @@ def test_one_tool_result_is_matched_and_terminal_output_is_validated() -> None:
             "delegation_turn",
             "delegation_turn",
         ]
+
+    asyncio.run(exercise())
+
+
+def test_missing_provider_call_id_is_synthesized_once_and_round_tripped() -> None:
+    async def exercise() -> None:
+        Worker.calls = 0
+        agents = AgentRegistry()
+        agents.register(Worker())
+        runtime, model = _runtime(
+            FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),
+            registry=agents,
+        )
+        tool_id = await _tool_id(runtime, _policy())
+        tool_name = await _tool_name(runtime, _policy())
+        model._script = (
+            {
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "arguments": {"value": "hello"},
+            },
+            {"type": "terminal", "response": {"value": "complete"}},
+        )
+        model.selection = None
+
+        outcome = await _run(runtime, DelegationConfig(toolbox=_policy()))
+
+        assert outcome.code is DelegationOutcomeCode.SUCCESS
+        assert Worker.calls == 1
+        synthesized = outcome.provenance.tool_calls[0].call_id
+        assert synthesized.startswith("tool_")
+        assert outcome.provenance.tool_calls[0].tool_id == tool_id
+        assert model.requests[1].tool_results[0].call_id == synthesized
 
     asyncio.run(exercise())
 

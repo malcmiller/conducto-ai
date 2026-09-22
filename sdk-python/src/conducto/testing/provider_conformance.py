@@ -7,9 +7,10 @@ Conducto contracts and never inspects provider internals.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+
+from pydantic import BaseModel
 
 from conducto.core.provider import (
     AcceptanceState,
@@ -22,9 +23,12 @@ from conducto.core.provider import (
     ProviderError,
     ProviderRateLimitError,
     ProviderResult,
+    ProviderToolDefinition,
     StructuredOutputRequest,
+    ToolResultMessage,
     Usage,
     complete_with_retries,
+    parse_model_decision,
 )
 
 PROVIDER_FIXTURE_VERSION = "1"
@@ -55,6 +59,8 @@ class ScriptedProviderCall:
     messages: tuple[ChatMessage, ...]
     options: GenerationOptions
     structured_output: StructuredOutputRequest
+    tools: tuple[ProviderToolDefinition, ...]
+    tool_results: tuple[ToolResultMessage, ...]
     deadline: float | None
     cancellation: bool
 
@@ -85,18 +91,19 @@ class ScriptedProvider:
         *,
         options: GenerationOptions,
         structured_output: StructuredOutputRequest,
-        tools: Sequence[Mapping[str, Any]] = (),
-        tool_results: Sequence[Any] = (),
+        tools: Sequence[ProviderToolDefinition] = (),
+        tool_results: Sequence[ToolResultMessage] = (),
         effective_deadline: float | None = None,
         call_context: ProviderCallContext | None = None,
     ) -> ProviderResult:
         """Return the next deterministic response without sleeping."""
-        del tools, tool_results
         self.calls.append(
             ScriptedProviderCall(
                 tuple(messages),
                 options,
                 structured_output,
+                tuple(tools),
+                tuple(tool_results),
                 effective_deadline,
                 call_context.cancelled if call_context is not None else False,
             )
@@ -135,6 +142,40 @@ async def assert_provider_conformance(provider: ModelProvider) -> None:
     assert result.structured == {"answer": "ok"}
     assert result.acceptance is AcceptanceState.ACCEPTED
     assert result.usage.input_tokens is None or result.usage.input_tokens >= 0
+
+
+async def assert_provider_tool_call_conformance(provider: ModelProvider) -> None:
+    """Run the deterministic native-tool decision contract against a provider."""
+    request = _request()
+    request = StructuredOutputRequest(
+        name=request.name,
+        schema=request.json_schema,
+        required=False,
+    )
+    tools = (
+        ProviderToolDefinition(
+            tool_id="tool-1",
+            name="lookup_tool_1",
+            description="Looks up deterministic fixture data.",
+            input_schema={
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        ),
+    )
+    result = await complete_with_retries(
+        provider,
+        (ChatMessage(role="user", content="tool conformance"),),
+        options=GenerationOptions(model="conformance"),
+        structured_output=request,
+        tools=tools,
+    )
+    decision = parse_model_decision(result, response_type=_ConformanceResponse, tools=tools)
+    assert decision.type == "tool_call"
+    assert decision.tool_id == "tool-1"
+    assert decision.arguments == {"query": "value"}
 
 
 async def run_provider_conformance(
@@ -184,3 +225,7 @@ def _request() -> StructuredOutputRequest:
             "required": ["answer"],
         },
     )
+
+
+class _ConformanceResponse(BaseModel):
+    answer: str
