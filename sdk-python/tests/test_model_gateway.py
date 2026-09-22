@@ -125,15 +125,16 @@ def test_model_decision_contract_separates_terminal_schema_and_native_tool_calls
             tools=tools,
         )
 
-    unresolved = parse_model_decision(
-        ProviderResult(
-            tool_calls=(ProviderToolCallRequest(tool_id="forged-tool", arguments={"query": "x"}),)
-        ),
-        response_type=Response,
-        tools=tools,
-    )
-    assert unresolved.type == "tool_call"
-    assert unresolved.tool_id == "forged-tool"
+    with pytest.raises(MalformedStructuredOutputError, match="unknown tool id"):
+        parse_model_decision(
+            ProviderResult(
+                tool_calls=(
+                    ProviderToolCallRequest(tool_id="forged-tool", arguments={"query": "x"}),
+                )
+            ),
+            response_type=Response,
+            tools=tools,
+        )
 
     ambiguous_tools = (
         _tool_definition(tool_id="tool-1", name="shared_tool"),

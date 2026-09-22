@@ -317,7 +317,8 @@ def test_unknown_invalid_and_replayed_calls_never_reexecute_business_logic() -> 
             unknown_runtime,
             DelegationConfig(toolbox=_policy()),
         )
-        assert unknown.code is DelegationOutcomeCode.UNKNOWN_TOOL_CALL
+        assert unknown.code is DelegationOutcomeCode.MALFORMED_DECISION
+        assert Worker.calls == 0
 
         invalid_runtime, invalid_model = _runtime(
             FakeModel({"type": "terminal", "response": {"value": "placeholder"}}),

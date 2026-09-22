@@ -176,7 +176,7 @@ def test_optional_unknown_replayed_and_invalid_tools_stop_without_duplicate_exec
                 )
             ),
         )
-        assert unknown.code is DelegationOutcomeCode.UNKNOWN_TOOL_CALL
+        assert unknown.code is DelegationOutcomeCode.MALFORMED_DECISION
         assert _Documentation.calls == 0
 
         replay = {

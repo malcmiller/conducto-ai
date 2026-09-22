@@ -278,7 +278,13 @@ class ProviderToolCallRequest(BaseModel):
     call_id: str | None = Field(default=None, min_length=1)
     tool_id: str | None = Field(default=None, min_length=1)
     tool_name: str | None = Field(default=None, min_length=1)
-    arguments: dict[str, Any] = Field(default_factory=dict)
+    arguments: Mapping[str, Any] = Field(default_factory=dict)
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def freeze_arguments(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Recursively freeze arguments so validated calls cannot be mutated in place."""
+        return cast(Mapping[str, Any], _freeze_json(value))
 
     @model_validator(mode="after")
     def validate_reference(self) -> ProviderToolCallRequest:
@@ -295,13 +301,19 @@ class ProviderToolCall(BaseModel):
 
     call_id: str = Field(min_length=1)
     tool_id: str = Field(min_length=1)
-    arguments: dict[str, Any]
+    arguments: Mapping[str, Any]
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def freeze_arguments(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Recursively freeze arguments so a normalized call cannot be mutated before execution."""
+        return cast(Mapping[str, Any], _freeze_json(value))
 
 
 class TerminalModelDecision(BaseModel):
     """The sole terminal response permitted for one model decision turn."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     type: Literal["terminal"]
     response: dict[str, Any]
@@ -310,12 +322,18 @@ class TerminalModelDecision(BaseModel):
 class ToolCallModelDecision(BaseModel):
     """The sole tool call permitted for one model decision turn."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     type: Literal["tool_call"]
     call_id: str = Field(min_length=1)
     tool_id: str = Field(min_length=1)
-    arguments: dict[str, Any]
+    arguments: Mapping[str, Any]
+
+    @field_validator("arguments", mode="before")
+    @classmethod
+    def freeze_arguments(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Recursively freeze arguments so the decision cannot be mutated before execution."""
+        return cast(Mapping[str, Any], _freeze_json(value))
 
 
 ModelDecision: TypeAlias = Annotated[
@@ -1036,6 +1054,8 @@ def _resolve_provider_tool_call(
             "Provider returned tool calls without an advertised tool snapshot"
         )
     if request.tool_id is not None:
+        if not any(tool.tool_id == request.tool_id for tool in tools):
+            raise MalformedStructuredOutputError("Provider returned an unknown tool id")
         call_id = request.call_id or _synthesize_tool_call_id(request, request.tool_id, request_id)
         return ProviderToolCall(
             call_id=call_id,
