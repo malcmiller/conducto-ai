@@ -212,7 +212,7 @@ jobs:
           cd release-bundle/dist
           sha256sum -c ../release/SHA256SUMS
       - name: Publish exact verified files
-        uses: pypa/gh-action-pypi-publish@ed0c5390579b4a5c0b6ed5d3d5e9d48f15f6c6f # release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           packages-dir: release-bundle/dist
           skip-existing: false
