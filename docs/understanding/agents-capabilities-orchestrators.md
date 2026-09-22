@@ -42,6 +42,21 @@ class WeatherAgent(BaseAgent):
         return {"city": city, "celsius": 21}
 ```
 
+## Capabilities are not the same as internal tools
+
+`@a2a_capability` marks an operation that Conducto can publish and invoke
+through its governed runtime. “Publish” does not mean every caller is allowed:
+discovery, authorization, scopes, approvals, and explicit export policy still
+control access.
+
+`@tool` records internal method metadata on one agent instance. It is not added
+to an Agent Card or made available to another agent. Today it is also not an
+automatic model-tool path; model delegation uses policy-approved capabilities
+projected into temporary tool definitions.
+
+For a complete comparison, read
+[Capabilities and tools](../capabilities-and-tools.md).
+
 The type annotation on `city` becomes part of the input schema. The returned
 value is normalized before it leaves the runtime.
 
@@ -72,6 +87,7 @@ or transport details.
 |---|---|
 | Agent | `BaseAgent`, `@a2a_agent` |
 | Capability | `@a2a_capability` |
+| Internal reflected export | `@tool` |
 | Local registration | `AgentRegistry` |
 | Coordination | `OrchestratorAgent` |
 | Governed execution | `Runtime` |
