@@ -7,6 +7,8 @@ deployment, roadmap, and automation documentation remains in
 ## Start here
 
 - [Quick start](./quickstart.md) — install, run, build, and smoke-test the SDK.
+- [Releasing](./releasing.md) — trusted publishing, rehearsal, verification,
+  and recovery procedures.
 - [Architecture](./architecture.md) — component boundaries and end-to-end data
   flow.
 - [SDK reference](./sdk-reference.md) — supported public imports and API

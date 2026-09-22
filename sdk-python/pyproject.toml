@@ -5,10 +5,14 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/conducto"]
 
+[tool.hatch.build.targets.sdist]
+include = ["src/conducto", "README.md", "LICENSE", "pyproject.toml"]
+
 [project]
 name = "conducto-ai"
 version = "0.1.0"
 requires-python = ">=3.12"
+license = { file = "LICENSE" }
 dependencies = [
     "a2a-sdk==1.1.5",
     "cryptography>=44.0.0",
