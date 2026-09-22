@@ -62,6 +62,8 @@ _RECORD_FIELDS: Final = (
     "event",
     "outcome",
     "correlation_id",
+    "trace_id",
+    "span_id",
     "run_id",
     "agent_id",
     "capability_id",
@@ -142,6 +144,15 @@ def emit_event(
         **(_CONTEXT.get() or {}),
         **fields,
     }
+    try:
+        from .telemetry import current_trace_ids
+
+        trace_ids = current_trace_ids()
+    except Exception:
+        trace_ids = None
+    if trace_ids is not None:
+        values.setdefault("trace_id", trace_ids.trace_id)
+        values.setdefault("span_id", trace_ids.span_id)
     if outcome is not None:
         values["outcome"] = outcome
     if duration_ms is not None:

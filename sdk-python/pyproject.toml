@@ -33,10 +33,14 @@ microsoft-foundry = [
 test = [
     "pytest>=9.1.1",
 ]
+opentelemetry = [
+    "opentelemetry-api==1.37.0",
+    "opentelemetry-sdk==1.37.0",
+]
 
 [dependency-groups]
 dev = [
-    "conducto-ai[mcp,test]",
+    "conducto-ai[mcp,opentelemetry,test]",
     "mypy>=1.14",
     "ruff>=0.9",
     "types-protobuf==7.35.1.20260906",
@@ -69,3 +73,6 @@ markers = [
     "golden: Schema/golden-fixture tests pinning public wire contracts.",
     "ollama: Opt-in tests against an already running local Ollama daemon.",
 ]
+
+[tool.uv.sources]
+conducto-ai = { workspace = true }

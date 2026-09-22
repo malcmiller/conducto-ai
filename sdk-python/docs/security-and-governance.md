@@ -67,7 +67,10 @@ and insufficient scope reason codes), approval requested/approved/denied,
 signature verification/rejection, replay rejection, and protected execution
 accepted/started/completed/failed. Events contain stable identifiers for the
 subject, issuer, audience, task, challenge, agent, capability, policy,
-correlation, resource, and optional trace/span IDs. `sequence` guarantees
+correlation, resource, and optional trace/span IDs. When OpenTelemetry tracing
+is active, the runtime copies the current safe trace identifiers into audit
+events; audit delivery remains independent of diagnostic telemetry and still
+follows its fail-closed policy. `sequence` guarantees
 causal ordering for a task only; concurrent tasks have no global ordering.
 `event_id` and `idempotency_key` let sinks detect duplicate deliveries.
 
@@ -121,10 +124,12 @@ application and loaded through private, immediately-removed temporary files.
 delegated-subject authorization as independent checks — a trusted client
 certificate never substitutes for bearer-token validation and vice versa — and
 returns a `Principal`/`AuthorizationContext` pair reusable by Story 2
-guardrails. `build_delegated_token_request` attenuates scopes before building
-an outgoing RFC 8693 exchange request for a nested call. Supplying an
-`AuditEmitter` records token-exchange, token-validation, mTLS, and delegation
-outcomes without logging protected material.
+guardrails. Optional W3C trace context headers are diagnostic parentage only;
+they are never authentication, authorization, idempotency, or replay evidence.
+`build_delegated_token_request` attenuates scopes before building an outgoing
+RFC 8693 exchange request for a nested call. Supplying an `AuditEmitter` records
+token-exchange, token-validation, mTLS, and delegation outcomes without logging
+protected material.
 
 These contracts are deterministic, local-fixture reference implementations:
 tests build local RSA/EC keys and sign fixture JWTs directly, without Azure,

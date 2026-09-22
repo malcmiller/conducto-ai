@@ -44,6 +44,7 @@ from .registration import RegisteredMethod
 from .run_context import DelegationBudget, DelegationFrame, use_run_context
 from .runtime import Runtime
 from .serialization import freeze_mapping, serialize_result
+from .telemetry import SPAN_CAPABILITY_INVOKE, start_span
 
 __all__ = [
     "InvocationCancelled",
@@ -152,6 +153,16 @@ async def invoke_agent(
         )
     agent_id = agent.agent_metadata.name
     if resolved is None:
+        with start_span(
+            SPAN_CAPABILITY_INVOKE,
+            attributes={
+                "conducto.agent.id": agent_id,
+                "conducto.capability.id": str(capability_id),
+                "conducto.correlation_id": correlation_id,
+                "conducto.outcome": "target_not_found",
+            },
+        ) as span:
+            span.set_outcome("target_not_found", reason="target_not_found")
         with log_context(correlation_id=correlation_id, agent_id=agent_id):
             emit_event(
                 INVOCATION_FAILED,
@@ -209,6 +220,17 @@ async def invoke_agent(
 
     with (
         use_run_context(context),
+        start_span(
+            SPAN_CAPABILITY_INVOKE,
+            attributes={
+                "conducto.agent.id": agent_id,
+                "conducto.capability.id": capability_name,
+                "conducto.correlation_id": correlation_id,
+                "conducto.run.id": context.run_id,
+                "conducto.parent_run.id": context.parent_run_id or "",
+                "conducto.deployment_type": "local",
+            },
+        ) as invocation_span,
         log_context(
             correlation_id=correlation_id,
             run_id=context.run_id,
@@ -218,6 +240,7 @@ async def invoke_agent(
         ),
     ):
         if context.cancellation.cancelled:
+            invocation_span.set_outcome("cancelled", reason="cancellation")
             return InvocationCancelled(correlation_id, context.invocation_metadata())
         try:
             validated = parameter_model.model_validate(dict(arguments))
@@ -232,6 +255,7 @@ async def invoke_agent(
                 outcome="failure",
                 error_category="argument_validation",
             )
+            invocation_span.set_outcome("validation_failure", reason="argument_validation")
             return InvocationValidationFailure(
                 correlation_id,
                 tuple(freeze_mapping(item) for item in error.errors()),
@@ -251,12 +275,20 @@ async def invoke_agent(
             if security_result.challenge is not None:
                 from .invocation_results import InvocationApprovalRequired
 
+                invocation_span.set_outcome(
+                    "approval_required",
+                    reason=security_result.challenge.reason_code,
+                )
                 return InvocationApprovalRequired(
                     correlation_id, security_result.challenge, context.invocation_metadata()
                 )
             assert isinstance(security_result.error, SecurityError)
             from .invocation_results import InvocationAuthorizationFailure
 
+            invocation_span.set_outcome(
+                "denied",
+                reason=security_result.error.reason_code,
+            )
             return InvocationAuthorizationFailure(
                 correlation_id, security_result.error.reason_code, context.invocation_metadata()
             )
@@ -339,6 +371,7 @@ async def invoke_agent(
                 outcome=AuditOutcome.SUCCESS,
                 reason_code="completed",
             )
+            invocation_span.set_outcome("success")
             return InvocationSuccess(
                 correlation_id,
                 serialized,
@@ -350,6 +383,7 @@ async def invoke_agent(
                 outcome="cancelled",
                 duration_ms=(time.perf_counter() - started) * 1000,
             )
+            invocation_span.set_outcome("cancelled", reason="cancellation")
             return InvocationCancelled(correlation_id, context.invocation_metadata())
         except asyncio.CancelledError:
             current_task = asyncio.current_task()
@@ -360,6 +394,7 @@ async def invoke_agent(
                 outcome="cancelled",
                 duration_ms=(time.perf_counter() - started) * 1000,
             )
+            invocation_span.set_outcome("cancelled", reason="cancellation")
             return InvocationCancelled(correlation_id, context.invocation_metadata())
         except TimeoutError:
             assert invocation_timeout is not None
@@ -378,6 +413,7 @@ async def invoke_agent(
                 duration_ms=(time.perf_counter() - started) * 1000,
                 error_category="timeout",
             )
+            invocation_span.set_outcome("timeout", reason="timeout")
             return InvocationTimeout(
                 correlation_id,
                 invocation_timeout,
@@ -399,6 +435,7 @@ async def invoke_agent(
                 duration_ms=(time.perf_counter() - started) * 1000,
                 error_category="capability_exception",
             )
+            invocation_span.set_error("capability_exception")
             return InvocationFailure(
                 correlation_id,
                 "Capability execution failed",
@@ -421,6 +458,7 @@ async def invoke_agent(
                 duration_ms=(time.perf_counter() - started) * 1000,
                 error_category="unsupported_return_value",
             )
+            invocation_span.set_error("unsupported_return_value")
             return InvocationFailure(
                 correlation_id,
                 str(error),
@@ -430,6 +468,7 @@ async def invoke_agent(
         except AuditDeliveryError as error:
             from .invocation_results import InvocationAuditFailure
 
+            invocation_span.set_error(error.reason_code)
             return InvocationAuditFailure(
                 correlation_id,
                 error.reason_code,
@@ -451,6 +490,7 @@ async def invoke_agent(
                 duration_ms=(time.perf_counter() - started) * 1000,
                 error_category="internal_error",
             )
+            invocation_span.set_error("internal_error")
             return InvocationFailure(
                 correlation_id,
                 "Capability execution failed",

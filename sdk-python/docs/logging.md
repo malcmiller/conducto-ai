@@ -82,6 +82,8 @@ The fields below are emitted when applicable:
 | `event`             | Stable, versioned event name.                                                                   |
 | `outcome`           | One of `success`, `failure`, `timeout`, or `cancelled`.                                         |
 | `correlation_id`    | Caller-provided invocation/route ID. If omitted, Conducto creates a UUID.                       |
+| `trace_id`          | Active OpenTelemetry trace ID when the optional tracing extra and provider are configured.       |
+| `span_id`           | Active OpenTelemetry span ID when the optional tracing extra and provider are configured.        |
 | `agent_id`          | Published local agent name.                                                                     |
 | `capability_id`     | Published capability name.                                                                      |
 | `duration_ms`       | Capability execution duration in milliseconds.                                                  |
@@ -111,6 +113,12 @@ agent, and capability IDs using `contextvars`. Context stays isolated between
 concurrent asyncio tasks and is automatically propagated into synchronous
 capabilities run with `asyncio.to_thread`.
 
+When `conducto-ai[opentelemetry]` is installed and the application has supplied
+an OpenTelemetry tracer provider, Conducto also adds the active `trace_id` and
+`span_id` to safe structured log records. Logging remains independent of any
+exporter: missing OpenTelemetry dependencies or provider configuration simply
+omit those fields and do not change invocation behavior.
+
 Application code can bind additional non-sensitive context around Conducto
 work:
 
@@ -125,6 +133,23 @@ Nested contexts restore the prior values on exit. Context keys named
 `approval`, `arguments`, `authorization`, `credential`, `credentials`,
 `model_response`, `prompt`, `result`, `results`, `secret`, or `token` are
 rejected.
+
+## OpenTelemetry tracing
+
+Conducto uses explicit, optional OpenTelemetry spans at SDK-owned boundaries:
+gateway discovery/invocation, MCP server/list/call, A2A client/server, token
+exchange, authorization/approval, model completion, capability invocation, and
+delegation turns. The stable semantic fixture is checked in at
+`docs/semantic-fixtures/opentelemetry-spans.v1.json`.
+
+The SDK does not install a global tracer provider, exporter, sampler,
+propagator, resource, or auto-instrumentation hook at import time. Applications
+own that lifecycle. `configure_in_memory_tracing()` is a documented helper for
+tests and local diagnostics; production applications should configure their own
+provider and exporters. Conducto propagates W3C `traceparent`/`tracestate` at
+supported HTTP/A2A boundaries, ignores malformed or oversized remote context,
+and records only the bounded `conducto.invalid_remote_context` attribute.
+Baggage is not forwarded by default.
 
 ## Privacy and sensitive data
 

@@ -36,10 +36,12 @@ from .invocation_results import (
     InvocationResult,
     InvocationSchemaMismatch,
     InvocationStaleBinding,
+    InvocationSuccess,
     InvocationTargetUnavailable,
 )
 from .registry import AgentRegistry
 from .run_context import DelegationFrame, RunContext
+from .telemetry import SPAN_GATEWAY_DISCOVER, SPAN_GATEWAY_INVOKE, start_span
 
 if TYPE_CHECKING:
     from .runtime import Runtime
@@ -116,54 +118,76 @@ class LocalAgentGateway:
 
     async def discover(self, query: DiscoveryQuery) -> DiscoveryResult:
         """Discover authorized compatible candidates from one registry snapshot."""
-        self._context.require_active()
-        try:
-            revision, matches, denied, unsupported = self._matching_candidates(query)
-        except _GatewayPolicyEvaluationError:
-            return DiscoveryResult(
-                self._registry.revision,
-                failure=GatewayFailure(
-                    GatewayFailureCode.POLICY_EVALUATION_FAILED,
-                    "Gateway policy evaluation failed",
-                ),
+        with start_span(
+            SPAN_GATEWAY_DISCOVER,
+            attributes={
+                "conducto.agent.id": self._context.agent_id,
+                "conducto.correlation_id": self._context.correlation_id,
+                "conducto.run.id": self._context.run_id,
+                "conducto.transport": "in_process",
+            },
+        ) as span:
+            self._context.require_active()
+            try:
+                revision, matches, denied, unsupported = self._matching_candidates(query)
+            except _GatewayPolicyEvaluationError:
+                span.set_outcome(
+                    "policy_evaluation_failed",
+                    reason=GatewayFailureCode.POLICY_EVALUATION_FAILED.value,
+                )
+                return DiscoveryResult(
+                    self._registry.revision,
+                    failure=GatewayFailure(
+                        GatewayFailureCode.POLICY_EVALUATION_FAILED,
+                        "Gateway policy evaluation failed",
+                    ),
+                )
+            except _UnsupportedSchemaError as error:
+                span.set_outcome(
+                    "validation_failure",
+                    reason=GatewayFailureCode.UNSUPPORTED_SCHEMA.value,
+                )
+                return DiscoveryResult(
+                    self._registry.revision,
+                    failure=GatewayFailure(
+                        GatewayFailureCode.UNSUPPORTED_SCHEMA,
+                        str(error),
+                    ),
+                )
+            limit = min(query.limit, self._max_results)
+            candidates = tuple(
+                BoundCapability(
+                    descriptor,
+                    self._issue_binding(descriptor, revision, generation),
+                )
+                for descriptor, generation in matches[:limit]
             )
-        except _UnsupportedSchemaError as error:
-            return DiscoveryResult(
-                self._registry.revision,
-                failure=GatewayFailure(
-                    GatewayFailureCode.UNSUPPORTED_SCHEMA,
-                    str(error),
-                ),
-            )
-        limit = min(query.limit, self._max_results)
-        candidates = tuple(
-            BoundCapability(
-                descriptor,
-                self._issue_binding(descriptor, revision, generation),
-            )
-            for descriptor, generation in matches[:limit]
-        )
-        failure = None
-        if not candidates:
-            if unsupported:
-                code = GatewayFailureCode.UNSUPPORTED_SCHEMA
-                message = "Matching providers use unsupported JSON Schema features"
+            failure = None
+            if not candidates:
+                if unsupported:
+                    code = GatewayFailureCode.UNSUPPORTED_SCHEMA
+                    message = "Matching providers use unsupported JSON Schema features"
+                else:
+                    code = (
+                        GatewayFailureCode.DISCOVERY_DENIED
+                        if denied
+                        else GatewayFailureCode.NO_MATCH
+                    )
+                    message = (
+                        "Capability discovery was denied"
+                        if denied
+                        else "No eligible capability matched the query"
+                    )
+                failure = GatewayFailure(code, message)
+                span.set_outcome(code.value, reason=code.value)
             else:
-                code = (
-                    GatewayFailureCode.DISCOVERY_DENIED if denied else GatewayFailureCode.NO_MATCH
-                )
-                message = (
-                    "Capability discovery was denied"
-                    if denied
-                    else "No eligible capability matched the query"
-                )
-            failure = GatewayFailure(code, message)
-        return DiscoveryResult(
-            revision,
-            candidates,
-            failure,
-            truncated=len(matches) > limit or (unsupported and bool(candidates)),
-        )
+                span.set_outcome("success")
+            return DiscoveryResult(
+                revision,
+                candidates,
+                failure,
+                truncated=len(matches) > limit or (unsupported and bool(candidates)),
+            )
 
     def _matching_candidates(
         self,
@@ -358,121 +382,158 @@ class LocalAgentGateway:
         cost: float = 0,
     ) -> InvocationResult:
         """Revalidate and invoke a binding through ``Runtime.invoke``."""
-        self._context.require_active()
-        correlation_id = self._context.correlation_id
-        metadata = self._context.invocation_metadata()
-        binding_failure = self._validate_binding(binding)
-        if binding_failure is not None:
-            return InvocationBindingFailure(
-                correlation_id,
-                binding_failure.value,
-                metadata,
-            )
-        frame = DelegationFrame(binding.agent_id, binding.capability_id)
-        path = self._context.delegation_path
-        if frame in path:
-            return InvocationDelegationFailure(
-                correlation_id,
-                GatewayFailureCode.CYCLE_DETECTED.value,
-                tuple((item.agent_id, item.capability_id) for item in path),
-                metadata,
-            )
-        if self._context.remaining_delegation_budget.depth < 1:
-            return InvocationDelegationFailure(
-                correlation_id,
-                GatewayFailureCode.DEPTH_EXCEEDED.value,
-                tuple((item.agent_id, item.capability_id) for item in path),
-                metadata,
-            )
+        with start_span(
+            SPAN_GATEWAY_INVOKE,
+            attributes={
+                "conducto.agent.id": self._context.agent_id,
+                "conducto.target_agent.id": getattr(binding, "agent_id", ""),
+                "conducto.capability.id": getattr(binding, "capability_id", ""),
+                "conducto.correlation_id": self._context.correlation_id,
+                "conducto.run.id": self._context.run_id,
+                "conducto.transport": "in_process",
+            },
+        ) as span:
+            self._context.require_active()
+            correlation_id = self._context.correlation_id
+            metadata = self._context.invocation_metadata()
+            binding_failure = self._validate_binding(binding)
+            if binding_failure is not None:
+                span.set_outcome("binding_failure", reason=binding_failure.value)
+                return InvocationBindingFailure(
+                    correlation_id,
+                    binding_failure.value,
+                    metadata,
+                )
+            frame = DelegationFrame(binding.agent_id, binding.capability_id)
+            path = self._context.delegation_path
+            if frame in path:
+                span.set_outcome(
+                    "delegation_failure",
+                    reason=GatewayFailureCode.CYCLE_DETECTED.value,
+                )
+                return InvocationDelegationFailure(
+                    correlation_id,
+                    GatewayFailureCode.CYCLE_DETECTED.value,
+                    tuple((item.agent_id, item.capability_id) for item in path),
+                    metadata,
+                )
+            if self._context.remaining_delegation_budget.depth < 1:
+                span.set_outcome(
+                    "delegation_failure",
+                    reason=GatewayFailureCode.DEPTH_EXCEEDED.value,
+                )
+                return InvocationDelegationFailure(
+                    correlation_id,
+                    GatewayFailureCode.DEPTH_EXCEEDED.value,
+                    tuple((item.agent_id, item.capability_id) for item in path),
+                    metadata,
+                )
 
-        (
-            agent,
-            agent_descriptor,
-            lifecycle,
-            healthy,
-            generation_valid,
-            schema_valid,
-        ) = self._registry.accept_binding(
-            agent_id=binding.agent_id,
-            capability_id=binding.capability_id,
-            generation=binding.registration_generation,
-            schema_digest=binding.schema_digest,
-        )
-        if agent is None or not generation_valid:
-            return InvocationStaleBinding(
-                correlation_id,
-                binding.agent_id,
-                binding.capability_id,
-                metadata,
+            (
+                agent,
+                agent_descriptor,
+                lifecycle,
+                healthy,
+                generation_valid,
+                schema_valid,
+            ) = self._registry.accept_binding(
+                agent_id=binding.agent_id,
+                capability_id=binding.capability_id,
+                generation=binding.registration_generation,
+                schema_digest=binding.schema_digest,
             )
-        if not schema_valid:
-            return InvocationSchemaMismatch(
-                correlation_id,
-                binding.agent_id,
-                binding.capability_id,
-                metadata,
+            if agent is None or not generation_valid:
+                span.set_outcome("stale_binding", reason="stale_binding")
+                return InvocationStaleBinding(
+                    correlation_id,
+                    binding.agent_id,
+                    binding.capability_id,
+                    metadata,
+                )
+            if not schema_valid:
+                span.set_outcome("schema_mismatch", reason="schema_mismatch")
+                return InvocationSchemaMismatch(
+                    correlation_id,
+                    binding.agent_id,
+                    binding.capability_id,
+                    metadata,
+                )
+            if lifecycle is not RegistrationLifecycle.ACTIVE or not healthy:
+                reason = lifecycle.value if lifecycle is not None else "unhealthy"
+                if lifecycle is RegistrationLifecycle.ACTIVE and not healthy:
+                    reason = "unhealthy"
+                span.set_outcome("target_unavailable", reason=reason)
+                return InvocationTargetUnavailable(
+                    correlation_id,
+                    binding.agent_id,
+                    binding.capability_id,
+                    reason,
+                    metadata,
+                )
+            assert agent_descriptor is not None
+            descriptor = next(
+                item
+                for item in agent_descriptor.capabilities
+                if item.capability_id == binding.capability_id
             )
-        if lifecycle is not RegistrationLifecycle.ACTIVE or not healthy:
-            reason = lifecycle.value if lifecycle is not None else "unhealthy"
-            if lifecycle is RegistrationLifecycle.ACTIVE and not healthy:
-                reason = "unhealthy"
-            return InvocationTargetUnavailable(
-                correlation_id,
-                binding.agent_id,
-                binding.capability_id,
-                reason,
-                metadata,
-            )
-        assert agent_descriptor is not None
-        descriptor = next(
-            item
-            for item in agent_descriptor.capabilities
-            if item.capability_id == binding.capability_id
-        )
-        try:
-            authorized = self._is_authorized(descriptor, check_budget=False)
-        except _GatewayPolicyEvaluationError:
-            return InvocationAuthorizationFailure(
-                correlation_id,
-                GatewayFailureCode.POLICY_EVALUATION_FAILED.value,
-                metadata,
-            )
-        if not authorized:
-            return InvocationAuthorizationFailure(
-                correlation_id,
-                GatewayFailureCode.DISCOVERY_DENIED.value,
-                metadata,
-            )
-        try:
-            self._context.remaining_timeout()
-        except TimeoutError:
-            from .invocation_results import InvocationTimeout
+            try:
+                authorized = self._is_authorized(descriptor, check_budget=False)
+            except _GatewayPolicyEvaluationError:
+                span.set_outcome(
+                    "authorization_failure",
+                    reason=GatewayFailureCode.POLICY_EVALUATION_FAILED.value,
+                )
+                return InvocationAuthorizationFailure(
+                    correlation_id,
+                    GatewayFailureCode.POLICY_EVALUATION_FAILED.value,
+                    metadata,
+                )
+            if not authorized:
+                span.set_outcome(
+                    "authorization_failure",
+                    reason=GatewayFailureCode.DISCOVERY_DENIED.value,
+                )
+                return InvocationAuthorizationFailure(
+                    correlation_id,
+                    GatewayFailureCode.DISCOVERY_DENIED.value,
+                    metadata,
+                )
+            try:
+                self._context.remaining_timeout()
+            except TimeoutError:
+                from .invocation_results import InvocationTimeout
 
-            return InvocationTimeout(correlation_id, 0.0, metadata)
-        if not self._context.delegation_budget.reserve(
-            calls=1,
-            tokens=token_cost,
-            cost=cost,
-        ):
-            return InvocationBudgetExhausted(
-                correlation_id,
-                "calls, tokens, or cost",
-                metadata,
+                span.set_outcome("timeout", reason="timeout")
+                return InvocationTimeout(correlation_id, 0.0, metadata)
+            if not self._context.delegation_budget.reserve(
+                calls=1,
+                tokens=token_cost,
+                cost=cost,
+            ):
+                span.set_outcome("budget_exhausted", reason="budget_exhausted")
+                return InvocationBudgetExhausted(
+                    correlation_id,
+                    "calls, tokens, or cost",
+                    metadata,
+                )
+            prior_calls = self._context.model_calls()
+            result = await self._runtime.invoke(
+                agent,
+                binding.capability_id,
+                arguments,
+                timeout=timeout,
+                correlation_id=correlation_id,
             )
-        prior_calls = self._context.model_calls()
-        result = await self._runtime.invoke(
-            agent,
-            binding.capability_id,
-            arguments,
-            timeout=timeout,
-            correlation_id=correlation_id,
-        )
-        if result.metadata is not None and prior_calls:
-            result = dataclasses.replace(
-                result,
-                metadata=result.metadata.with_prior_model_calls(prior_calls),
-            )
-        return result
+            if result.metadata is not None and prior_calls:
+                result = dataclasses.replace(
+                    result,
+                    metadata=result.metadata.with_prior_model_calls(prior_calls),
+                )
+            if isinstance(result, InvocationSuccess):
+                span.set_outcome("success")
+            else:
+                span.set_outcome(type(result).__name__)
+            return result
 
     def _is_authorized(
         self,

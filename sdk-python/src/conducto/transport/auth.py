@@ -63,6 +63,70 @@ async def authenticate_incoming_request(
     correlation_id: str,
     mtls_peer: MTLSPeerIdentity | None = None,
     audit: AuditEmitter | None = None,
+    trace_headers: dict[str, str] | None = None,
+) -> AuthorizationContext:
+    """Authenticate one inbound A2A request under an optional remote trace context.
+
+    Args:
+        authorization_header: Bounded bearer authorization header.
+        validator: Application-owned token validator.
+        policy: Trust policy for token and mTLS checks.
+        task_id: Domain task identifier, distinct from any trace identifier.
+        correlation_id: Conducto correlation identifier for logs and audit.
+        mtls_peer: Optional TLS peer identity already validated by the server.
+        audit: Optional mandatory audit emitter.
+        trace_headers: Optional W3C trace context headers supplied by the transport.
+
+    Returns:
+        The immutable authorization context for the inbound request.
+    """
+    from conducto.core.telemetry import (
+        SPAN_A2A_SERVER,
+        extract_trace_context,
+        start_span,
+    )
+
+    extracted = extract_trace_context(trace_headers or {})
+    with start_span(
+        SPAN_A2A_SERVER,
+        kind="server",
+        remote_context=extracted.context,
+        attributes={
+            "conducto.protocol": "a2a",
+            "conducto.transport": "jsonrpc",
+            "conducto.task.id": task_id,
+            "conducto.correlation_id": correlation_id,
+            "conducto.invalid_remote_context": extracted.invalid_remote_context,
+        },
+    ) as span:
+        try:
+            context = await _authenticate_incoming_request(
+                authorization_header=authorization_header,
+                validator=validator,
+                policy=policy,
+                task_id=task_id,
+                correlation_id=correlation_id,
+                mtls_peer=mtls_peer,
+                audit=audit,
+            )
+        except (AuthenticationError, TokenValidationError) as error:
+            span.set_outcome(
+                "denied", reason=getattr(error, "reason_code", "authentication_failed")
+            )
+            raise
+        span.set_outcome("success")
+        return context
+
+
+async def _authenticate_incoming_request(
+    *,
+    authorization_header: str | None,
+    validator: TokenValidator,
+    policy: TrustPolicy,
+    task_id: str,
+    correlation_id: str,
+    mtls_peer: MTLSPeerIdentity | None = None,
+    audit: AuditEmitter | None = None,
 ) -> AuthorizationContext:
     """Authenticate one inbound A2A request and build its ``AuthorizationContext``.
 
@@ -190,38 +254,50 @@ async def build_delegated_token_request(
     Raises:
         ScopeAttenuationError: If ``requested_scopes`` would broaden authority.
     """
-    try:
-        scopes = attenuate_scopes(
-            incoming_scopes=identity.scopes,
-            requested_scopes=requested_scopes,
-            destination_allowed_scopes=destination_allowed_scopes,
-        )
-    except ScopeAttenuationError as error:
+    from conducto.core.telemetry import SPAN_AUTH_EXCHANGE, start_span
+
+    with start_span(
+        SPAN_AUTH_EXCHANGE,
+        attributes={
+            "conducto.task.id": task_id,
+            "conducto.correlation_id": correlation_id,
+            "conducto.outbound_audience": destination_audience,
+        },
+    ) as span:
+        try:
+            scopes = attenuate_scopes(
+                incoming_scopes=identity.scopes,
+                requested_scopes=requested_scopes,
+                destination_allowed_scopes=destination_allowed_scopes,
+            )
+        except ScopeAttenuationError as error:
+            await _audit(
+                audit,
+                AuditEventName.DELEGATION_REJECTED,
+                AuditOutcome.REJECTED,
+                error.reason_code,
+                task_id,
+                correlation_id,
+            )
+            span.set_outcome("denied", reason=error.reason_code)
+            raise
         await _audit(
             audit,
-            AuditEventName.DELEGATION_REJECTED,
-            AuditOutcome.REJECTED,
-            error.reason_code,
+            AuditEventName.DELEGATION_ATTENUATED,
+            AuditOutcome.SUCCESS,
+            "scope_attenuated",
             task_id,
             correlation_id,
         )
-        raise
-    await _audit(
-        audit,
-        AuditEventName.DELEGATION_ATTENUATED,
-        AuditOutcome.SUCCESS,
-        "scope_attenuated",
-        task_id,
-        correlation_id,
-    )
-    return TokenExchangeRequest(
-        subject_token=subject_token,
-        subject_token_type=subject_token_type,
-        audience=destination_audience,
-        scope=scopes,
-        actor_token=actor_token,
-        actor_token_type=actor_token_type,
-    )
+        span.set_outcome("success")
+        return TokenExchangeRequest(
+            subject_token=subject_token,
+            subject_token_type=subject_token_type,
+            audience=destination_audience,
+            scope=scopes,
+            actor_token=actor_token,
+            actor_token_type=actor_token_type,
+        )
 
 
 def build_authorization_header(access_token: str) -> str:
@@ -249,6 +325,9 @@ async def _audit(
 ) -> None:
     if audit is None:
         return
+    from conducto.core.telemetry import current_trace_ids
+
+    trace_ids = current_trace_ids()
     decision = AuditDecision.ALLOW if outcome == AuditOutcome.SUCCESS else AuditDecision.DENY
     severity = AuditSeverity.INFO if outcome == AuditOutcome.SUCCESS else AuditSeverity.WARNING
     await audit.emit(
@@ -263,6 +342,8 @@ async def _audit(
             audience=audience,
             task_id=task_id,
             correlation_id=correlation_id,
+            trace_id=trace_ids.trace_id if trace_ids is not None else "",
+            span_id=trace_ids.span_id if trace_ids is not None else "",
             policy_version=policy_version,
             severity=severity,
         )

@@ -41,6 +41,7 @@ flowchart TD
 | `ModelGateway` | Invocation-scoped provider calls, deadlines, cancellation, typed output, usage | Long-lived provider ownership |
 | `run_delegation` | Bounded model/tool loop and terminal outcome | Discovery authority or direct registry access |
 | `conducto.mcp` | MCP export policy, deterministic tool naming, schema projection, result mapping, stdio lifecycle | Capability declaration, validation, authorization, MCP framing |
+| `conducto.core.telemetry` | Optional Conducto span names, safe attributes, W3C trace-context helpers, and test tracing helper | Application tracer-provider/exporter lifecycle or auto-instrumentation |
 
 The similarly named registries solve different problems:
 `AgentRegistry` indexes callable agents and capabilities, while
@@ -92,6 +93,16 @@ The similarly named registries solve different problems:
    gateway call, and the typed result is mapped to an MCP tool result.
 
 See [MCP tool export](./mcp-export.md).
+
+### Optional tracing
+
+OpenTelemetry support is an optional package extra. Importing `conducto` does
+not configure global tracing, exporters, samplers, propagators, or framework
+auto-instrumentation. Applications own those choices; Conducto creates
+best-effort explicit spans only at SDK-owned boundaries and keeps invocation,
+security, audit, deadline, retry, and cancellation behavior unchanged when
+tracing is absent. W3C `traceparent`/`tracestate` context is propagated at
+supported remote boundaries, while baggage is not forwarded by default.
 
 ## State and concurrency
 
