@@ -15,9 +15,11 @@ from conducto import (
     GenerationOptions,
     MalformedStructuredOutputError,
     ModelConfiguration,
+    ProviderCallContext,
     ProviderClientConfig,
     ProviderOwnership,
     ProviderRegistry,
+    ProviderTimeoutError,
     ProviderToolDefinition,
     StructuredOutputRequest,
     ToolResultMessage,
@@ -30,6 +32,8 @@ from conducto.providers import (
     OllamaConfigurationError,
     OllamaIncompatibleVersionError,
     OllamaModelNotFoundError,
+    OllamaOversizedResponseError,
+    OllamaProfile,
     OllamaProvider,
     OllamaProviderFactory,
     OllamaReadinessError,
@@ -51,17 +55,21 @@ class _FakeOllamaClient:
         version: str = "0.6.0",
         show_error: Exception | None = None,
         version_error: Exception | None = None,
+        delay: float = 0.0,
     ) -> None:
         self.responses = list(responses)
         self.version_value = version
         self.show_error = show_error
         self.version_error = version_error
+        self.delay = delay
         self.chat_calls: list[dict[str, Any]] = []
         self.closed = False
 
     async def chat(self, **kwargs: Any) -> Mapping[str, Any]:
         """Return the next scripted chat response."""
         self.chat_calls.append(kwargs)
+        if self.delay:
+            await asyncio.sleep(self.delay)
         if not self.responses:
             raise AssertionError("script exhausted")
         return self.responses.pop(0)
@@ -199,10 +207,30 @@ def test_ollama_provider_completes_tool_call_result_terminal_flow_without_one_of
         )
 
         assert second.structured == {"value": "done"}
+        assistant_message = client.chat_calls[1]["messages"][-2]
         result_message = client.chat_calls[1]["messages"][-1]
+        assert assistant_message["role"] == "assistant"
+        assert assistant_message["tool_calls"][0]["function"]["name"] == "lookup_tool_1"
         assert result_message["role"] == "tool"
-        assert result_message["tool_call_id"] == decision.call_id
-        assert result_message["name"] == "lookup_tool_1"
+        assert "tool_call_id" not in result_message
+        assert "name" not in result_message
+        assert result_message["tool_name"] == "lookup_tool_1"
+
+        with pytest.raises(MalformedStructuredOutputError, match="unknown call ID"):
+            await provider.complete(
+                (ChatMessage(role="user", content="lookup"),),
+                options=GenerationOptions(model="llama3.1:8b"),
+                structured_output=_schema(),
+                tools=tools,
+                tool_results=(
+                    ToolResultMessage(
+                        call_id="unknown",
+                        status="success",
+                        result={"value": "fixture"},
+                    ),
+                ),
+            )
+        assert len(client.chat_calls) == 2
 
     asyncio.run(exercise())
 
@@ -309,11 +337,17 @@ def test_ollama_provider_rejects_ambiguous_tools_and_unsupported_profiles() -> N
                 tools=(_tool_definition(),),
             )
         assert terminal_only.capabilities.tool_calling is False
+        with pytest.raises(OllamaConfigurationError, match="has not been conformance tested"):
+            OllamaProvider(
+                model="llama3.1:8b",
+                client=_FakeOllamaClient(()),
+                profile=OllamaProfile("custom", tool_calling=True),
+            )
 
     asyncio.run(exercise())
 
 
-def test_ollama_provider_rejects_unsupported_terminal_schema_before_dispatch() -> None:
+def test_ollama_provider_rejects_unsupported_schemas_before_dispatch() -> None:
     async def exercise() -> None:
         client = _FakeOllamaClient(())
         provider = OllamaProvider(model="llama3.1:8b", client=client)
@@ -345,6 +379,105 @@ def test_ollama_provider_rejects_unsupported_terminal_schema_before_dispatch() -
             )
         assert client.chat_calls == []
 
+        tool_provider = OllamaProvider(
+            model="llama3.1:8b",
+            client=client,
+            profile=OLLAMA_TOOL_CAPABLE_PROFILE,
+        )
+        with pytest.raises(UnsupportedProviderCapabilityError, match="unsupported keywords"):
+            await tool_provider.complete(
+                (ChatMessage(role="user", content="lookup"),),
+                options=GenerationOptions(model="llama3.1:8b"),
+                structured_output=_schema(),
+                tools=(
+                    ProviderToolDefinition(
+                        tool_id="tool-1",
+                        name="lookup_tool_1",
+                        description="Looks up deterministic fixture data.",
+                        input_schema={
+                            "type": "object",
+                            "properties": {"query": {"type": "string", "pattern": "^safe$"}},
+                        },
+                    ),
+                ),
+            )
+        assert client.chat_calls == []
+
+    asyncio.run(exercise())
+
+
+def test_ollama_provider_enforces_call_timeout_and_deadline() -> None:
+    async def exercise() -> None:
+        provider = OllamaProvider(
+            model="llama3.1:8b",
+            client=_FakeOllamaClient(
+                ({"message": {"role": "assistant", "content": '{"value":"ok"}'}},),
+                delay=0.05,
+            ),
+        )
+        with pytest.raises(ProviderTimeoutError):
+            await provider.complete(
+                (ChatMessage(role="user", content="answer"),),
+                options=GenerationOptions(model="llama3.1:8b", timeout=0.001),
+                structured_output=_schema(),
+            )
+
+        expired = OllamaProvider(model="llama3.1:8b", client=_FakeOllamaClient(()))
+        with pytest.raises(ProviderTimeoutError):
+            await expired.complete(
+                (ChatMessage(role="user", content="answer"),),
+                options=GenerationOptions(model="llama3.1:8b"),
+                structured_output=_schema(),
+                call_context=ProviderCallContext(deadline=0.0),
+            )
+
+    asyncio.run(exercise())
+
+
+def test_bounded_http_adapter_rejects_oversized_response_before_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeStream:
+        status_code = 200
+
+        async def __aenter__(self) -> FakeStream:
+            return self
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+        async def aiter_bytes(self) -> Any:
+            yield b'{"message":'
+            yield b'{"content":"too large"}}'
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        def stream(self, method: str, path: str, *, json: Mapping[str, Any] | None = None) -> Any:
+            _ = (method, path, json)
+            return FakeStream()
+
+        async def aclose(self) -> None:
+            return None
+
+    async def exercise() -> None:
+        import httpx
+
+        monkeypatch.setattr(httpx, "AsyncClient", FakeHttpClient)
+        client = ollama_adapter._BoundedOllamaHttpClient(
+            endpoint="http://localhost:11434",
+            auth_token=None,
+            headers={},
+            timeout=None,
+            transport_options={},
+            tls_options={},
+            proxy_options={},
+            max_response_bytes=8,
+        )
+        with pytest.raises(OllamaOversizedResponseError):
+            await client.chat(model="llama3.1:8b", messages=[])
+
     asyncio.run(exercise())
 
 
@@ -357,6 +490,7 @@ def test_ollama_provider_factory_and_preconstructed_client_paths_are_isolated(
         assert kwargs["endpoint"] == "http://localhost:11434"
         assert kwargs["auth_token"] == "secret-token"
         assert kwargs["transport_options"]["max_connections"] == 4
+        assert kwargs["max_response_bytes"] == 1_000_000
         client = _FakeOllamaClient(())
         constructed_clients.append(client)
         return client

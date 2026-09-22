@@ -31,6 +31,7 @@ Capabilities are profile-specific:
 | Usage counters | Uses reported prompt/eval counts only | Uses reported prompt/eval counts only |
 | Cancellation | Propagates task cancellation and pre-dispatch cancellation state | Same |
 | Context/output limits | Configurable via `context_window`, `max_output_tokens`, and options | Same |
+| Response body limit | Enforced while reading HTTP response bytes for configuration-owned clients | Same |
 
 Known limitations:
 
@@ -52,8 +53,12 @@ uv add "conducto-ai[ollama]"
 ```
 
 Importing `conducto` or `conducto.providers` does not import the optional
-Ollama client, read credentials, or contact a network. The official client is
-imported only when constructing a configuration-owned provider.
+Ollama client, read credentials, or contact a network. Configuration-owned
+providers validate the optional Ollama extra, then use a small bounded HTTP
+adapter for Ollama's documented endpoints because the official Python client
+does not expose a maximum response-body limit. Preconstructed clients remain
+supported for applications that want to provide their own official-client
+lifecycle.
 
 ## Registration
 

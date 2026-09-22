@@ -8,9 +8,9 @@ never pulls, deletes, or manages model weights.
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import os
+import time
 import uuid
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
@@ -175,6 +175,111 @@ class _CachedToolCall:
 
     call_id: str
     name: str
+    assistant_message: Mapping[str, Any]
+
+
+class _OllamaHttpStatusError(RuntimeError):
+    """Bounded HTTP error raised by the local Ollama protocol adapter."""
+
+    def __init__(self, status_code: int, body: str) -> None:
+        """Create an HTTP status error with bounded, local-only body text."""
+        super().__init__(body)
+        self.status_code = status_code
+
+
+class _BoundedOllamaHttpClient:
+    """Small bounded HTTP adapter for official-client gaps.
+
+    The official Ollama client does not expose a response-body byte limit, so
+    configuration-owned clients use this adapter for the same documented
+    Ollama endpoints while keeping provider-specific mechanics behind the
+    Conducto protocol.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoint: str | None,
+        auth_token: str | None,
+        headers: Mapping[str, str],
+        timeout: float | None,
+        transport_options: Mapping[str, Any],
+        tls_options: Mapping[str, Any],
+        proxy_options: Mapping[str, Any],
+        max_response_bytes: int,
+    ) -> None:
+        """Create a bounded HTTP client for one Ollama endpoint."""
+        try:
+            import httpx
+        except Exception as error:
+            raise OllamaConfigurationError("httpx is required for Ollama transport") from error
+        self._max_response_bytes = max_response_bytes
+        self._client = httpx.AsyncClient(
+            base_url=endpoint or DEFAULT_OLLAMA_ENDPOINT,
+            **_official_client_kwargs(
+                auth_token=auth_token,
+                headers=headers,
+                timeout=timeout,
+                transport_options=transport_options,
+                tls_options=tls_options,
+                proxy_options=proxy_options,
+            ),
+        )
+
+    async def chat(self, **kwargs: Any) -> Any:
+        """Send one bounded chat request to Ollama."""
+        return await self._request_json("POST", "/api/chat", json_body=kwargs)
+
+    async def list(self) -> Any:
+        """List locally available Ollama models."""
+        return await self._request_json("GET", "/api/tags")
+
+    async def show(self, model: str) -> Any:
+        """Return local metadata for one model."""
+        return await self._request_json("POST", "/api/show", json_body={"model": model})
+
+    async def version(self) -> Any:
+        """Return Ollama server version metadata."""
+        return await self._request_json("GET", "/api/version")
+
+    def close(self) -> None:
+        """Release the underlying HTTP connection pool synchronously."""
+        close = getattr(self._client, "close", None)
+        if callable(close):
+            close()
+
+    async def aclose(self) -> None:
+        """Release the underlying HTTP connection pool asynchronously."""
+        await self._client.aclose()
+
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Mapping[str, Any] | None = None,
+    ) -> Any:
+        """Execute one request while bounding the response body before decode."""
+        async with self._client.stream(method, path, json=json_body) as response:
+            body = await self._read_bounded(response)
+            if response.status_code >= 400:
+                text = body[:_MAX_ERROR_BODY_CHARS].decode("utf-8", errors="replace")
+                raise _OllamaHttpStatusError(response.status_code, text)
+            try:
+                return json.loads(body)
+            except json.JSONDecodeError as error:
+                raise MalformedStructuredOutputError("Ollama returned malformed JSON") from error
+
+    async def _read_bounded(self, response: Any) -> bytes:
+        """Read a streaming HTTP response up to the configured byte bound."""
+        chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > self._max_response_bytes:
+                raise OllamaOversizedResponseError()
+            chunks.append(chunk)
+        return b"".join(chunks)
 
 
 class OllamaProvider(ModelProvider):
@@ -296,6 +401,7 @@ class OllamaProvider(ModelProvider):
                 transport_options=transport_options or {},
                 tls_options=tls_options or {},
                 proxy_options=proxy_options or {},
+                max_response_bytes=max_response_bytes,
             )
 
     async def complete(
@@ -310,7 +416,6 @@ class OllamaProvider(ModelProvider):
         call_context: ProviderCallContext | None = None,
     ) -> ProviderResult:
         """Generate one Ollama chat completion through Conducto contracts."""
-        _ = effective_deadline
         if self._closed:
             raise ProviderEndpointUnavailableError("Ollama provider is closed", attempted=False)
         if call_context is not None and call_context.cancelled:
@@ -319,6 +424,13 @@ class OllamaProvider(ModelProvider):
         if (tools or tool_results) and not self.capabilities.tool_calling:
             raise UnsupportedProviderCapabilityError(
                 "Configured Ollama profile does not support native tool calling"
+            )
+        for tool in tools:
+            _assert_schema_supported(
+                StructuredOutputRequest(
+                    name=f"{tool.name}_arguments",
+                    schema=tool.input_schema,
+                )
             )
         model = options.model or self._model
         request = {
@@ -333,9 +445,20 @@ class OllamaProvider(ModelProvider):
         if tools:
             request["tools"] = tuple(_to_ollama_tool(tool) for tool in tools)
         try:
-            response = await self._client.chat(**request)
+            timeout_for_request = _request_timeout(
+                options,
+                effective_deadline=effective_deadline,
+                call_context=call_context,
+            )
+            completion = self._client.chat(**request)
+            if timeout_for_request is not None:
+                response = await asyncio.wait_for(completion, timeout_for_request)
+            else:
+                response = await completion
         except asyncio.CancelledError as error:
             raise ProviderCancellationError() from error
+        except ProviderError:
+            raise
         except TimeoutError as error:
             raise ProviderTimeoutError(attempted=True) from error
         except Exception as error:
@@ -438,17 +561,18 @@ class OllamaProvider(ModelProvider):
         ]
         for result in tool_results:
             cached = await self._lookup_tool_call(result.call_id)
+            if cached is None:
+                raise MalformedStructuredOutputError("Ollama tool result has unknown call ID")
             content = _safe_json_dumps(
                 {"status": result.status, "result": result.result},
                 "tool result",
             )
+            translated.append(dict(cached.assistant_message))
             payload: dict[str, Any] = {
                 "role": "tool",
                 "content": content,
-                "tool_call_id": result.call_id,
+                "tool_name": cached.name,
             }
-            if cached is not None:
-                payload["name"] = cached.name
             translated.append(payload)
         return translated
 
@@ -482,7 +606,7 @@ class OllamaProvider(ModelProvider):
                 request_id=request_id,
             )
         if tool_calls:
-            call = await self._normalize_tool_call(tool_calls[0], tools, request_id)
+            call = await self._normalize_tool_call(tool_calls[0], message, tools, request_id)
             return ProviderResult(
                 tool_calls=(call,),
                 usage=usage,
@@ -518,6 +642,7 @@ class OllamaProvider(ModelProvider):
     async def _normalize_tool_call(
         self,
         raw_call: Mapping[str, Any],
+        message: Mapping[str, Any],
         tools: tuple[ProviderToolDefinition, ...],
         request_id: str | None,
     ) -> ProviderToolCallRequest:
@@ -546,17 +671,30 @@ class OllamaProvider(ModelProvider):
             name=name,
             arguments=arguments,
         )
-        await self._remember_tool_call(call_id, name)
+        await self._remember_tool_call(
+            call_id,
+            name,
+            _assistant_tool_message(message, raw_call, name, arguments),
+        )
         return ProviderToolCallRequest(
             call_id=call_id,
             tool_id=tool.tool_id,
             arguments=arguments,
         )
 
-    async def _remember_tool_call(self, call_id: str, name: str) -> None:
+    async def _remember_tool_call(
+        self,
+        call_id: str,
+        name: str,
+        assistant_message: Mapping[str, Any],
+    ) -> None:
         """Cache a bounded call ID to tool-name mapping for result turns."""
         async with self._cache_lock:
-            self._tool_calls_by_id[call_id] = _CachedToolCall(call_id, name)
+            self._tool_calls_by_id[call_id] = _CachedToolCall(
+                call_id,
+                name,
+                assistant_message,
+            )
             self._tool_calls_by_id.move_to_end(call_id)
             while len(self._tool_calls_by_id) > _CALL_CACHE_LIMIT:
                 self._tool_calls_by_id.popitem(last=False)
@@ -649,26 +787,24 @@ def _create_official_client(
     transport_options: Mapping[str, Any],
     tls_options: Mapping[str, Any],
     proxy_options: Mapping[str, Any],
+    max_response_bytes: int,
 ) -> _OllamaClient:
-    """Construct the official Ollama AsyncClient lazily."""
+    """Construct a bounded client for Ollama's official HTTP protocol."""
     try:
         require_adapter("ollama")
-        ollama = importlib.import_module("ollama")
     except AdapterDependencyError:
         raise
     except Exception as error:
         raise OllamaConfigurationError("Ollama client dependency is unavailable") from error
-    client_kwargs: dict[str, Any] = _official_client_kwargs(
+    return _BoundedOllamaHttpClient(
+        endpoint=endpoint,
         auth_token=auth_token,
         headers=headers,
         timeout=timeout,
         transport_options=transport_options,
         tls_options=tls_options,
         proxy_options=proxy_options,
-    )
-    return cast(
-        _OllamaClient,
-        ollama.AsyncClient(host=endpoint or DEFAULT_OLLAMA_ENDPOINT, **client_kwargs),
+        max_response_bytes=max_response_bytes,
     )
 
 
@@ -753,6 +889,10 @@ def _coerce_profile(profile: OllamaProfile | str | None) -> OllamaProfile:
     if profile is None:
         return OLLAMA_DEFAULT_PROFILE
     if isinstance(profile, OllamaProfile):
+        if profile.tool_calling and profile.name not in _TOOL_CAPABLE_PROFILE_NAMES:
+            raise OllamaConfigurationError(
+                f"Ollama tool profile '{profile.name}' has not been conformance tested"
+            )
         return profile
     if profile in _TOOL_CAPABLE_PROFILE_NAMES:
         return OllamaProfile(profile, tool_calling=True)
@@ -837,6 +977,51 @@ def _to_ollama_tool(tool: ProviderToolDefinition) -> dict[str, Any]:
             "description": tool.description,
             "parameters": dict(tool.input_schema),
         },
+    }
+
+
+def _request_timeout(
+    options: GenerationOptions,
+    *,
+    effective_deadline: float | None,
+    call_context: ProviderCallContext | None,
+) -> float | None:
+    """Return the per-call timeout after applying all known deadlines."""
+    timeout = options.timeout
+    deadline = effective_deadline
+    if call_context is not None and call_context.deadline is not None:
+        deadline = (
+            min(deadline, call_context.deadline) if deadline is not None else call_context.deadline
+        )
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ProviderTimeoutError(attempted=False)
+        timeout = min(timeout, remaining) if timeout is not None else remaining
+    return timeout
+
+
+def _assistant_tool_message(
+    message: Mapping[str, Any],
+    raw_call: Mapping[str, Any],
+    name: str,
+    arguments: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    """Build the assistant tool-call message Ollama expects before results."""
+    content = message.get("content")
+    call_payload: dict[str, Any] = {
+        "function": {
+            "name": name,
+            "arguments": dict(arguments),
+        }
+    }
+    raw_id = _safe_string(raw_call.get("id"))
+    if raw_id is not None:
+        call_payload["id"] = raw_id
+    return {
+        "role": "assistant",
+        "content": content if isinstance(content, str) else "",
+        "tool_calls": (call_payload,),
     }
 
 
