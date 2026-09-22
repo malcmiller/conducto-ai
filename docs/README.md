@@ -49,5 +49,4 @@ Agent Cards and deterministic routing payloads.
 
 ## Scope note
 
-The current implementation is Python-first, while repository-level contracts
-are designed for later .NET parity and cross-language conformance.
+The implementation and repository are Python-only.

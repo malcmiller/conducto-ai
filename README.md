@@ -27,8 +27,7 @@ Conducto separates those responsibilities:
   serialization, and result semantics.
 - **Portable deployments:** The same agent contract is intended to progress from one process to
   containers, Microsoft Foundry, and optional cross-organization federation.
-- **Cross-language conformance:** Python establishes the reference behavior; .NET follows shared
-  schemas, protocol fixtures, and observable semantics.
+- **Protocol conformance:** Checked-in schemas and fixtures pin observable wire behavior.
 
 ## What Conducto is for
 
@@ -39,7 +38,7 @@ giving every model unrestricted access to every tool or deployment:
 - a business workflow that requires scoped authority and human approval before protected actions
 - a local agent composition that later moves behind authenticated network boundaries
 - a hybrid deployment that combines in-process, containerized, and Foundry-hosted agents
-- independently implemented Python and .NET agents that must follow the same observable contract
+- independently deployed Python agents that must follow the same observable contract
 
 Conducto is not intended to be another general-purpose chat UI or a vendor-specific model wrapper.
 Its primary concern is the controlled discovery, delegation, and execution of typed agent
@@ -63,8 +62,8 @@ Implemented foundations include:
 - bounded Ollama and OpenAI-compatible provider adapters
 - optional MCP export and OpenTelemetry integration
 
-Container deployment, Foundry integration, durable workflow orchestration, .NET parity, and
-federation remain roadmap work. No v1 API has shipped: common application entry points live in
+Container deployment, Foundry integration, durable workflow orchestration, and federation remain
+roadmap work. No v1 API has shipped: common application entry points live in
 `conducto`, specialized contracts in their owning `conducto.core` packages, and deterministic
 test providers in `conducto.testing`.
 
@@ -136,7 +135,7 @@ Optional integrations are installed with package extras such as
 
 ## Architecture principles
 
-1. **Python first, contracts first.** Python proves behavior before .NET ports it.
+1. **Python and contracts first.** Python establishes the reference behavior.
 2. **Local before remote.** In-process execution establishes semantics before network transport.
 3. **Capabilities before endpoints.** Agent code targets compatible capabilities, not deployment
    addresses.
@@ -164,12 +163,11 @@ The active roadmap is tracked in [GitHub milestones](https://github.com/malcmill
 5. Python exporters, observability, and packaging
 6. Python model runtimes and Microsoft Foundry
 7. Python hybrid deployment and workflow orchestration
-8. .NET SDK parity and cross-language conformance
-9. Cross-organization federation
+8. Cross-organization federation
 
 The required product progression is **local Python → governed Python chaining → Python network
-transport → operational packaging → containers and Foundry → hybrid workflows → .NET parity →
-optional federation**.
+transport → operational packaging → containers and Foundry → hybrid workflows → optional
+federation**.
 
 ## Repository layout
 
@@ -183,9 +181,6 @@ optional federation**.
 ├── pyproject.toml               Package and tool configuration
 └── uv.lock                      Reproducible dependency lock
 ```
-
-The .NET SDK will be added during the .NET parity milestone rather than maintained as an
-unimplemented placeholder.
 
 ## Documentation
 

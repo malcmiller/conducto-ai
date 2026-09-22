@@ -10,16 +10,14 @@ once, expose typed capabilities, and invoke those capabilities through the same 
 whether the target is in-process, behind A2A transport, containerized, or hosted in Microsoft
 Foundry.
 
-Development is intentionally Python-first:
+Development is Python-only:
 
 1. Establish the complete Python reference behavior.
-2. Preserve language-neutral wire contracts and conformance fixtures.
-3. Implement .NET parity from those stable contracts.
-4. Add cross-organization federation only after local, remote, and cross-language behavior is
-   proven.
+2. Preserve stable wire contracts and conformance fixtures.
+3. Prove local, remote, container, and Foundry execution.
+4. Add cross-organization federation only after those deployment paths are proven.
 
-Do not introduce .NET-driven abstractions into unfinished Python contracts or make local Python
-development depend on cloud services.
+Do not make local Python development depend on cloud services.
 
 ## Architecture boundaries
 

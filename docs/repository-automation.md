@@ -19,7 +19,7 @@ supports the project but does not define Conducto's product architecture.
 
 Repository-wide requirements live in [`AGENTS.md`](../AGENTS.md). They define:
 
-- the Python-first product sequence
+- the Python-only product sequence
 - architecture and security boundaries
 - implementation and modularity expectations
 - mandatory validation and repository inspection
@@ -100,12 +100,6 @@ The aggregate job fails when a required dependency fails or is cancelled.
 - Keep required tests network-free, cloud-free, credential-free, and model-download-free.
 - Do not upload prompts, credentials, tokens, environment variables, or sensitive capability data
   as workflow artifacts.
-
-## Future workflows
-
-When the .NET SDK is introduced in Milestone 8, add a path-filtered .NET workflow with equivalent
-formatting, analyzers, tests, package, and consumer-smoke coverage. Either extend the repository
-aggregate or add a stable repository-level required job that depends on both language aggregates.
 
 Deployment and publishing workflows should remain separate from pull-request validation, use
 environment protection, and request credentials only in the jobs that need them.

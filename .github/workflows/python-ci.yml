@@ -13,9 +13,6 @@
 #     and fails if any dependency failed or was canceled.
 #   - No job requests write permissions, and no publishing credentials are
 #     used anywhere in this workflow.
-#   - When .NET parity work begins, add a parallel `dotnet-ci.yml` workflow
-#     (or a `dotnet` job gated by its own `changes` filter) and add it to the
-#     `required` job's `needs:` list; Milestone 1 does not require it yet.
 name: Python CI
 
 on:

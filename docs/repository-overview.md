@@ -22,10 +22,9 @@ conducto-ai/
 └── LICENSE
 ```
 
-The repository is intentionally Python-first. The Python SDK establishes
-reference behavior and language-neutral fixtures before .NET parity is added.
-Cross-organization federation follows only after local, remote, and
-cross-language behavior is proven.
+The repository is Python-only. The SDK establishes reference behavior and
+protocol fixtures before cross-organization federation is added. Federation
+follows only after local, remote, container, and Foundry behavior is proven.
 
 ## Product concepts
 

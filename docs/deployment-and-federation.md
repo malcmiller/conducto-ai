@@ -230,8 +230,7 @@ Each deployment exposes:
 An orchestrator registers a validated URL rather than importing the networked
 agent. The endpoint can be a local container, remote container, or adapter for
 a Foundry-hosted agent. Milestone 3 establishes Python agent chaining and the
-local gateway; Milestone 4 adds Python A2A network transport. .NET hosting and
-cross-language conformance follow in Milestone 8.
+local gateway; Milestone 4 adds Python A2A network transport.
 
 ### 4. Configure deployment-specific identity and trust
 
@@ -291,8 +290,7 @@ remote catalog and policy-aware workflow runtime. It applies whether all
 agents belong to one organization or a workflow uses a mixture of deployment
 types.
 
-Milestone 8 establishes .NET SDK parity and cross-language conformance.
-Milestone 9 adds the optional cross-organization federation control plane:
+Milestone 8 adds the optional cross-organization federation control plane:
 global identity, signed discovery metadata, external trust onboarding, and an
 end-to-end multi-organization Azure verification. The local, container, and
 single-organization Foundry scenarios do not depend on federation merely to
@@ -326,12 +324,11 @@ flowchart LR
     M4 --> M5[5. Python exporters, observability, and packaging]
     M5 --> M6[6. Python model runtimes and Microsoft Foundry]
     M6 --> M7[7. Python hybrid deployment and workflow orchestration]
-    M7 --> M8[8. .NET SDK parity and cross-language conformance]
-    M8 --> M9[9. Cross-organization federation]
+    M7 --> M8[8. Cross-organization federation]
 ```
 
 The practical delivery order is strict: one-machine contracts and execution,
 local containers and A2A transport, same-organization Azure deployment, hybrid
-orchestration, .NET parity and cross-language conformance, then optional
-cross-organization federation. This is the canonical milestone order, not a
-claim that every story in an earlier milestone is already complete.
+orchestration, then optional cross-organization federation. This is the
+canonical milestone order, not a claim that every story in an earlier
+milestone is already complete.

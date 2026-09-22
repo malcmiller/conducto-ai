@@ -18,9 +18,9 @@ The Conducto package version is independent from this protocol version.
 
 The upstream `a2a.proto` for `v1.0.0` is normative. Conducto does not edit
 generated SDK types by hand. Python validation parses Agent Cards, messages,
-and tasks through the pinned official SDK, while language-neutral fixtures in
-`tests/golden/fixtures/a2a/a2a_1_0_conformance.json` preserves the
-observable wire behavior later SDKs must match.
+and tasks through the pinned official SDK, while protocol fixtures in
+`tests/golden/fixtures/a2a/a2a_1_0_conformance.json` preserve the observable
+wire behavior network consumers must match.
 
 To verify the pinned source artifact:
 
@@ -101,7 +101,7 @@ after a terminal task creates a new task in the same context rather than
 resuming the terminal task.
 
 `InvocationResult` variants are mapped to protocol outcomes without exposing
-Python or .NET exception objects:
+implementation exception objects:
 
 | Conducto result | A2A outcome |
 |---|---|
@@ -140,8 +140,8 @@ To evaluate a later A2A patch or major version:
 1. Review the upstream release notes and `a2a.proto` diff.
 2. Update the pinned provenance constants and `a2a-sdk` dependency only if the
    official SDK supports the target specification.
-3. Regenerate the golden Agent Card fixture and update language-neutral
-   conformance fixtures for intentional wire changes.
+3. Regenerate the golden Agent Card fixture and update protocol conformance
+   fixtures for intentional wire changes.
 4. Document compatibility impact, especially removed fields, new required
    fields, operation support, extension behavior, and media-type changes.
 5. Run the golden, focused protocol tests, and the full Python validation gate

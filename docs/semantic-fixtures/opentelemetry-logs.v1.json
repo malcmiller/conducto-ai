@@ -1,6 +1,6 @@
 {
   "schema_version": "1",
-  "description": "Language-neutral mapping from Conducto's versioned diagnostic events (conducto.core.logging) to OpenTelemetry Logs Data Model fields, produced by conducto.core.otel_logs.OpenTelemetryLogBridge.",
+  "description": "Stable mapping from Conducto's versioned diagnostic events (conducto.core.logging) to OpenTelemetry Logs Data Model fields, produced by conducto.core.otel_logs.OpenTelemetryLogBridge.",
   "body_and_event_name_policy": "body and event_name are both set to the stable, versioned Conducto event name; neither ever contains a formatted message, exception text, or payload.",
   "trace_correlation": "trace_id/span_id are derived by the OpenTelemetry SDK from the active context at emission time; they are zero when no span is active, and are never fabricated by Conducto.",
   "excluded_by_default": [

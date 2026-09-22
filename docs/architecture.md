@@ -233,7 +233,6 @@ For the details behind each layer, continue with
 The repository's [canonical roadmap](../README.md#roadmap) is Python local
 flow (1), security and governance (2), chaining and local gateway (3), A2A
 network transport (4), exporters/observability/packaging (5), model runtimes
-and Microsoft Foundry (6), hybrid deployment and workflows (7), .NET parity
-and cross-language conformance (8), then cross-organization federation (9).
-Python execution and wire contracts precede .NET implementations; local
-development never requires Foundry or federation infrastructure.
+and Microsoft Foundry (6), hybrid deployment and workflows (7), then
+cross-organization federation (8). Local development never requires Foundry
+or federation infrastructure.

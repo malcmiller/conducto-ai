@@ -36,7 +36,7 @@ PROVIDER_FIXTURE_VERSION = "1"
 
 @dataclass(frozen=True, slots=True)
 class ConformanceFixture:
-    """Language-neutral expected result for one deterministic contract case."""
+    """Provider-independent expected result for one deterministic contract case."""
 
     name: str
     expected_acceptance: AcceptanceState | None = None

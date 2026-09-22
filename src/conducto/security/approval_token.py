@@ -51,7 +51,7 @@ class ApprovalTokenClaims:
     contract_version: str = "1"
 
     def as_dict(self) -> dict[str, Any]:
-        """Return the language-neutral claim names used on the wire."""
+        """Return the stable claim names used on the wire."""
         return {
             "iss": self.issuer,
             "aud": self.audience,
