@@ -146,18 +146,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        extra: [mcp, opentelemetry, ollama, openai, microsoft-foundry, test]
+        include:
+          - extra: registration
+            module: httpx
+          - extra: mcp
+            module: mcp
+          - extra: opentelemetry
+            module: opentelemetry
+          - extra: ollama
+            module: ollama
+          - extra: openai
+            module: openai
+          - extra: microsoft-foundry
+            module: azure.ai.projects
+          - extra: test
+            module: pytest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: conducto-ai-release-${{ needs.build.outputs.version }}-${{ needs.build.outputs.wheel_sha256 }}-${{ needs.build.outputs.sdist_sha256 }}
-          path: release-bundle
+          path: sdk-python/release-bundle
       - name: Install wheel with only one optional extra
         run: |
           wheel="$(ls release-bundle/dist/*.whl)"
-          uv run --no-project --with "$wheel[${{ matrix.extra }}]" python -c "import conducto; print(conducto.__file__)"
-          uv run --no-project --with "$wheel[${{ matrix.extra }}]" python sdk-python/scripts/smoke_test.py
+          uv run --no-project --with "$wheel[${{ matrix.extra }}]" python -c "import importlib; from importlib.metadata import metadata; import conducto; extra='${{ matrix.extra }}'; assert extra in metadata('conducto-ai').get_all('Provides-Extra', []); importlib.import_module('${{ matrix.module }}'); print(conducto.__file__)"
+          uv run --no-project --with "$wheel[${{ matrix.extra }}]" python scripts/smoke_test.py
 
   prepublish:
     name: Check PyPI version availability
@@ -187,11 +205,12 @@ jobs:
     permissions:
       contents: read
       id-token: write
+      attestations: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: conducto-ai-release-${{ needs.build.outputs.version }}-${{ needs.build.outputs.wheel_sha256 }}-${{ needs.build.outputs.sdist_sha256 }}
-          path: release-bundle
+          path: sdk-python/release-bundle
       - name: Recheck verified artifact digests
         run: |
           cd release-bundle/dist
@@ -199,14 +218,14 @@ jobs:
       - name: Publish exact verified files
         uses: pypa/gh-action-pypi-publish@ed0c5390579b4a5c0b6ed5d3d5e9d48f15f6c6f # release/v1
         with:
-          packages-dir: release-bundle/dist
+          packages-dir: sdk-python/release-bundle/dist
           skip-existing: false
       - name: Attest exact release files
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.2.2
         with:
           subject-path: |
-            release-bundle/dist/*.whl
-            release-bundle/dist/*.tar.gz
+            sdk-python/release-bundle/dist/*.whl
+            sdk-python/release-bundle/dist/*.tar.gz
 
   github-release:
     name: Create GitHub Release
@@ -216,10 +235,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: conducto-ai-release-${{ needs.build.outputs.version }}-${{ needs.build.outputs.wheel_sha256 }}-${{ needs.build.outputs.sdist_sha256 }}
-          path: release-bundle
+          path: sdk-python/release-bundle
       - name: Create release with generated notes
         uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
         with:
@@ -227,5 +246,5 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(needs.build.outputs.version, '-') }}
           files: |
-            release-bundle/dist/*
-            release-bundle/release/*
+            sdk-python/release-bundle/dist/*
+            sdk-python/release-bundle/release/*
