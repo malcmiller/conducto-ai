@@ -5,29 +5,12 @@ from typing import Any
 
 import pytest
 
-from conducto import (
-    BaseAgent,
-    FakeModel,
-    InvocationSuccess,
-    ModelConfiguration,
-    OrchestratorAgent,
-    a2a_agent,
-    a2a_capability,
-)
-from conducto.core import (
-    InvocationSuccess as CoreInvocationSuccess,
-)
-from conducto.core import (
-    RoutingFailure as CoreRoutingFailure,
-)
-from conducto.core.agent import (
-    AgentRegistrationError,
-    RegisteredMethod,
-)
-from conducto.core.invocation import InvocationSuccess as ModuleInvocationSuccess
-from conducto.core.invocation_results import RoutingFailure as ResultRoutingFailure
-from conducto.core.orchestrator import RoutingFailure
-from conducto.core.registration import RegisteredMethod as RegistrationRegisteredMethod
+from conducto import AgentRegistry, BaseAgent, OrchestratorAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.invocation_results import InvocationSuccess, RoutingFailure
+from conducto.core.provider import ModelConfiguration, ProviderResult
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.core.registration import AgentRegistrationError, RegisteredMethod
+from conducto.testing import FakeModel
 
 
 def test_registration_constructs_one_parameter_model_per_method(
@@ -66,15 +49,22 @@ def test_route_generates_routing_metadata_once(monkeypatch: pytest.MonkeyPatch) 
             return value
 
     async def exercise() -> None:
-        orchestrator = OrchestratorAgent(
-            model_provider=FakeModel(
-                {
-                    "agent_id": "RouteAgent",
-                    "capability_id": "echo",
-                    "arguments": {"value": "ok"},
-                }
+        registry = ProviderRegistry()
+        registry.register_client(
+            "test",
+            FakeModel(
+                ProviderResult(
+                    structured={
+                        "agent_id": "RouteAgent",
+                        "capability_id": "echo",
+                        "arguments": {"value": "ok"},
+                    }
+                )
             ),
-            model_config=ModelConfiguration(provider="fake", model="test"),
+            ModelConfiguration(provider="fake", model="test"),
+        )
+        orchestrator = OrchestratorAgent(
+            model_reference="test", runtime=Runtime(provider_registry=registry)
         )
         orchestrator.register_agent(RouteAgent())
         calls = 0
@@ -94,8 +84,33 @@ def test_route_generates_routing_metadata_once(monkeypatch: pytest.MonkeyPatch) 
     asyncio.run(exercise())
 
 
-def test_public_and_direct_module_re_exports_remain_available() -> None:
-    assert InvocationSuccess is CoreInvocationSuccess is ModuleInvocationSuccess
+def test_public_exports_reference_owning_modules() -> None:
+    assert InvocationSuccess.__module__ == "conducto.core.invocation_results"
     assert issubclass(AgentRegistrationError, ValueError)
-    assert RegisteredMethod is RegistrationRegisteredMethod
-    assert RoutingFailure is CoreRoutingFailure is ResultRoutingFailure
+    assert RegisteredMethod.__module__ == "conducto.core.registration"
+    assert RoutingFailure.__module__ == "conducto.core.invocation_results"
+
+
+def test_registry_preserves_all_capability_providers_without_first_choice_projection() -> None:
+    @a2a_agent(name="Alpha", version="1.0.0", description="First provider.")
+    class Alpha(BaseAgent):
+        @a2a_capability(name="echo", description="Echoes.")
+        def echo(self, value: str) -> str:
+            return value
+
+    @a2a_agent(name="Bravo", version="1.0.0", description="Second provider.")
+    class Bravo(Alpha):
+        pass
+
+    registry = AgentRegistry()
+    alpha, bravo = Alpha(), Bravo()
+    registry.register(bravo)
+    registry.register(alpha)
+
+    assert registry.capability_providers("echo") == (alpha, bravo)
+    assert [agent.agent_id for agent in registry.snapshot().agents] == ["Alpha", "Bravo"]
+    assert not hasattr(registry, "registered_capabilities")
+    assert not hasattr(registry, "capabilities")
+
+    registry.remove(alpha)
+    assert registry.capability_providers("echo") == (bravo,)

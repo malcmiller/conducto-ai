@@ -14,7 +14,8 @@ from dataclasses import dataclass
 import pytest
 from pydantic import BaseModel
 
-from conducto import (
+from conducto.adapters import AdapterDependencyError, require_adapter
+from conducto.core.provider import (
     ChatMessage,
     GenerationOptions,
     ProviderToolDefinition,
@@ -22,7 +23,6 @@ from conducto import (
     ToolResultMessage,
     parse_model_decision,
 )
-from conducto.adapters import AdapterDependencyError, require_adapter
 from conducto.providers import (
     LM_STUDIO_TOOL_CAPABLE_PROFILE,
     VLLM_TOOL_CAPABLE_PROFILE,

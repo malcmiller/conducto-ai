@@ -2,7 +2,6 @@
 
 import pytest
 
-from conducto import FakeModel, ModelConfiguration, ModelPolicyContext, ProviderCapabilities
 from conducto.core.model_config import (
     AgentModelConfig,
     ModelReference,
@@ -12,11 +11,14 @@ from conducto.core.model_config import (
     RuntimeConfig,
 )
 from conducto.core.model_resolution import ModelResolver
+from conducto.core.provider import ModelConfiguration, ProviderCapabilities, ProviderResult
 from conducto.core.provider_registry import ProviderRegistry
+from conducto.core.run_context import ModelPolicyContext
 from conducto.core.runtime_errors import (
     IncompatibleProviderCapabilitiesError,
     ModelOverrideDeniedError,
 )
+from conducto.testing import FakeModel
 
 
 def _resolver(*references: str) -> ModelResolver:
@@ -24,7 +26,7 @@ def _resolver(*references: str) -> ModelResolver:
     for reference in references:
         registry.register_client(
             reference,
-            FakeModel({}),
+            FakeModel(ProviderResult(structured={}, accepted=True)),
             ModelConfiguration(provider=f"provider-{reference}", model=reference),
         )
     return ModelResolver(registry)
@@ -58,7 +60,7 @@ def test_model_resolver_preserves_precedence_and_policy_facts() -> None:
 
 def test_model_resolver_denies_policy_and_incompatible_capabilities() -> None:
     registry = ProviderRegistry()
-    provider = FakeModel({})
+    provider = FakeModel(ProviderResult(structured={}, accepted=True))
     provider.capabilities = ProviderCapabilities()
     registry.register_client(
         "model",

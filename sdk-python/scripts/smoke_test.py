@@ -13,7 +13,6 @@ Usage (from an environment with only the built wheel installed):
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import io
 import json
@@ -51,17 +50,13 @@ def _smoke_mcp_stdio() -> str:
 
 def main() -> int:
     import conducto
-    from conducto import (
-        A2A_AGENT_CARD_SPEC_VERSION,
-        BaseAgent,
-        FakeModel,
-        InvocationSuccess,
-        ModelConfiguration,
-        OrchestratorAgent,
-        a2a_agent,
-        a2a_capability,
-        configure_logging,
-    )
+    from conducto import BaseAgent, OrchestratorAgent, Runtime, a2a_agent, a2a_capability
+    from conducto.core.agent_card import A2A_AGENT_CARD_SPEC_VERSION
+    from conducto.core.invocation_results import InvocationSuccess
+    from conducto.core.logging import configure_logging
+    from conducto.core.provider import ModelConfiguration, ProviderResult
+    from conducto.core.provider_registry import ProviderRegistry
+    from conducto.testing import FakeModel
 
     source_root = Path(__file__).resolve().parents[1] / "src"
     imported_from = Path(conducto.__file__ or "").resolve()
@@ -101,15 +96,23 @@ def main() -> int:
     async def invoke() -> None:
         stream = io.StringIO()
         configure_logging(format="json", stream=stream)
-        orchestrator = OrchestratorAgent(
-            model_provider=FakeModel(
-                {
-                    "agent_id": "SmokeIncidentAgent",
-                    "capability_id": "summarize",
-                    "arguments": {"service": "checkout", "severity": 5},
-                },
+        registry = ProviderRegistry()
+        registry.register_client(
+            "smoke-model",
+            FakeModel(
+                ProviderResult(
+                    structured={
+                        "agent_id": "SmokeIncidentAgent",
+                        "capability_id": "summarize",
+                        "arguments": {"service": "checkout", "severity": 5},
+                    }
+                ),
             ),
-            model_config=ModelConfiguration(provider="fake", model="smoke-model"),
+            ModelConfiguration(provider="fake", model="smoke-model"),
+        )
+        orchestrator = OrchestratorAgent(
+            model_reference="smoke-model",
+            runtime=Runtime(provider_registry=registry),
         )
         for agent in agents:
             orchestrator.register_agent(agent)
@@ -127,19 +130,6 @@ def main() -> int:
     asyncio.run(invoke())
 
     example = Path(__file__).resolve().parents[1] / "examples" / "agent_chaining.py"
-    tree = ast.parse(example.read_text(encoding="utf-8"), filename=str(example))
-    for node in ast.walk(tree):
-        module = (
-            node.module
-            if isinstance(node, ast.ImportFrom)
-            else next((name.name for name in node.names if name.name == "conducto.core"), None)
-            if isinstance(node, ast.Import)
-            else None
-        )
-        if module == "conducto.core" or (
-            isinstance(module, str) and module.startswith("conducto.core.")
-        ):
-            raise AssertionError("agent chaining example imports a non-public conducto.core module")
     chaining = runpy.run_path(str(example))
     asyncio.run(chaining["main"]())
 

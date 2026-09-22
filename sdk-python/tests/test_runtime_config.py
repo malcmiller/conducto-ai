@@ -1,41 +1,42 @@
 """Focused contracts for immutable runtime configuration."""
 
 from dataclasses import FrozenInstanceError
+from inspect import signature
 from typing import Any, cast
 
 import pytest
 
-from conducto.core.model_config import ModelReference as ConfigModelReference
-from conducto.core.runtime import (
-    GenerationOptions,
-    ModelConfiguration,
-    ModelProvider,
-    ModelReference,
-    ProviderResult,
-    RunConfig,
-    RuntimeConfig,
-    Usage,
-    complete_with_retries,
-)
+from conducto.core import runtime
+from conducto.core.model_config import ModelReference, RunConfig, RuntimeConfig
 
 
-def test_runtime_config_re_exports_preserve_identity_and_normalization() -> None:
-    assert ModelReference is ConfigModelReference
+def test_runtime_config_normalizes_model_references() -> None:
     assert RuntimeConfig(" default ").default_model == ModelReference("default")
 
 
-def test_runtime_retains_historical_provider_re_exports() -> None:
-    assert all(
-        symbol is not None
-        for symbol in (
-            GenerationOptions,
-            ModelConfiguration,
-            ModelProvider,
-            ProviderResult,
-            Usage,
-            complete_with_retries,
-        )
-    )
+def test_runtime_exports_only_its_facade() -> None:
+    assert runtime.__all__ == ["Runtime"]
+    for name in (
+        "GenerationOptions",
+        "ModelConfiguration",
+        "ModelProvider",
+        "ProviderResult",
+        "Usage",
+        "complete_with_retries",
+        "ProviderClientConfig",
+        "ProviderRegistration",
+        "ProviderFactory",
+        "get_run_context",
+        "use_run_context",
+    ):
+        assert not hasattr(runtime, name)
+
+
+def test_runtime_invoke_accepts_only_canonical_authorization_keyword() -> None:
+    parameters = signature(runtime.Runtime.invoke).parameters
+
+    assert "authorization" in parameters
+    assert "authorization_context" not in parameters
 
 
 def test_run_config_recursively_freezes_safe_metadata() -> None:

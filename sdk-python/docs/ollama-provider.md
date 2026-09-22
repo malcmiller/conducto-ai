@@ -10,11 +10,11 @@ stop, reconfigure, pull, or delete Ollama models.
 The adapter is implemented against the official Ollama Python client and
 Ollama's documented chat `format` JSON Schema and native `tools` fields.
 
-| Profile | Server | Python client | Tool calls | Call IDs | Streaming |
-|---------|--------|---------------|------------|----------|-----------|
-| `terminal-json` | `>=0.6.0` tested | `ollama>=0.5` | No | N/A | No |
-| `llama3.1-tools` | `>=0.6.0` tested | `ollama>=0.5` | Yes, opt-in | Preserved when supplied; otherwise synthesized once by the adapter | No |
-| `qwen2.5-tools` | `>=0.6.0` tested | `ollama>=0.5` | Yes, opt-in | Preserved when supplied; otherwise synthesized once by the adapter | No |
+| Profile          | Server           | Python client | Tool calls  | Call IDs                                                           | Streaming |
+|------------------|------------------|---------------|-------------|--------------------------------------------------------------------|-----------|
+| `terminal-json`  | `>=0.6.0` tested | `ollama>=0.5` | No          | N/A                                                                | No        |
+| `llama3.1-tools` | `>=0.6.0` tested | `ollama>=0.5` | Yes, opt-in | Preserved when supplied; otherwise synthesized once by the adapter | No        |
+| `qwen2.5-tools`  | `>=0.6.0` tested | `ollama>=0.5` | Yes, opt-in | Preserved when supplied; otherwise synthesized once by the adapter | No        |
 
 The CPU-friendly example recommendation is `llama3.1:8b` or another small
 tool-capable model already present in your Ollama installation. Conducto never
@@ -22,16 +22,16 @@ downloads it automatically.
 
 Capabilities are profile-specific:
 
-| Capability | `terminal-json` | Tool-capable profiles |
-|------------|-----------------|-----------------------|
-| Terminal JSON Schema through Ollama `format` | Yes | Yes |
-| Independent Conducto JSON validation | Yes | Yes |
-| Native Ollama `tools` | No | Yes |
-| Tool-result messages | No | Yes |
-| Usage counters | Uses reported prompt/eval counts only | Uses reported prompt/eval counts only |
-| Cancellation | Propagates task cancellation and pre-dispatch cancellation state | Same |
-| Context/output limits | Configurable via `context_window`, `max_output_tokens`, and options | Same |
-| Response body limit | Enforced while reading HTTP response bytes for configuration-owned clients | Same |
+| Capability                                   | `terminal-json`                                                            | Tool-capable profiles                 |
+|----------------------------------------------|----------------------------------------------------------------------------|---------------------------------------|
+| Terminal JSON Schema through Ollama `format` | Yes                                                                        | Yes                                   |
+| Independent Conducto JSON validation         | Yes                                                                        | Yes                                   |
+| Native Ollama `tools`                        | No                                                                         | Yes                                   |
+| Tool-result messages                         | No                                                                         | Yes                                   |
+| Usage counters                               | Uses reported prompt/eval counts only                                      | Uses reported prompt/eval counts only |
+| Cancellation                                 | Propagates task cancellation and pre-dispatch cancellation state           | Same                                  |
+| Context/output limits                        | Configurable via `context_window`, `max_output_tokens`, and options        | Same                                  |
+| Response body limit                          | Enforced while reading HTTP response bytes for configuration-owned clients | Same                                  |
 
 Known limitations:
 
@@ -60,6 +60,20 @@ does not expose a maximum response-body limit. Preconstructed clients remain
 supported for applications that want to provide their own official-client
 lifecycle.
 
+Both adapters use shared private bounded HTTP and normalization infrastructure
+under `conducto.providers`. Configured credentials are resolved only during
+client construction and sent as actual bearer credentials on outbound HTTP
+requests. Diagnostics and logs omit authorization headers, response bodies,
+and underlying exception text; redaction never replaces the wire credential.
+Import model contracts from `conducto.core.provider` and registration
+contracts from `conducto.core.provider_registry`.
+
+Use `await provider.aclose()` to release a configuration-owned asynchronous
+HTTP client, or let `Runtime.aclose()` manage it through the provider registry.
+The adapter has no synchronous `close()` shortcut. Borrowed clients remain
+application-owned and are never closed by the adapter. The `ollama` extra
+explicitly declares the HTTPX transport dependency.
+
 ## Registration
 
 Configuration-owned registration keeps endpoint, authentication, TLS, proxy,
@@ -67,7 +81,8 @@ transport, keep-alive, and model defaults single-sourced in
 `ProviderClientConfig`:
 
 ```python
-from conducto import ModelConfiguration, ProviderClientConfig, ProviderRegistry
+from conducto.core.provider import ModelConfiguration
+from conducto.core.provider_registry import ProviderClientConfig, ProviderRegistry
 from conducto.providers import ollama_provider_factory
 
 registry = ProviderRegistry()
@@ -94,7 +109,8 @@ registry.register_provider(
 Preconstructed clients are also supported:
 
 ```python
-from conducto import ModelConfiguration, ProviderRegistry
+from conducto.core.provider import ModelConfiguration
+from conducto.core.provider_registry import ProviderRegistry
 from conducto.providers import OllamaProvider
 
 client = OllamaProvider(model="llama3.1:8b", client=my_async_ollama_client)

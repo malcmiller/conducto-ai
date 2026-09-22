@@ -8,6 +8,14 @@ credential-free model reference that agents and runs use.
 Model resolution (`ProviderRegistry.resolve`) only ever selects an
 already-published binding — it never constructs a client on the call path.
 
+The package facade delegates factory validation/reservations to `factories`,
+model publication and resolution to `bindings`, bounded health evaluation
+to `availability`, identity-based client/lease ownership to `ownership` and
+`lifecycle`, bounded close mechanics to `cleanup`, and safe projections to
+`snapshots`. All mutation shares one lock and publication generation state.
+Application imports remain `conducto.core.provider_registry`; these
+collaborators do not expose separate registration paths.
+
 ## Registering a provider type (factory) once
 
 Trusted application code registers an allowlisted factory for one provider
@@ -16,7 +24,7 @@ configuration-supplied code; the factory is a plain object your code
 constructs and hands to the registry.
 
 ```python
-from conducto import ProviderClientConfig, ProviderRegistry
+from conducto.core.provider_registry import ProviderClientConfig, ProviderRegistry
 
 
 class OllamaFactory:
@@ -40,7 +48,7 @@ secret), `transport`, `tls`, `proxy`, and `provider_defaults`.
 ## Binding a model reference to a factory-constructed client
 
 ```python
-from conducto import ModelConfiguration
+from conducto.core.provider import ModelConfiguration
 
 registry.register_provider(
     "local-llama",
@@ -64,7 +72,7 @@ satisfies the Story 6.1 structural provider protocol (`capabilities` plus a
 callable `complete(...)`), without any inheritance requirement.
 
 ```python
-from conducto import ProviderOwnership
+from conducto.core.provider_registry import ProviderOwnership
 
 registry.register_client(
     "custom-model",
@@ -200,20 +208,13 @@ exceeds `available_timeout` seconds (`DEFAULT_AVAILABILITY_TIMEOUT_SECONDS`
 by default) is treated as unavailable rather than blocking `resolve()`,
 `list_models()`, or `snapshot()`.
 
-## Migrating from `ProviderRegistry.register(...)`
+## Explicit registration APIs
 
-`register(reference, client, configuration, *, available=True, replace=False)`
-still works but is deprecated (`DeprecationWarning`) and now delegates to
-`register_client(...)` with `ownership=ProviderOwnership.CALLER_OWNED` — the
-same assumption the old API implicitly made, since it only ever accepted an
-already-built client.
+Use `register_provider_type()` for trusted factory registration,
+`register_provider()` for configuration-owned construction, and
+`register_client()` for preconstructed clients. There is no generic
+`ProviderRegistry.register()` or deprecated registration path.
 
-| Before                                                 | After                                                                                             |
-|--------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `registry.register(ref, client, config)`               | `registry.register_client(ref, client, config)`                                                   |
-| `registry.register(ref, client, config, replace=True)` | `registry.register_client(ref, client, config, replace=True)`                                     |
-| *(no factory path existed)*                            | `registry.register_provider_type(...)` once, then `registry.register_provider(...)` per reference |
-
-Call → run → agent → runtime model-reference precedence, concurrent run
-isolation, and Story 6.1 provider request/result semantics are unchanged by
-this migration.
+Import these contracts from `conducto.core.provider_registry`; model request
+and configuration contracts live in `conducto.core.provider`. Agents receive
+only model references, never provider construction settings.

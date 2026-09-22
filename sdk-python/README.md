@@ -44,7 +44,8 @@ uv run --no-project --with "$wheel" python scripts/smoke_test.py
 Expected example output:
 
 ```text
-quickstart result: agent=InvoiceAgent capability=classify_invoice value={"amount": 1250.0, "approved": false, "decision": "review", "vendor_id": "vendor-42"} correlation_id=quickstart-local-001
+approval required: role=finance; granting local demo approval
+quickstart result: agent=InvoiceAgent capability=classify_invoice value={"amount": 6000.0, "approved": false, "decision": "review", "vendor_id": "vendor-42"} correlation_id=quickstart-local-001
 ```
 
 See the detailed, copy/pasteable guide in
@@ -105,8 +106,16 @@ class InvoiceAgent(BaseAgent):
         }
 ```
 
-`examples/quickstart.py` shows the complete two-agent flow using only public
-imports from `conducto` and a deterministic `FakeModel`.
+`examples/quickstart.py` shows the complete two-agent flow using the public
+application facade, explicit provider contracts, and a deterministic
+`conducto.testing.FakeModel`.
+
+The pre-v1 root API contains agents, decorators, runtime, model references,
+run configuration, and context access. Specialized APIs come from their
+owning packages: `conducto.core.provider`, `conducto.core.provider_registry`,
+`conducto.core.gateway`, `conducto.core.catalog`, `conducto.core.delegation`,
+and `conducto.core.invocation_results`. `conducto.core` is a namespace, not
+a duplicate umbrella API. See the [import map](docs/sdk-reference.md).
 
 ## Agent chaining
 
@@ -153,14 +162,19 @@ discovery calls without recreating the caller or runtime.
 
 ## Model-facing toolbox projection
 
-`conducto.core.gateway_tools` (re-exported from `conducto`) bridges gateway
-discovery and a future model/tool execution loop. An agent declares which
+`conducto.core.gateway_tools` bridges gateway discovery and the bounded
+model/tool execution loop. An agent declares which
 capability families it may use – never a concrete provider agent ID -- and
 `build_toolbox` projects only already-authorized candidates into a bounded,
 immutable, schema-valid snapshot for one model decision boundary.
 
 ```python
-from conducto import CapabilityUse, CapabilityUseRequirement, ToolboxPolicy, build_toolbox
+from conducto.core.gateway_tools import (
+    CapabilityUse,
+    CapabilityUseRequirement,
+    ToolboxPolicy,
+    build_toolbox,
+)
 
 policy = ToolboxPolicy(
     uses=(
@@ -188,7 +202,10 @@ capability. Each model turn receives one immutable toolbox snapshot and must
 return exactly one structured terminal response or one tool call.
 
 ```python
-from conducto import BaseAgent, CapabilityUse, ChatMessage, DelegationConfig, ToolboxPolicy
+from conducto import BaseAgent
+from conducto.core.gateway_tools import CapabilityUse, ToolboxPolicy
+from conducto.core.provider import ChatMessage
+from conducto.core.delegation import DelegationConfig
 from pydantic import BaseModel
 
 
@@ -253,11 +270,22 @@ sdk-python/
 ├── src/
 │   └── conducto/
 │       ├── __init__.py
+│       ├── a2a/
+│       ├── adapters/          # Allowlisted adapter metadata and optional dependencies
+│       ├── providers/         # Vendor adaptation and private shared infrastructure
+│       ├── testing/           # Deterministic fakes and provider conformance
+│       ├── security/
+│       ├── transport/
+│       ├── mcp/
 │       └── core/
 │           ├── agent.py
 │           ├── agent_card.py
 │           ├── decorators.py
-│           ├── delegation.py
+│           ├── catalog/
+│           ├── delegation/
+│           ├── gateway/
+│           ├── gateway_models.py
+│           ├── gateway_tools.py
 │           ├── invocation.py
 │           ├── invocation_results.py
 │           ├── logging.py
@@ -266,12 +294,14 @@ sdk-python/
 │           ├── model_resolution.py
 │           ├── orchestrator.py
 │           ├── parameter_schema.py
-│           ├── provider.py
-│           ├── provider_registry.py
+│           ├── provider/
+│           ├── provider_registry/
 │           ├── registration.py
 │           ├── registry.py
 │           ├── run_context.py
 │           ├── runtime.py
+│           ├── runtime_context.py
+│           ├── runtime_invocation.py
 │           ├── runtime_errors.py
 │           └── serialization.py
 ├── tests/
@@ -312,7 +342,7 @@ the root logger during import. Applications can attach handlers to the
 `conducto` logger or opt into:
 
 ```python
-from conducto import configure_logging
+from conducto.core.logging import configure_logging
 
 configure_logging(format="json")
 ```
@@ -331,5 +361,6 @@ Applications register an allowlisted provider-type factory once and bind
 credential-free model references to configuration-constructed or
 preconstructed clients — see
 [`docs/provider-registration.md`](docs/provider-registration.md) for the full
-registration API, typed failures, and the migration path from the deprecated
-`ProviderRegistry.register(...)`.
+registration APIs, typed failures, and ownership rules. Use
+`register_provider_type()`, `register_provider()`, or `register_client()`;
+the deprecated generic `register()` path has been removed.

@@ -4,6 +4,20 @@ The provider subsystem separates a model's public reference, its
 application-owned client, selection policy, and invocation-scoped use. Agent
 code depends on Conducto contracts rather than vendor SDK types.
 
+## Imports and ownership
+
+Provider contracts are published from `conducto.core.provider`, registration
+and cleanup contracts from `conducto.core.provider_registry`, and deterministic
+fakes from `conducto.testing`. Import model identities and selection settings
+from `conducto.core.model_config`; `Runtime` is not a re-export location for
+these types.
+
+The contract package separates messages, results, errors, tools, schemas,
+decisions, capabilities, and retry mechanics. Registry construction and
+availability are independent of client lifetime and snapshot projection.
+Provider adapters share bounded transport and normalization infrastructure,
+but retain their own profile constraints and request/response adaptation.
+
 ## Provider contract
 
 `ModelProvider` is a structural protocol. A provider advertises immutable
@@ -85,7 +99,7 @@ Provider responses must satisfy the requested schema and declared schema
 dialect/features. Required structured output never silently degrades to prose
 parsing.
 
-Tool descriptions are provider-neutral. A tool-aware turn now carries four
+Tool descriptions are provider-neutral. A tool-aware turn carries four
 separate concerns instead of encoding them into one synthetic schema union:
 
 - the terminal `StructuredOutputRequest`
@@ -99,10 +113,11 @@ claiming support for unrelated terminal-schema combinators such as `oneOf`.
 schema actually requested for that turn, while tool support is negotiated
 independently through `ProviderCapabilities.tool_calling`.
 
-`build_model_decision_schema()` now returns only the terminal response schema
-for a delegation turn. Existing callers should continue to pass tools and tool
-results through the native provider channels rather than wrapping terminal and
-tool outcomes in a top-level JSON Schema `oneOf`.
+Pass tools and tool results through the typed native provider channels rather
+than wrapping terminal and tool outcomes in a synthetic top-level JSON Schema
+`oneOf`. A terminal response and a tool call are distinct result channels.
+`build_terminal_output_request(response_type)` constructs just that terminal
+request; it does not combine terminal and tool schemas.
 
 ## Adapter guidance
 

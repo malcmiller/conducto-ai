@@ -87,9 +87,9 @@ The most important code paths are:
 - `src/conducto/core/decorators.py` — metadata declaration
 - `src/conducto/core/agent.py` — reflection and Agent Card generation
 - `src/conducto/core/registry.py` — local agent registration and snapshots
-- `src/conducto/core/gateway.py` — governed discovery and bound invocation
+- `src/conducto/core/gateway/` — governed discovery, binding revalidation, schema compatibility, and tool projection
 - `src/conducto/core/orchestrator.py` — direct and model-mediated routing facade
 - `src/conducto/core/runtime.py` — execution composition and invocation context
-- `src/conducto/core/provider.py` — model provider and structured-output contracts
+- `src/conducto/core/provider/` — cohesive model, message, result, tool, schema, and retry contracts
 
 If you are extending the SDK, change the smallest surface area that preserves the public API and update tests that assert the public contract.

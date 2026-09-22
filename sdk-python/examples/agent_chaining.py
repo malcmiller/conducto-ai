@@ -1,4 +1,4 @@
-"""Three-agent local chaining example using only the public ``conducto`` API.
+"""Three-agent chaining through public application and domain contracts.
 
 Run from a built wheel with:
 
@@ -13,29 +13,24 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from conducto import (
-    AgentRegistry,
-    BaseAgent,
-    CapabilityUse,
+from conducto import AgentRegistry, BaseAgent, OrchestratorAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.delegation import DelegationConfig
+from conducto.core.gateway_tools import CapabilityUse, ToolboxPolicy
+from conducto.core.invocation_results import InvocationSuccess
+from conducto.core.provider import (
     ChatMessage,
-    DelegationConfig,
-    FakeModelRequest,
-    InvocationSuccess,
+    GenerationOptions,
     ModelConfiguration,
-    OrchestratorAgent,
     ProviderCapabilities,
-    ProviderRegistry,
     ProviderResult,
     ProviderToolCallRequest,
     ProviderToolDefinition,
-    Runtime,
     StructuredOutputRequest,
-    ToolboxPolicy,
     ToolResultMessage,
     Usage,
-    a2a_agent,
-    a2a_capability,
 )
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.testing import FakeModelRequest
 
 
 class ProductAnswer(BaseModel):
@@ -62,7 +57,7 @@ class ChainingModel:
         self,
         messages: Sequence[ChatMessage],
         *,
-        options: Any,
+        options: GenerationOptions,
         structured_output: StructuredOutputRequest,
         tools: Sequence[ProviderToolDefinition] = (),
         tool_results: Sequence[ToolResultMessage] = (),

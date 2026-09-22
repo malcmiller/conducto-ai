@@ -100,7 +100,7 @@ checks. These mutations affect future discovery and are rechecked when a
 binding is invoked.
 
 `OrchestratorAgent.register_agent()` uses the same registry but rejects
-capability collisions for its legacy single-provider routing behavior.
+capability collisions for its explicit single-provider routing behavior.
 Direct `AgentRegistry.register()` permits multiple providers for one
 capability by default so the gateway can resolve or report ambiguity.
 

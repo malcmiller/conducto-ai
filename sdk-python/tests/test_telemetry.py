@@ -6,32 +6,26 @@ import json
 from pathlib import Path
 from typing import Any
 
-from conducto import (
-    AgentRegistry,
-    BaseAgent,
-    DiscoveryQuery,
-    Principal,
-    Runtime,
-    a2a_agent,
-    a2a_capability,
-    configure_in_memory_tracing,
-    current_trace_ids,
-    extract_trace_context,
-    inject_trace_context,
-    require_scope,
-    start_span,
-)
-from conducto.core.runtime import use_run_context
+from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.gateway_models import DiscoveryQuery
+from conducto.core.run_context import use_run_context
 from conducto.core.telemetry import (
     SPAN_CAPABILITY_INVOKE,
     SPAN_MCP_SERVER,
     TRACE_SCHEMA_VERSION,
+    configure_in_memory_tracing,
+    current_trace_ids,
+    extract_trace_context,
+    inject_trace_context,
+    start_span,
 )
 from conducto.security import (
     AuditEmitter,
     AuthorizationContext,
     InMemoryAuditSink,
+    Principal,
     SecurityPipeline,
+    require_scope,
 )
 
 

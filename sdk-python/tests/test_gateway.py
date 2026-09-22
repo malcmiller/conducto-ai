@@ -7,30 +7,24 @@ from collections.abc import Callable
 import pytest
 from pydantic import BaseModel, Field
 
-from conducto import (
-    AgentRegistry,
-    BaseAgent,
-    DelegationBudget,
+from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.gateway import LocalAgentGateway
+from conducto.core.gateway_models import (
     DiscoveryQuery,
     GatewayFailureCode,
+    RegistrationLifecycle,
+    SelectionStatus,
+)
+from conducto.core.invocation_results import (
     InvocationAuthorizationFailure,
     InvocationBindingFailure,
     InvocationBudgetExhausted,
     InvocationStaleBinding,
     InvocationSuccess,
     InvocationTargetUnavailable,
-    LocalAgentGateway,
-    NoActiveRunContextError,
-    Principal,
-    RegistrationLifecycle,
-    Runtime,
-    SelectionStatus,
-    a2a_agent,
-    a2a_capability,
-    require_scope,
 )
-from conducto.core.runtime import use_run_context
-from conducto.security import AuthorizationContext
+from conducto.core.run_context import DelegationBudget, NoActiveRunContextError, use_run_context
+from conducto.security import AuthorizationContext, Principal, require_scope
 
 
 @a2a_agent(
@@ -492,5 +486,51 @@ def test_accepted_invocation_keeps_original_target_after_removal() -> None:
             result = await invocation
             assert isinstance(result, InvocationSuccess)
             assert result.value == "original"
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "agent_id",
+        "capability_id",
+        "schema_digest",
+        "registry_revision",
+        "registration_generation",
+        "issued_at",
+        "expires_at",
+        "nonce",
+        "signature",
+    ],
+)
+def test_every_binding_authority_field_is_authenticated_before_budget_reservation(
+    field: str,
+) -> None:
+    registry = AgentRegistry()
+    registry.register(AlphaSearch())
+    runtime = Runtime(agent_registry=registry)
+    budget = DelegationBudget(calls=1)
+    context = runtime.create_run_context(agent_id="Caller", delegation_budget=budget)
+
+    async def exercise() -> None:
+        with use_run_context(context):
+            selected = await context.gateway.lookup("AlphaSearch", "lookup")
+            assert selected.binding is not None
+            binding = selected.binding
+            current = getattr(binding, field)
+            replacement = (
+                current + 0.001
+                if isinstance(current, float)
+                else (current + 1 if isinstance(current, int) else "0" * 64)
+            )
+            tampered = dataclasses.replace(binding, **{field: replacement})
+            rejected = await context.gateway.invoke(tampered, {"query": "unused"})
+            assert isinstance(rejected, InvocationBindingFailure)
+            assert rejected.reason_code == GatewayFailureCode.INVALID_BINDING.value
+            assert budget.snapshot(current_depth=0, remaining_time=None).calls == 1
+            accepted = await context.gateway.invoke(binding, {"query": "original"})
+            assert isinstance(accepted, InvocationSuccess)
+            assert accepted.value == "alpha:original"
 
     asyncio.run(exercise())

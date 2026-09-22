@@ -3,15 +3,13 @@
 import asyncio
 
 from conducto import Runtime, get_run_context
-from conducto.core.run_context import RunContext as ContextRunContext
-from conducto.core.runtime import RunContext, use_run_context
+from conducto.core.run_context import RunContext, use_run_context
 
 
 def test_nested_run_contexts_restore_the_parent_context() -> None:
     parent = RunContext(run_id="parent", correlation_id="parent")
     child = RunContext(run_id="child", correlation_id="child")
 
-    assert RunContext is ContextRunContext
     with use_run_context(parent):
         assert get_run_context() is parent
         with use_run_context(child):

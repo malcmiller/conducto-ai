@@ -1,7 +1,8 @@
 # Conducto Python SDK quick start
 
 This guide proves the Milestone 1 local-agent flow from a clean checkout, using
-only the public `conducto` package API and deterministic `FakeModel` routing.
+the public application facade, explicit domain contracts, and deterministic
+`conducto.testing.FakeModel` routing.
 No network access, model downloads, or credentials are required.
 
 ## 1. Start from a clean checkout
@@ -71,7 +72,8 @@ uv run --no-project --with "$wheel" python examples/quickstart.py
 Expected output:
 
 ```text
-quickstart result: agent=InvoiceAgent capability=classify_invoice value={"amount": 1250.0, "approved": false, "decision": "review", "vendor_id": "vendor-42"} correlation_id=quickstart-local-001
+approval required: role=finance; granting local demo approval
+quickstart result: agent=InvoiceAgent capability=classify_invoice value={"amount": 6000.0, "approved": false, "decision": "review", "vendor_id": "vendor-42"} correlation_id=quickstart-local-001
 ```
 
 On Windows PowerShell, use:
@@ -110,9 +112,11 @@ invokes the selected local capability, receives an immutable
 `InvocationSuccess` envelope, and checks structured model/invocation logs under
 one caller-supplied correlation ID.
 
-The quickstart imports SDK names only from the public `conducto` package. It
-does not import `conducto.core`, contact live providers, read credentials, or
-depend on test-only packages.
+The quickstart imports application entry points from `conducto`, provider and
+invocation contracts from their `conducto.core` packages, and the packaged fake
+from `conducto.testing`. It registers the fake on a `ProviderRegistry` owned by
+the application's runtime. It does not contact live providers, read
+credentials, or depend on development-only packages.
 
 ## Troubleshooting
 

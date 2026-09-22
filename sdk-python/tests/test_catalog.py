@@ -108,6 +108,49 @@ class _Clock:
         return self.now
 
 
+@pytest.mark.parametrize(
+    "lifecycle",
+    [
+        CatalogLifecycleState.QUARANTINED,
+        CatalogLifecycleState.DISABLED,
+        CatalogLifecycleState.REVOKED,
+    ],
+)
+def test_admission_and_heartbeat_cannot_reactivate_a_blocked_registration(
+    lifecycle: CatalogLifecycleState,
+) -> None:
+    clock = _Clock()
+    catalog = AgentCatalog(clock=clock)
+    original = catalog.register_instance(_entry())
+    snapshot = catalog.snapshot()
+    catalog.set_lifecycle("org.demo", lifecycle)
+    clock.now = 10
+    updated = catalog.register_instance(_entry(instance_id="inst-2", card=_card(version="2.0.0")))
+    renewed = catalog.renew_lease("org.demo", "inst-1")
+
+    assert updated.lifecycle is lifecycle
+    assert updated.generation == original.generation + 1
+    assert renewed.last_heartbeat_at == 10
+    assert catalog.snapshot().agents == ()
+    assert snapshot.agents == (original,)
+    assert original.lifecycle is CatalogLifecycleState.ACTIVE
+    assert original.instances[0].last_heartbeat_at == 0
+    assert len(original.instances) == 1
+
+
+def test_rejected_admission_preserves_generation_leases_revision_and_snapshot() -> None:
+    catalog = AgentCatalog(clock=_Clock())
+    original = catalog.register_instance(_entry())
+    snapshot = catalog.snapshot()
+    with pytest.raises(CatalogValidationError, match="input schema"):
+        catalog.register_instance(
+            _entry(instance_id="rejected", card=_card(input_schema={"type": "string"}))
+        )
+    assert catalog.revision == snapshot.revision
+    assert catalog.get("org.demo") == original
+    assert catalog.snapshot() == snapshot
+
+
 def test_register_instance_admits_agent_and_capabilities() -> None:
     catalog = AgentCatalog(clock=_Clock())
     record = catalog.register_instance(_entry())

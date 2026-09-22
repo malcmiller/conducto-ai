@@ -8,6 +8,19 @@ or invokes a capability; that belongs to a future agent gateway that consumes
 catalog snapshots the same way `LocalAgentGateway` consumes `AgentRegistry`
 snapshots.
 
+## Package ownership
+
+Import catalog contracts from `conducto.core.catalog`. The package separates
+immutable public records and typed failures, admission-source providers,
+Agent Card/provenance validation, and the service that coordinates lifecycle,
+health, leases, and coherent snapshots. Provider loading produces candidate
+entries; it cannot bypass admission or publish partially validated state.
+Lease and lifecycle transitions remain serialized with registry mutation.
+
+The catalog package has no dependency on concrete model providers and never
+constructs a transport client or executes capabilities. A catalog snapshot is
+metadata, not authorization to invoke a target.
+
 ## Provider contract
 
 Any admission source implements `CatalogProvider`:
@@ -36,7 +49,12 @@ trust-policy reference, supported versions, transports, and a requested lease
 duration:
 
 ```python
-from conducto import AgentCatalog, CatalogEntry, DeploymentType, InMemoryCatalogProvider
+from conducto.core.catalog import (
+    AgentCatalog,
+    CatalogEntry,
+    DeploymentType,
+    InMemoryCatalogProvider,
+)
 
 entry = CatalogEntry(
     agent_id="org-a.finance.payout",

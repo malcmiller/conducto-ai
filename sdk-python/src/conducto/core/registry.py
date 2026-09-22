@@ -41,7 +41,6 @@ class AgentRegistry:
 
     def __init__(self) -> None:
         self.agents: dict[str, BaseAgent] = {}
-        self.capabilities: dict[str, BaseAgent] = {}
         self.lock = threading.RLock()
         self._registrations: dict[str, _Registration] = {}
         self._capability_index: dict[str, dict[str, _Registration]] = {}
@@ -70,11 +69,6 @@ class AgentRegistry:
         """Return all registered agents in sorted order."""
         with self.lock:
             return tuple(self.agents[name] for name in sorted(self.agents))
-
-    def registered_capabilities(self) -> dict[str, BaseAgent]:
-        """Return a deterministic compatibility view of capability owners."""
-        with self.lock:
-            return dict(sorted(self.capabilities.items()))
 
     def capability_providers(self, capability_id: str) -> tuple[BaseAgent, ...]:
         """Return every provider of a capability in stable agent order."""
@@ -146,7 +140,6 @@ class AgentRegistry:
             self._removed.discard(agent_name)
             for capability_name in sorted(agent.capabilities):
                 self._capability_index.setdefault(capability_name, {})[agent_name] = registration
-            self._refresh_legacy_capabilities()
             self._revision += 1
             emit_event(
                 AGENT_REGISTERED,
@@ -243,7 +236,6 @@ class AgentRegistry:
         with self.lock:
             self._removed.update(self.agents)
             self.agents.clear()
-            self.capabilities.clear()
             self._registrations.clear()
             self._capability_index.clear()
             self._revision += 1
@@ -318,7 +310,7 @@ class AgentRegistry:
             return registration.agent, registration.descriptor
 
     def routing_metadata(self) -> list[dict[str, Any]]:
-        """Build legacy routing metadata from one coherent agent snapshot."""
+        """Build orchestrator routing metadata from one coherent agent snapshot."""
         with self.lock:
             agents = tuple(
                 registration.agent
@@ -352,12 +344,6 @@ class AgentRegistry:
         emit_event(AGENT_DISCOVERED, level=10, outcome="success", agent_count=len(metadata))
         return metadata
 
-    def remove_mapping(self, agent: BaseAgent) -> None:
-        """Compatibility helper that removes a mapping under the registry lock."""
-        with self.lock:
-            self._remove_mapping_locked(agent)
-            self._revision += 1
-
     def _remove_mapping_locked(self, agent: BaseAgent) -> None:
         agent_id = next(
             (name for name, existing in self.agents.items() if existing is agent),
@@ -370,7 +356,6 @@ class AgentRegistry:
             providers.pop(agent_id, None)
             if not providers:
                 del self._capability_index[capability_id]
-        self._refresh_legacy_capabilities()
 
     def _replace_registration_locked(
         self,
@@ -380,13 +365,6 @@ class AgentRegistry:
         self._registrations[agent_id] = registration
         for capability_id in registration.agent.capabilities:
             self._capability_index[capability_id][agent_id] = registration
-
-    def _refresh_legacy_capabilities(self) -> None:
-        self.capabilities.clear()
-        for capability_id, providers in sorted(self._capability_index.items()):
-            if providers:
-                first = min(providers)
-                self.capabilities[capability_id] = providers[first].agent
 
     def _require_registration(self, agent_id: str) -> _Registration:
         registration = self._registrations.get(agent_id)

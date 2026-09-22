@@ -5,12 +5,12 @@ import asyncio
 from conducto import (
     AgentRegistry,
     BaseAgent,
-    InvocationSuccess,
     Runtime,
     a2a_agent,
     a2a_capability,
     require_run_context,
 )
+from conducto.core.invocation_results import InvocationSuccess
 
 
 @a2a_agent(name="WeatherAgent", version="1.0.0", description="Provides local weather.")

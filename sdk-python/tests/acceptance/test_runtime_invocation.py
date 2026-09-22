@@ -2,7 +2,6 @@
 
 import asyncio
 import threading
-import time
 
 import pytest
 from pydantic import BaseModel
@@ -10,25 +9,22 @@ from pydantic import BaseModel
 from conducto import (
     AgentModelConfig,
     BaseAgent,
-    ChatMessage,
-    FakeModel,
-    InvocationSuccess,
-    InvocationTimeout,
-    ModelConfiguration,
     ModelRequirement,
-    ModelResolutionSource,
-    NoActiveRunContextError,
     OrchestratorAgent,
-    ProviderRegistry,
     RunConfig,
     Runtime,
     RuntimeConfig,
-    Usage,
     a2a_agent,
     a2a_capability,
     get_run_context,
     require_run_context,
 )
+from conducto.core.invocation_results import InvocationSuccess, InvocationTimeout
+from conducto.core.model_config import ModelResolutionSource
+from conducto.core.provider import ChatMessage, ModelConfiguration, ProviderResult, Usage
+from conducto.core.provider_registry import ProviderRegistry
+from conducto.core.runtime_errors import NoActiveRunContextError
+from conducto.testing import FakeModel
 
 pytestmark = pytest.mark.acceptance
 
@@ -77,16 +73,22 @@ def _runtime(
 ) -> tuple[Runtime, FakeModel, FakeModel]:
     registry = ProviderRegistry()
     router = FakeModel(
-        {
-            "agent_id": "AuditAgent",
-            "capability_id": "draft",
-            "arguments": {"subject": "annual controls"},
-        },
-        usage=Usage(input_tokens=5, output_tokens=2, total_tokens=7),
+        ProviderResult(
+            structured={
+                "agent_id": "AuditAgent",
+                "capability_id": "draft",
+                "arguments": {"subject": "annual controls"},
+            },
+            usage=Usage(input_tokens=5, output_tokens=2, total_tokens=7),
+            accepted=True,
+        ),
     )
     worker = FakeModel(
-        {"report": worker_report},
-        usage=Usage(input_tokens=8, output_tokens=3, total_tokens=11),
+        ProviderResult(
+            structured={"report": worker_report},
+            usage=Usage(input_tokens=8, output_tokens=3, total_tokens=11),
+            accepted=True,
+        ),
     )
     registry.register_client(
         "router",
@@ -156,12 +158,18 @@ def test_concurrent_standalone_and_orchestrated_runs_are_isolated() -> None:
     async def exercise() -> None:
         runtime, _router, _worker = _runtime()
         first = FakeModel(
-            {"report": "first"},
-            usage=Usage(input_tokens=1, output_tokens=2, total_tokens=3),
+            ProviderResult(
+                structured={"report": "first"},
+                usage=Usage(input_tokens=1, output_tokens=2, total_tokens=3),
+                accepted=True,
+            ),
         )
         second = FakeModel(
-            {"report": "second"},
-            usage=Usage(input_tokens=4, output_tokens=5, total_tokens=9),
+            ProviderResult(
+                structured={"report": "second"},
+                usage=Usage(input_tokens=4, output_tokens=5, total_tokens=9),
+                accepted=True,
+            ),
         )
         runtime.provider_registry.register_client(
             "first",
@@ -238,7 +246,7 @@ def test_model_resolution_precedence_uses_public_configuration_types() -> None:
     for reference in ("runtime", "agent", "run", "call"):
         registry.register_client(
             reference,
-            FakeModel({"unused": reference}),
+            FakeModel(ProviderResult(structured={"unused": reference}, accepted=True)),
             ModelConfiguration(provider=f"{reference}-provider", model=f"{reference}-model"),
         )
     runtime = Runtime(provider_registry=registry, config=RuntimeConfig(default_model="runtime"))
@@ -423,30 +431,46 @@ def test_runtime_preserves_sync_capability_lock_after_timeout() -> None:
     active = 0
     maximum_active = 0
     guard = threading.Lock()
+    release = threading.Event()
+    started = asyncio.Event()
+    finished = asyncio.Event()
+    loop: asyncio.AbstractEventLoop
 
     class LockAgent(BaseAgent):
         """Lock test agent."""
 
         @a2a_capability(name="work", description="Does blocking work.")
-        def work(self, delay: float) -> str:
+        def work(self, block: bool) -> str:
             nonlocal active, maximum_active
             with guard:
                 active += 1
                 maximum_active = max(maximum_active, active)
-            time.sleep(delay)
+            if block:
+                loop.call_soon_threadsafe(started.set)
+                release.wait()
             with guard:
                 active -= 1
+            if block:
+                loop.call_soon_threadsafe(finished.set)
             return "done"
 
     async def exercise() -> None:
+        nonlocal loop
+        loop = asyncio.get_running_loop()
         runtime = Runtime()
         agent = LockAgent()
-        first = await runtime.invoke(agent, "work", {"delay": 0.04}, timeout=0.001)
-        second = await runtime.invoke(agent, "work", {"delay": 0}, timeout=0.001)
-        assert isinstance(first, InvocationTimeout)
-        assert isinstance(second, InvocationTimeout)
-        await asyncio.sleep(0.06)
-        final = await runtime.invoke(agent, "work", {"delay": 0})
+        pending = asyncio.create_task(runtime.invoke(agent, "work", {"block": True}, timeout=0.1))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=1)
+            first = await pending
+            second = await runtime.invoke(agent, "work", {"block": False}, timeout=0.001)
+            assert isinstance(first, InvocationTimeout)
+            assert isinstance(second, InvocationTimeout)
+        finally:
+            release.set()
+            await pending
+        await asyncio.wait_for(finished.wait(), timeout=1)
+        final = await runtime.invoke(agent, "work", {"block": False})
         assert isinstance(final, InvocationSuccess)
 
     asyncio.run(exercise())

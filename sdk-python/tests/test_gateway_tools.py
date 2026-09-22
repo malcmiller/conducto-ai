@@ -3,20 +3,16 @@ import json
 
 import pytest
 
-from conducto import (
-    AgentRegistry,
-    BaseAgent,
+from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
+from conducto.core.gateway_models import GatewayFailureCode
+from conducto.core.gateway_tools import (
     CapabilityUse,
     CapabilityUseRequirement,
-    GatewayFailureCode,
-    Runtime,
     ToolboxPolicy,
     ToolboxStatus,
-    a2a_agent,
-    a2a_capability,
     build_toolbox,
 )
-from conducto.core.runtime import use_run_context
+from conducto.core.run_context import use_run_context
 
 
 @a2a_agent(name="AlphaSearch", version="1.2.0", description="Search metadata.", tags=("search",))

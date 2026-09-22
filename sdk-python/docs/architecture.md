@@ -26,23 +26,98 @@ flowchart TD
     I --> X[Typed invocation result]
 ```
 
+## Python package boundaries
+
+`conducto` is a small application facade, not an inventory of every SDK type.
+`conducto.core` is a namespace. Domain packages publish their own contracts;
+implementation helpers are not re-exported through unrelated facades.
+`Runtime` composes collaborators rather than acting as an import hub.
+
+```mermaid
+flowchart TD
+    APP[conducto: application entry points] --> RT[core.runtime: composition]
+    RT --> INV[core.invocation: governed execution]
+    RT --> CTX[core.run_context: per-run state]
+    RT --> MG[core.model_gateway: model calls]
+    MG --> PC[core.provider: typed contracts]
+    RT --> PR[core.provider_registry: registration and ownership]
+    PR --> PC
+    PA[providers: vendor adaptation] --> PC
+    PA --> SH[providers private shared infrastructure]
+    SH --> HTTP[Bounded transport and safe errors]
+    SH --> NORM[Schema traversal, deadlines, JSON and tool normalization]
+    RT --> GW[core.gateway: discovery and binding]
+    GW --> AR[core.registry: local facts]
+    CAT[core.catalog: remote facts] --> ADM[Admission, provenance and leases]
+    DEL[core.delegation: bounded execution loop] --> GW
+    DEL --> MG
+    TEST[conducto.testing: fakes and conformance] --> PC
+```
+
+Provider contracts separate message/content models, result/usage models,
+typed errors, native tool channels, structured-schema validation, decision
+parsing, capability validation, and retry/deadline handling. A provider
+adapter consumes these same contracts; it does not create a second validation
+or error path.
+
+| Package                  | Implementation modules                                                                                                                          |
+|--------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `core.provider`          | `messages`, `configuration`, `results`, `errors`, `structured`, `tools`, `decisions`, `protocol`, `execution`                                   |
+| `core.provider_registry` | `configuration`, `factories`, `registration`, `bindings`, `availability`, `ownership`, `lifecycle`, `cleanup`, `snapshots`, `state`, `registry` |
+| Runtime composition      | `runtime` facade, `runtime_context` construction/attenuation, `runtime_invocation` authorization/approval wiring, `invocation` execution        |
+| `core.gateway`           | `_contracts`, `_local`, `_discovery`, `_bindings`, `_schema`, `_projection`                                                                     |
+| `core.catalog`           | `_models`, `_providers`, `_admission`, `_lifecycle`                                                                                             |
+| `core.delegation`        | `_models`, `_fallback`, `_results`, `_arguments`, `_loop`                                                                                       |
+| `providers`              | Vendor-facing adapters over shared private `_config`, `_http`, `_lifecycle`, `_schema`, `_response`, `_tool_cache`                              |
+| `conducto.testing`       | `fake_model` and provider conformance helpers, separate from production contracts                                                               |
+
+The registry's implementation modules share one synchronization domain.
+They are collaborators of `ProviderRegistry`, not alternative registries.
+Use the package-level registry contracts for application imports; internal
+state, leases, and mutation reservations remain implementation details.
+
+First-party adapters own asynchronous HTTP pools through shared lifecycle
+coordination. Cancelling a shutdown waiter does not abandon an in-progress
+pool close; later shutdown calls await that same attempt. Cleanup failures
+remain failures rather than turning an already-closed HTTPX state flag into
+a successful result.
+
+Provider registration separates factory allowlisting, immutable model
+bindings, bounded availability evaluation, identity-based client ownership,
+leases/retirement/cleanup, and credential-free snapshots. The registry lock
+protects publication and lifecycle decisions; construction, health predicates,
+and shutdown callbacks do not execute while holding it.
+
+Gateway schema compatibility and model-safe projection are distinct from
+binding authorization. Catalog providers load candidate facts; admission
+validates Agent Cards and provenance before lifecycle state becomes visible.
+Delegation models and result mapping are separate from the execution loop;
+fallback is explicit policy, not an exception-swallowing branch.
+
+No wire contract changes are intended by these Python module moves. Golden
+schemas and result envelopes remain the conformance boundary. Pre-v1 API
+cleanup removes the generic `ProviderRegistry.register()`, runtime import
+aliases, and agent-owned raw provider configuration. See the
+[public import map](./sdk-reference.md) for preferred imports.
+
 ## Responsibility boundaries
 
-| Component | Owns | Does not own |
-|---|---|---|
-| `BaseAgent` and decorators | Agent metadata, capability declarations, agent defaults | Global registration, provider clients, transport |
-| `registration.py` | Reflection of decorated methods and registration metadata | Runtime agent discovery |
-| `AgentRegistry` | Local agent instances, capability indexes, lifecycle, health, immutable snapshots | Policy decisions, model calls, capability execution |
-| `AgentGateway` | Caller-aware discovery, deterministic selection, opaque bindings, invocation revalidation | Mutable registration state, provider construction |
-| `OrchestratorAgent` | Application-facing local registry facade and optional model-based top-level routing | Nested delegation state or provider lifecycle |
-| `Runtime` | Run context, model resolution, gateway construction, security, invocation, provenance | Agent metadata declaration |
-| `ProviderRegistry` | Provider factories, clients, ownership metadata, model-reference bindings | Selecting a model for a particular call |
-| `ModelResolver` | Call/run/agent/runtime precedence, policy, provider capability checks | Provider execution |
-| `ModelGateway` | Invocation-scoped provider calls, deadlines, cancellation, typed output, usage | Long-lived provider ownership |
-| `run_delegation` | Bounded model/tool loop and terminal outcome | Discovery authority or direct registry access |
-| `conducto.mcp` | MCP export policy, deterministic tool naming, schema projection, result mapping, stdio lifecycle | Capability declaration, validation, authorization, MCP framing |
-| `conducto.core.telemetry` | Optional Conducto span names, safe attributes, W3C trace-context helpers, and test tracing helper | Application tracer-provider/exporter lifecycle or auto-instrumentation |
-| `conducto.core.otel_logs` | Optional bridge attaching an application-owned `LoggerProvider` to `conducto` events, bounded/redacted attribute mapping, and test in-memory helper | Global provider/handler/exporter installation, security audit delivery |
+| Component                  | Owns                                                                                                                                                | Does not own                                                           |
+|----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------|
+| `BaseAgent` and decorators | Agent metadata, capability declarations, agent defaults                                                                                             | Global registration, provider clients, transport                       |
+| `registration.py`          | Reflection of decorated methods and registration metadata                                                                                           | Runtime agent discovery                                                |
+| `AgentRegistry`            | Local agent instances, capability indexes, lifecycle, health, immutable snapshots                                                                   | Policy decisions, model calls, capability execution                    |
+| `AgentGateway`             | Caller-aware discovery, deterministic selection, opaque bindings, invocation revalidation                                                           | Mutable registration state, provider construction                      |
+| `OrchestratorAgent`        | Application-facing local registry facade and optional model-based top-level routing                                                                 | Nested delegation state or provider lifecycle                          |
+| `Runtime`                  | Run context, model resolution, gateway construction, security, invocation, provenance                                                               | Agent metadata declaration                                             |
+| `ProviderRegistry`         | Provider factories, clients, ownership metadata, model-reference bindings                                                                           | Selecting a model for a particular call                                |
+| `ModelResolver`            | Call/run/agent/runtime precedence, policy, provider capability checks                                                                               | Provider execution                                                     |
+| `ModelGateway`             | Invocation-scoped provider calls, deadlines, cancellation, typed output, usage                                                                      | Long-lived provider ownership                                          |
+| `run_delegation`           | Bounded model/tool loop and terminal outcome                                                                                                        | Discovery authority or direct registry access                          |
+| `conducto.mcp`             | MCP export policy, deterministic tool naming, schema projection, result mapping, stdio lifecycle                                                    | Capability declaration, validation, authorization, MCP framing         |
+| `conducto.core.telemetry`  | Optional Conducto span names, safe attributes, W3C trace-context helpers, and test tracing helper                                                   | Application tracer-provider/exporter lifecycle or auto-instrumentation |
+| `conducto.core.otel_logs`  | Optional bridge attaching an application-owned `LoggerProvider` to `conducto` events, bounded/redacted attribute mapping, and test in-memory helper | Global provider/handler/exporter installation, security audit delivery |
+| `conducto.adapters`        | Optional SDK requirements and allowlisted external adapter metadata/loading                                                                         | Agent admission, provider execution, implicit plugin imports           |
 
 The similarly named registries solve different problems:
 `AgentRegistry` indexes callable agents and capabilities, while
@@ -114,7 +189,7 @@ log records with trace/span correlation from the active context. The
 application owns the provider, exporter, resource, and shutdown; the bridge
 owns only the handler it creates, applies bounded/redacted attribute mapping
 before any record reaches a processor or exporter, and never blocks
-invocation on exporter failures. It is entirely independent from the Story
+invocation on exporter failures. It is entirely independent of the Story
 2.3 security audit sink: accepting a log record here never satisfies
 mandatory audit delivery. See [Python logging](./logging.md).
 
@@ -145,3 +220,13 @@ For the details behind each layer, continue with
 [orchestration and delegation](./orchestration-and-delegation.md),
 [providers and models](./providers-and-models.md), and
 [runtime and invocation](./runtime-and-invocation.md).
+
+## Roadmap order
+
+The repository's [canonical roadmap](../../README.md#roadmap) is Python local
+flow (1), security and governance (2), chaining and local gateway (3), A2A
+network transport (4), exporters/observability/packaging (5), model runtimes
+and Microsoft Foundry (6), hybrid deployment and workflows (7), .NET parity
+and cross-language conformance (8), then cross-organization federation (9).
+Python execution and wire contracts precede .NET implementations; local
+development never requires Foundry or federation infrastructure.

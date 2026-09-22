@@ -26,7 +26,7 @@ protected arguments, or tracebacks.
 ## MCP stdio identity
 
 MCP export never relaxes these rules. An `McpStdioServer` requires an explicit
-`Principal` or principal resolver, so there is no anonymous privileged default
+`Principal` or principal resolver, so there is no anonymous-privileged default
 and protected capabilities fail closed without identity. `tools/list` returns
 only policy-admitted capabilities eligible for that principal, every
 `tools/call` runs through `Runtime.invoke()` with the same authorization,

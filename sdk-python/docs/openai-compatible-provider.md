@@ -76,13 +76,27 @@ Python client does not expose a maximum response-body limit. Preconstructed
 clients (including a real `openai.AsyncOpenAI` instance) are also supported
 for applications that want their own official-client lifecycle.
 
+The adapter shares private bounded HTTP, schema traversal, deadline, and
+normalization helpers with Ollama. Configured credentials become actual
+outbound bearer authorization; only diagnostics are redacted. Diagnostic
+events never publish credentials, authorization headers, response bodies, or
+underlying exception text. Model contracts live in `conducto.core.provider`;
+registry and construction contracts live in `conducto.core.provider_registry`.
+
+Configuration-owned HTTP clients have asynchronous lifetimes: use
+`await provider.aclose()` or runtime-managed registry shutdown. There is no
+synchronous `close()` shortcut that could leave the connection pool open.
+Borrowed clients remain application-owned. The `openai` extra explicitly
+declares the HTTPX transport dependency.
+
 ## Registration
 
 Configuration-owned registration keeps endpoint, authentication, TLS, proxy,
 transport, and model defaults single-sourced in `ProviderClientConfig`:
 
 ```python
-from conducto import ModelConfiguration, ProviderClientConfig, ProviderRegistry
+from conducto.core.provider import ModelConfiguration
+from conducto.core.provider_registry import ProviderClientConfig, ProviderRegistry
 from conducto.providers import openai_compatible_provider_factory
 
 registry = ProviderRegistry()
@@ -110,7 +124,8 @@ client:
 
 ```python
 import openai
-from conducto import ModelConfiguration, ProviderRegistry
+from conducto.core.provider import ModelConfiguration
+from conducto.core.provider_registry import ProviderRegistry
 from conducto.providers import OpenAICompatibleProvider
 
 official_client = openai.AsyncOpenAI(base_url="http://localhost:1234/v1", api_key="not-needed")

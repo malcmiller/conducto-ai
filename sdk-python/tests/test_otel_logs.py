@@ -8,16 +8,18 @@ from typing import Any
 
 import pytest
 
-from conducto import (
+from conducto.core.logging import emit_event, log_context
+from conducto.core.otel_logs import (
+    LOG_MAPPING_SCHEMA_VERSION,
     OpenTelemetryLogBridge,
     configure_in_memory_logs,
+)
+from conducto.core.telemetry import (
+    SPAN_CAPABILITY_INVOKE,
+    TRACE_SCHEMA_VERSION,
     configure_in_memory_tracing,
-    emit_event,
-    log_context,
     start_span,
 )
-from conducto.core.otel_logs import LOG_MAPPING_SCHEMA_VERSION
-from conducto.core.telemetry import SPAN_CAPABILITY_INVOKE, TRACE_SCHEMA_VERSION
 
 
 def _reset_conducto_logger() -> None:

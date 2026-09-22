@@ -7,16 +7,10 @@ import asyncio
 import pytest
 from examples.agent_chaining import DocumentationAgent, build_application
 
-from conducto import (
-    BaseAgent,
-    CapabilityUse,
-    InvocationSuccess,
-    ToolboxPolicy,
-    a2a_agent,
-    a2a_capability,
-    build_toolbox,
-)
-from conducto.core.runtime import use_run_context
+from conducto import BaseAgent, a2a_agent, a2a_capability
+from conducto.core.gateway_tools import CapabilityUse, ToolboxPolicy, build_toolbox
+from conducto.core.invocation_results import InvocationSuccess
+from conducto.core.run_context import use_run_context
 
 pytestmark = pytest.mark.acceptance
 
