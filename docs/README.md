@@ -13,7 +13,8 @@ Read the five short pages in [Understanding Conducto](./understanding/README.md)
 2. [Agents, capabilities, and orchestrators](./understanding/agents-capabilities-orchestrators.md)
 3. [How agents communicate](./understanding/how-agents-communicate.md)
 4. [Security in plain English](./understanding/security-in-plain-english.md)
-5. [Where agents can run](./understanding/where-agents-run.md)
+5. [Authentication, authorization, and scopes](./understanding/authentication-and-scopes.md)
+6. [Where agents can run](./understanding/where-agents-run.md)
 
 These pages avoid implementation detail until the underlying idea is clear.
 

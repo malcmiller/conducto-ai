@@ -1,5 +1,8 @@
 # Where agents can run
 
+Previous:
+[authentication, authorization, and scopes](./authentication-and-scopes.md).
+
 ## Start with the simplest topology
 
 Begin with all agents in one Python process. It is faster to develop, easier to

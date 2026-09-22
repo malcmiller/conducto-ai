@@ -4,6 +4,10 @@ Capability authorization is enforced in `conducto.security`, before capability
 business logic and independently of any transport. Use `Principal` and
 `AuthorizationContext` to pass authenticated identity facts at invocation time.
 
+For a progressive explanation of authentication, roles, exact scope matching,
+capability allowlists, admin authority, and approvals, start with
+[Authentication, authorization, and scopes](./understanding/authentication-and-scopes.md).
+
 Scopes are opaque, case-sensitive values. Multiple declarations are cumulative
 and every scope must be present. `require_approval(role, condition)` accepts an
 application callback receiving the immutable context and validated argument
@@ -22,6 +26,27 @@ single-process applications. Production applications own durable persistence,
 distributed locking, authentication, and transport integration. Approval
 payloads intentionally do not contain credentials, raw tokens, claims,
 protected arguments, or tracebacks.
+
+## Roles, admin authority, and capability allowlists
+
+Roles are immutable application-defined identity facts. Conducto does not map
+roles to scopes and does not treat `"admin"`, `"*"`, or namespace patterns as
+scope wildcards. A principal satisfies `require_scope` only when every exact
+required value is present in `Principal.scopes`. Applications that grant
+administrators all current permissions must explicitly map trusted identity
+claims to that complete scope set and update it when new scopes are introduced.
+
+`allowed_capabilities` is independent of scopes. `None` means no additional
+allowlist restriction, an empty set permits no gateway/A2A capability, and a
+non-empty set admits matching capability IDs or exact
+`"AgentId:capability_id"` values. Resolver-owned and request-owned A2A
+allowlists are intersected. Nested contexts inherit or reduce their parent's
+roles, scopes, and capability allowlist; they cannot amplify them.
+
+Admin scopes do not bypass approvals, trust policy, deadlines, cancellation,
+delegation budgets, or required audit delivery. An approval role names the
+role needed to approve a challenge; it does not make an invoking principal
+with the same role automatically approved.
 
 ## MCP stdio identity
 

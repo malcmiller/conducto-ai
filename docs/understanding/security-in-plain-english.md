@@ -68,4 +68,6 @@ arguments.
 See [security and governance](../security-and-governance.md) for exact
 contracts.
 
-Next: [where agents can run](./where-agents-run.md).
+Next: understand the difference between identity, roles, exact scopes,
+capability allowlists, approvals, and admin authority in
+[authentication, authorization, and scopes](./authentication-and-scopes.md).
