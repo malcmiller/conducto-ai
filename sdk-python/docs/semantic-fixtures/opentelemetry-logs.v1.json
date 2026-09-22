@@ -1,0 +1,62 @@
+{
+  "schema_version": "1",
+  "description": "Language-neutral mapping from Conducto's versioned diagnostic events (conducto.core.logging) to OpenTelemetry Logs Data Model fields, produced by conducto.core.otel_logs.OpenTelemetryLogBridge.",
+  "body_and_event_name_policy": "body and event_name are both set to the stable, versioned Conducto event name; neither ever contains a formatted message, exception text, or payload.",
+  "trace_correlation": "trace_id/span_id are derived by the OpenTelemetry SDK from the active context at emission time; they are zero when no span is active, and are never fabricated by Conducto.",
+  "excluded_by_default": [
+    "credentials",
+    "tokens",
+    "certificates",
+    "prompts",
+    "model responses",
+    "capability arguments/results",
+    "approval content",
+    "complete audit payloads",
+    "exception messages",
+    "tracebacks"
+  ],
+  "severity_mapping": [
+    {"python_level": "DEBUG", "severity_number": 5, "severity_text": "DEBUG"},
+    {"python_level": "INFO", "severity_number": 9, "severity_text": "INFO"},
+    {"python_level": "WARNING", "severity_number": 13, "severity_text": "WARN"},
+    {"python_level": "ERROR", "severity_number": 17, "severity_text": "ERROR"},
+    {"python_level": "CRITICAL", "severity_number": 21, "severity_text": "FATAL"}
+  ],
+  "attributes": [
+    {"conducto_field": "schema_version", "otel_attribute": "conducto.schema_version"},
+    {"conducto_field": "event", "otel_attribute": "conducto.event"},
+    {"conducto_field": "outcome", "otel_attribute": "conducto.outcome"},
+    {"conducto_field": "correlation_id", "otel_attribute": "conducto.correlation_id"},
+    {"conducto_field": "run_id", "otel_attribute": "conducto.run_id"},
+    {"conducto_field": "agent_id", "otel_attribute": "conducto.agent_id"},
+    {"conducto_field": "capability_id", "otel_attribute": "conducto.capability_id"},
+    {"conducto_field": "duration_ms", "otel_attribute": "conducto.duration_ms"},
+    {"conducto_field": "error_category", "otel_attribute": "conducto.error_category"},
+    {"conducto_field": "provider", "otel_attribute": "conducto.provider"},
+    {"conducto_field": "model_reference", "otel_attribute": "conducto.model_reference"},
+    {"conducto_field": "resolution_source", "otel_attribute": "conducto.resolution_source"},
+    {"conducto_field": "agent_count", "otel_attribute": "conducto.agent_count"},
+    {"conducto_field": "input_tokens", "otel_attribute": "conducto.input_tokens"},
+    {"conducto_field": "output_tokens", "otel_attribute": "conducto.output_tokens"},
+    {"conducto_field": "total_tokens", "otel_attribute": "conducto.total_tokens"},
+    {"conducto_field": "loop_id", "otel_attribute": "conducto.loop_id"},
+    {"conducto_field": "turn", "otel_attribute": "conducto.turn"},
+    {"conducto_field": "tool_call_id", "otel_attribute": "conducto.tool_call_id"},
+    {"conducto_field": "snapshot_revision", "otel_attribute": "conducto.snapshot_revision"}
+  ],
+  "events": [
+    {"event": "conducto.agent.registered.v1", "default_level": "INFO"},
+    {"event": "conducto.agent.discovered.v1", "default_level": "DEBUG"},
+    {"event": "conducto.model.selected.v1", "default_level": "INFO"},
+    {"event": "conducto.model.usage_recorded.v1", "default_level": "INFO"},
+    {"event": "conducto.delegation.turn_started.v1", "default_level": "INFO"},
+    {"event": "conducto.delegation.tool_completed.v1", "default_level": "INFO"},
+    {"event": "conducto.delegation.completed.v1", "default_level": "INFO"},
+    {"event": "conducto.capability.arguments_validated.v1", "default_level": "INFO"},
+    {"event": "conducto.capability.invocation_started.v1", "default_level": "INFO"},
+    {"event": "conducto.capability.invocation_completed.v1", "default_level": "INFO"},
+    {"event": "conducto.capability.invocation_failed.v1", "default_level": "INFO|WARNING|ERROR"},
+    {"event": "conducto.capability.invocation_timed_out.v1", "default_level": "WARNING"},
+    {"event": "conducto.capability.invocation_cancelled.v1", "default_level": "INFO"}
+  ]
+}
