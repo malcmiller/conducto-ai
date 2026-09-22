@@ -183,14 +183,41 @@ class SecurityPipeline:
         Existing synchronous callers may retain ``check``; runtime invocation
         uses this method, so required audit acceptance is enforced before work.
         """
-        result = self.check(
-            target,
-            context,
-            arguments,
-            agent_id=agent_id,
-            capability_id=capability_id,
-            approved_approval_id=approved_approval_id,
+        from conducto.core.telemetry import (
+            SPAN_SECURITY_APPROVAL,
+            SPAN_SECURITY_AUTHORIZE,
+            start_span,
         )
+
+        span_name = (
+            SPAN_SECURITY_APPROVAL if approved_approval_id is not None else SPAN_SECURITY_AUTHORIZE
+        )
+        with start_span(
+            span_name,
+            attributes={
+                "conducto.agent.id": agent_id,
+                "conducto.capability.id": capability_id,
+                "conducto.task.id": context.task_id if context else "",
+                "conducto.correlation_id": context.correlation_id if context else "",
+            },
+        ) as span:
+            result = self.check(
+                target,
+                context,
+                arguments,
+                agent_id=agent_id,
+                capability_id=capability_id,
+                approved_approval_id=approved_approval_id,
+            )
+            if result.allowed:
+                span.set_outcome("success")
+            elif result.challenge is not None:
+                span.set_outcome("approval_required", reason=result.challenge.reason_code)
+            else:
+                span.set_outcome(
+                    "denied",
+                    reason=getattr(result.error, "reason_code", "authorization_denied"),
+                )
         if self.audit_emitter is None:
             return result
         guardrails = discover_guardrails(target)
@@ -444,6 +471,9 @@ class SecurityPipeline:
         if self.audit_emitter is None:
             return
         principal = context.principal if context is not None else None
+        from conducto.core.telemetry import current_trace_ids
+
+        trace_ids = current_trace_ids()
         category = (
             AuditCategory.AUTHORIZATION
             if name.value.startswith("security.authorization")
@@ -468,6 +498,8 @@ class SecurityPipeline:
                 policy_id="conducto.guardrails",
                 policy_version=policy_version,
                 correlation_id=context.correlation_id if context else "",
+                trace_id=trace_ids.trace_id if trace_ids is not None else "",
+                span_id=trace_ids.span_id if trace_ids is not None else "",
                 resource=f"capability:{agent_id}:{capability_id}",
                 severity=(
                     AuditSeverity.ERROR

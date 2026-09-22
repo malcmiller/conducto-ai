@@ -1,0 +1,18 @@
+{
+  "schema_version": "1",
+  "spans": [
+    {"name": "conducto.gateway.discover", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.transport"]},
+    {"name": "conducto.gateway.invoke", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.transport"]},
+    {"name": "conducto.mcp.server", "kind": "server", "required_attributes": ["conducto.trace_schema_version", "conducto.protocol", "conducto.transport"]},
+    {"name": "conducto.mcp.tools.list", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.protocol", "conducto.transport"]},
+    {"name": "conducto.mcp.tools.call", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.protocol", "conducto.transport"]},
+    {"name": "conducto.a2a.client", "kind": "client", "required_attributes": ["conducto.trace_schema_version", "conducto.protocol", "conducto.transport"]},
+    {"name": "conducto.a2a.server", "kind": "server", "required_attributes": ["conducto.trace_schema_version", "conducto.protocol", "conducto.transport"]},
+    {"name": "conducto.auth.exchange", "kind": "internal", "required_attributes": ["conducto.trace_schema_version"]},
+    {"name": "conducto.security.authorize", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.agent.id", "conducto.capability.id"]},
+    {"name": "conducto.security.approval", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.agent.id", "conducto.capability.id"]},
+    {"name": "conducto.model.complete", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.model.provider", "conducto.model.reference"]},
+    {"name": "conducto.capability.invoke", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.agent.id", "conducto.capability.id"]},
+    {"name": "conducto.delegation.turn", "kind": "internal", "required_attributes": ["conducto.trace_schema_version", "conducto.delegation.loop_id", "conducto.delegation.turn"]}
+  ]
+}

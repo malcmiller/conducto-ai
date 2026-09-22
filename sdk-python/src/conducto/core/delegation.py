@@ -61,6 +61,7 @@ from .run_context import (
     aggregate_usage,
 )
 from .runtime_errors import ModelResolutionError
+from .telemetry import SPAN_DELEGATION_TURN, start_span
 
 __all__ = [
     "DelegationConfig",
@@ -366,31 +367,41 @@ async def run_delegation(
                 )
             snapshot = toolbox.snapshot
             model_turns += 1
-            emit_event(
-                DELEGATION_TURN_STARTED,
-                outcome="success",
-                loop_id=loop_id,
-                turn=model_turns,
-                snapshot_revision=snapshot.registry_revision,
-            )
-
             try:
-                model_call = await context.models.require(config.model).complete(
-                    history,
-                    structured_output=build_model_decision_schema(response_type),
-                    tools=snapshot.as_provider_tools(),
-                    tool_results=tuple(
-                        ToolResultMessage(
-                            call_id=result.call_id,
-                            status=result.status.value,
-                            result=result.to_dict(),
-                        )
-                        for result in results
-                    ),
-                    effective_deadline=deadline,
-                    purpose="delegation_turn",
-                    clock=clock,
-                )
+                with start_span(
+                    SPAN_DELEGATION_TURN,
+                    attributes={
+                        "conducto.agent.id": context.agent_id,
+                        "conducto.correlation_id": context.correlation_id,
+                        "conducto.run.id": context.run_id,
+                        "conducto.delegation.loop_id": loop_id,
+                        "conducto.delegation.turn": model_turns,
+                    },
+                ) as turn_span:
+                    emit_event(
+                        DELEGATION_TURN_STARTED,
+                        outcome="success",
+                        loop_id=loop_id,
+                        turn=model_turns,
+                        snapshot_revision=snapshot.registry_revision,
+                    )
+                    model_call = await context.models.require(config.model).complete(
+                        history,
+                        structured_output=build_model_decision_schema(response_type),
+                        tools=snapshot.as_provider_tools(),
+                        tool_results=tuple(
+                            ToolResultMessage(
+                                call_id=result.call_id,
+                                status=result.status.value,
+                                result=result.to_dict(),
+                            )
+                            for result in results
+                        ),
+                        effective_deadline=deadline,
+                        purpose="delegation_turn",
+                        clock=clock,
+                    )
+                    turn_span.set_outcome("success")
             except asyncio.CancelledError:
                 if context.cancellation.cancelled:
                     return finish(DelegationOutcomeCode.CANCELLATION)

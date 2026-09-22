@@ -7,6 +7,12 @@ import contextlib
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from conducto.core.telemetry import (
+    SPAN_MCP_SERVER,
+    SPAN_MCP_TOOLS_CALL,
+    SPAN_MCP_TOOLS_LIST,
+    start_span,
+)
 from conducto.security.context import Principal
 
 from .errors import McpDependencyError, McpExportError, McpServerStateError, McpToolNotFoundError
@@ -141,11 +147,20 @@ class McpStdioServer:
             raise McpServerStateError("This MCP server instance is already serving")
         self._serve_task = asyncio.current_task()
         try:
-            await self._server.run(
-                read_stream,
-                write_stream,
-                self._server.create_initialization_options(),
-            )
+            with start_span(
+                SPAN_MCP_SERVER,
+                kind="server",
+                attributes={
+                    "conducto.protocol": "mcp",
+                    "conducto.transport": "stdio",
+                },
+            ) as span:
+                await self._server.run(
+                    read_stream,
+                    write_stream,
+                    self._server.create_initialization_options(),
+                )
+                span.set_outcome("success")
         finally:
             self._serve_task = None
 
@@ -192,17 +207,25 @@ class McpStdioServer:
         params: types.PaginatedRequestParams | None,
     ) -> types.ListToolsResult:
         """Return the tools admitted by policy for the configured principal."""
-        tools = [
-            types.Tool(
-                name=definition.name,
-                title=definition.title,
-                description=definition.description,
-                input_schema=definition.input_schema_dict(),
-                output_schema=definition.output_schema_dict(),
-            )
-            for definition in self._exporter.list_tools(self.principal)
-        ]
-        return types.ListToolsResult(tools=tools)
+        with start_span(
+            SPAN_MCP_TOOLS_LIST,
+            attributes={
+                "conducto.protocol": "mcp",
+                "conducto.transport": "stdio",
+            },
+        ) as span:
+            tools = [
+                types.Tool(
+                    name=definition.name,
+                    title=definition.title,
+                    description=definition.description,
+                    input_schema=definition.input_schema_dict(),
+                    output_schema=definition.output_schema_dict(),
+                )
+                for definition in self._exporter.list_tools(self.principal)
+            ]
+            span.set_outcome("success")
+            return types.ListToolsResult(tools=tools)
 
     async def _on_call_tool(
         self,
@@ -217,15 +240,26 @@ class McpStdioServer:
         if task is not None:
             self._in_flight.add(task)
         try:
-            outcome = await self._exporter.call_tool(
-                params.name,
-                arguments,
-                principal=self.principal,
-                task_id=self._next_task_id(),
-                timeout=self._call_timeout,
-            )
-        except McpToolNotFoundError as error:
-            raise MCPError(types.INVALID_PARAMS, str(error)) from None
+            with start_span(
+                SPAN_MCP_TOOLS_CALL,
+                attributes={
+                    "conducto.protocol": "mcp",
+                    "conducto.transport": "stdio",
+                    "conducto.capability.id": params.name,
+                },
+            ) as span:
+                try:
+                    outcome = await self._exporter.call_tool(
+                        params.name,
+                        arguments,
+                        principal=self.principal,
+                        task_id=self._next_task_id(),
+                        timeout=self._call_timeout,
+                    )
+                except McpToolNotFoundError as error:
+                    span.set_outcome("not_found", reason="tool_not_found")
+                    raise MCPError(types.INVALID_PARAMS, str(error)) from None
+                span.set_outcome("success" if not outcome.is_error else "failure")
         finally:
             if task is not None:
                 self._in_flight.discard(task)

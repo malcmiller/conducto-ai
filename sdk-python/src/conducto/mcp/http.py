@@ -12,6 +12,13 @@ from typing import Any
 from uuid import uuid4
 
 from conducto.security.context import AuthorizationContext
+from conducto.core.telemetry import (
+    SPAN_MCP_SERVER,
+    SPAN_MCP_TOOLS_CALL,
+    SPAN_MCP_TOOLS_LIST,
+    extract_trace_context,
+    start_span,
+)
 
 from .errors import McpDependencyError, McpExportError, McpToolNotFoundError
 from .export import McpToolExporter
@@ -228,6 +235,7 @@ class McpHttpServer:
             key.decode("latin-1").lower(): value.decode("latin-1")
             for key, value in scope["headers"]
         }
+        raw_header_names = tuple(key.decode("latin-1").lower() for key, _ in scope["headers"])
         if (
             sum(len(key) + len(value) for key, value in headers.items())
             > self._limits.max_header_bytes
@@ -249,29 +257,50 @@ class McpHttpServer:
                 scope, receive, send
             )
             return
-        request = McpHttpRequest(
-            method=str(scope.get("method", "")).upper(),
-            headers=headers,
-            client_host=client_host,
-            scheme=str(scope.get("scheme", "")),
-        )
-        try:
-            authorization = self._authorization_resolver(request)
-            if inspect.isawaitable(authorization):
-                authorization = await authorization
-            if not isinstance(authorization, AuthorizationContext):
-                raise TypeError
-        except (TypeError, ValueError):
-            await PlainTextResponse("Authentication failed", status_code=401)(scope, receive, send)
-            return
-        session_id = headers.get(MCP_SESSION_ID_HEADER)
-        if session_id is not None:
-            if not self._same_session_identity(self._sessions.get(session_id), authorization):
-                await PlainTextResponse("Session not found", status_code=404)(scope, receive, send)
+        extracted = extract_trace_context(headers, raw_header_names=raw_header_names)
+        with start_span(
+            SPAN_MCP_SERVER,
+            kind="server",
+            remote_context=extracted.context,
+            attributes={
+                "conducto.protocol": "mcp",
+                "conducto.transport": "streamable_http",
+                "conducto.invalid_remote_context": extracted.invalid_remote_context,
+                "http.request.method": str(scope.get("method", "")).upper(),
+                "url.scheme": str(scope.get("scheme", "")),
+            },
+        ) as span:
+            request = McpHttpRequest(
+                method=str(scope.get("method", "")).upper(),
+                headers=headers,
+                client_host=client_host,
+                scheme=str(scope.get("scheme", "")),
+            )
+            try:
+                authorization = self._authorization_resolver(request)
+                if inspect.isawaitable(authorization):
+                    authorization = await authorization
+                if not isinstance(authorization, AuthorizationContext):
+                    raise TypeError
+            except (TypeError, ValueError):
+                span.set_outcome("denied", reason="authentication_failed")
+                await PlainTextResponse("Authentication failed", status_code=401)(
+                    scope, receive, send
+                )
                 return
-            await self._manager.handle_request(scope, receive, send)
-            return
-        await self._opening_request(scope, receive, send, authorization)
+            session_id = headers.get(MCP_SESSION_ID_HEADER)
+            if session_id is not None:
+                if not self._same_session_identity(self._sessions.get(session_id), authorization):
+                    span.set_outcome("session_not_found", reason="session_not_found")
+                    await PlainTextResponse("Session not found", status_code=404)(
+                        scope, receive, send
+                    )
+                    return
+                await self._manager.handle_request(scope, receive, send)
+                span.set_outcome("success")
+                return
+            await self._opening_request(scope, receive, send, authorization)
+            span.set_outcome("success")
 
     async def drain(self) -> None:
         """Reject new work and cancel accepted calls after their bounded grace."""
@@ -341,18 +370,29 @@ class McpHttpServer:
     ) -> types.ListToolsResult:
         """List exporter tools authorized for the bound HTTP session."""
         authorization = self._authorization_for_context(context)
-        return types.ListToolsResult(
-            tools=[
-                types.Tool(
-                    name=definition.name,
-                    title=definition.title,
-                    description=definition.description,
-                    input_schema=definition.input_schema_dict(),
-                    output_schema=definition.output_schema_dict(),
-                )
-                for definition in self._exporter.list_tools(authorization.principal)
-            ]
-        )
+        with start_span(
+            SPAN_MCP_TOOLS_LIST,
+            attributes={
+                "conducto.protocol": "mcp",
+                "conducto.transport": "streamable_http",
+                "conducto.task.id": authorization.task_id,
+                "conducto.correlation_id": authorization.correlation_id,
+            },
+        ) as span:
+            result = types.ListToolsResult(
+                tools=[
+                    types.Tool(
+                        name=definition.name,
+                        title=definition.title,
+                        description=definition.description,
+                        input_schema=definition.input_schema_dict(),
+                        output_schema=definition.output_schema_dict(),
+                    )
+                    for definition in self._exporter.list_tools(authorization.principal)
+                ]
+            )
+            span.set_outcome("success")
+            return result
 
     async def _on_call_tool(
         self,
@@ -384,15 +424,28 @@ class McpHttpServer:
         if task is not None:
             self._active_calls.add(task)
         try:
-            outcome = await self._exporter.call_tool(
-                params.name,
-                params.arguments or {},
-                authorization=call_authorization,
-                task_id=task_id,
-                timeout=self._limits.call_timeout,
-            )
-        except McpToolNotFoundError as error:
-            raise MCPError(types.INVALID_PARAMS, str(error)) from None
+            with start_span(
+                SPAN_MCP_TOOLS_CALL,
+                attributes={
+                    "conducto.protocol": "mcp",
+                    "conducto.transport": "streamable_http",
+                    "conducto.task.id": task_id,
+                    "conducto.correlation_id": call_authorization.correlation_id,
+                    "conducto.capability.id": params.name,
+                },
+            ) as span:
+                try:
+                    outcome = await self._exporter.call_tool(
+                        params.name,
+                        params.arguments or {},
+                        authorization=call_authorization,
+                        task_id=task_id,
+                        timeout=self._limits.call_timeout,
+                    )
+                except McpToolNotFoundError as error:
+                    span.set_outcome("not_found", reason="tool_not_found")
+                    raise MCPError(types.INVALID_PARAMS, str(error)) from None
+                span.set_outcome("success" if not outcome.is_error else "failure")
         finally:
             self._in_flight[session_id] -= 1
             if task is not None:

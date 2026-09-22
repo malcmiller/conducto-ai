@@ -27,6 +27,7 @@ from .provider import (
 )
 from .run_context import InvocationMetadata, ModelCallProvenance, RunContext
 from .runtime_errors import MissingModelDefaultError
+from .telemetry import SPAN_MODEL_COMPLETE, start_span
 
 if TYPE_CHECKING:
     from .model_resolution import ResolvedModel
@@ -200,10 +201,23 @@ async def complete_model_call(
         timeout=timeout,
         retries=binding.configuration.retries,
     )
-    with log_context(
-        correlation_id=context.correlation_id,
-        run_id=context.run_id,
-        agent_id=context.agent_id,
+    with (
+        start_span(
+            SPAN_MODEL_COMPLETE,
+            attributes={
+                "conducto.agent.id": context.agent_id,
+                "conducto.correlation_id": context.correlation_id,
+                "conducto.run.id": context.run_id,
+                "conducto.model.provider": resolved.provider,
+                "conducto.model.reference": str(resolved.reference),
+                "conducto.model.source": resolved.source.value,
+            },
+        ) as span,
+        log_context(
+            correlation_id=context.correlation_id,
+            run_id=context.run_id,
+            agent_id=context.agent_id,
+        ),
     ):
         emit_event(
             MODEL_SELECTED,
@@ -240,6 +254,15 @@ async def complete_model_call(
                     raise asyncio.CancelledError
                 await asyncio.wait((completion,), timeout=0.01)
             result = await completion
+        except TimeoutError:
+            span.set_outcome("timeout", reason="timeout")
+            raise
+        except asyncio.CancelledError:
+            span.set_outcome("cancelled", reason="cancellation")
+            raise
+        except Exception:
+            span.set_error("provider_failure")
+            raise
         finally:
             if not completion.done():
                 completion.cancel()
@@ -257,6 +280,7 @@ async def complete_model_call(
             total_tokens=result.usage.total_tokens,
             outcome="success",
         )
+        span.set_outcome("success")
     model_call = ModelCallProvenance(
         purpose=purpose,
         model_reference=str(resolved.reference),

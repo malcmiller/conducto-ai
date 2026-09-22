@@ -18,6 +18,7 @@ from conducto.core.a2a_profile import (
     A2AProtocolError,
     parse_agent_card,
 )
+from conducto.core.telemetry import SPAN_A2A_CLIENT, inject_trace_context, start_span
 
 from .errors import CompatibilityError, DiscoveryError, LimitExceededError, ProtocolError
 
@@ -97,19 +98,63 @@ class A2AClient:
 
     async def send_message(self, request: Any, *, context: Any = None) -> Any:
         """Send a non-retried A2A message through the official SDK client."""
-        return self._client.send_message(request, context=context)
+        with start_span(
+            SPAN_A2A_CLIENT,
+            kind="client",
+            attributes={
+                "conducto.protocol": "a2a",
+                "conducto.transport": "jsonrpc",
+                "conducto.remote_agent.id": self.descriptor.name,
+            },
+        ) as span:
+            result = self._client.send_message(request, context=context)
+            span.set_outcome("success")
+            return result
 
     async def get_task(self, request: Any, *, context: Any = None) -> Any:
         """Read a remote task through the official SDK client."""
-        return await self._client.get_task(request, context=context)
+        with start_span(
+            SPAN_A2A_CLIENT,
+            kind="client",
+            attributes={
+                "conducto.protocol": "a2a",
+                "conducto.transport": "jsonrpc",
+                "conducto.remote_agent.id": self.descriptor.name,
+            },
+        ) as span:
+            result = await self._client.get_task(request, context=context)
+            span.set_outcome("success")
+            return result
 
     async def list_tasks(self, request: Any, *, context: Any = None) -> Any:
         """List remote tasks through the official SDK client."""
-        return await self._client.list_tasks(request, context=context)
+        with start_span(
+            SPAN_A2A_CLIENT,
+            kind="client",
+            attributes={
+                "conducto.protocol": "a2a",
+                "conducto.transport": "jsonrpc",
+                "conducto.remote_agent.id": self.descriptor.name,
+            },
+        ) as span:
+            result = await self._client.list_tasks(request, context=context)
+            span.set_outcome("success")
+            return result
 
     async def cancel_task(self, request: Any, *, context: Any = None) -> Any:
         """Cancel a remote task through the official SDK client."""
-        return await self._client.cancel_task(request, context=context)
+        with start_span(
+            SPAN_A2A_CLIENT,
+            kind="client",
+            attributes={
+                "conducto.protocol": "a2a",
+                "conducto.transport": "jsonrpc",
+                "conducto.remote_agent.id": self.descriptor.name,
+            },
+        ) as span:
+            result = await self._client.cancel_task(request, context=context)
+            span.set_outcome("success")
+            return result
 
     async def close(self) -> None:
         """Close the official SDK client's owned transport resources."""
@@ -127,73 +172,90 @@ async def discover_agent(
     Redirects are disabled. The configured card location and the card's advertised
     JSON-RPC endpoint are independently validated, including fresh DNS resolution.
     """
-    _validate_url(card_url, policy)
-    owns_client = http_client is None
-    client = http_client or httpx.AsyncClient(follow_redirects=False)
-    try:
+    with start_span(
+        SPAN_A2A_CLIENT,
+        kind="client",
+        attributes={
+            "conducto.protocol": "a2a",
+            "conducto.transport": "agent_card",
+        },
+    ) as span:
+        _validate_url(card_url, policy)
+        owns_client = http_client is None
+        client = http_client or httpx.AsyncClient(follow_redirects=False)
         try:
-            async with client.stream(
-                "GET",
-                card_url,
-                headers={"accept": "application/json"},
-                follow_redirects=False,
-                timeout=policy.request_timeout,
-            ) as response:
-                if response.is_redirect:
-                    raise DiscoveryError("Agent Card redirects are not permitted")
-                response.raise_for_status()
-                content_type = response.headers.get("content-type", "")
-                if "application/json" not in content_type.lower():
-                    raise DiscoveryError(
-                        "Agent Card response must have application/json content type"
-                    )
-                declared_size = response.headers.get("content-length")
-                if declared_size and int(declared_size) > policy.max_card_bytes:
-                    raise LimitExceededError("Agent Card exceeds configured size limit")
-                chunks: list[bytes] = []
-                size = 0
-                async for chunk in response.aiter_bytes():
-                    size += len(chunk)
-                    if size > policy.max_card_bytes:
+            try:
+                async with client.stream(
+                    "GET",
+                    card_url,
+                    headers=inject_trace_context({"accept": "application/json"}),
+                    follow_redirects=False,
+                    timeout=policy.request_timeout,
+                ) as response:
+                    if response.is_redirect:
+                        raise DiscoveryError("Agent Card redirects are not permitted")
+                    response.raise_for_status()
+                    content_type = response.headers.get("content-type", "")
+                    if "application/json" not in content_type.lower():
+                        raise DiscoveryError(
+                            "Agent Card response must have application/json content type"
+                        )
+                    declared_size = response.headers.get("content-length")
+                    if declared_size and int(declared_size) > policy.max_card_bytes:
                         raise LimitExceededError("Agent Card exceeds configured size limit")
-                    chunks.append(chunk)
-        except httpx.HTTPError as exc:
-            raise DiscoveryError(f"Unable to retrieve Agent Card: {exc}") from exc
-        try:
-            payload = response.json() if not chunks else __import__("json").loads(b"".join(chunks))
-        except (ValueError, UnicodeDecodeError) as exc:
-            raise ProtocolError("Agent Card is not valid JSON") from exc
-        if not isinstance(payload, dict):
-            raise ProtocolError("Agent Card must be a JSON object")
-        try:
-            card = parse_agent_card(payload)
-        except A2AProtocolError as exc:
-            raise CompatibilityError(str(exc)) from exc
-        interfaces = [
-            interface
-            for interface in card.supported_interfaces
-            if interface.protocol_binding == A2A_JSONRPC_BINDING
-            and interface.protocol_version == A2A_PROTOCOL_VERSION
-        ]
-        if len(interfaces) != 1:
-            raise CompatibilityError(
-                "Agent Card must advertise exactly one A2A 1.0 JSON-RPC interface"
+                    chunks: list[bytes] = []
+                    size = 0
+                    async for chunk in response.aiter_bytes():
+                        size += len(chunk)
+                        if size > policy.max_card_bytes:
+                            raise LimitExceededError("Agent Card exceeds configured size limit")
+                        chunks.append(chunk)
+            except httpx.HTTPError as exc:
+                span.set_error("transport_error")
+                raise DiscoveryError(f"Unable to retrieve Agent Card: {exc}") from exc
+            try:
+                payload = (
+                    response.json() if not chunks else __import__("json").loads(b"".join(chunks))
+                )
+            except (ValueError, UnicodeDecodeError) as exc:
+                span.set_outcome("validation_failure", reason="invalid_json")
+                raise ProtocolError("Agent Card is not valid JSON") from exc
+            if not isinstance(payload, dict):
+                span.set_outcome("validation_failure", reason="invalid_card")
+                raise ProtocolError("Agent Card must be a JSON object")
+            try:
+                card = parse_agent_card(payload)
+            except A2AProtocolError as exc:
+                span.set_outcome("validation_failure", reason="incompatible_card")
+                raise CompatibilityError(str(exc)) from exc
+            interfaces = [
+                interface
+                for interface in card.supported_interfaces
+                if interface.protocol_binding == A2A_JSONRPC_BINDING
+                and interface.protocol_version == A2A_PROTOCOL_VERSION
+            ]
+            if len(interfaces) != 1:
+                span.set_outcome("validation_failure", reason="invalid_interface")
+                raise CompatibilityError(
+                    "Agent Card must advertise exactly one A2A 1.0 JSON-RPC interface"
+                )
+            endpoint_url = interfaces[0].url
+            _validate_url(endpoint_url, policy)
+            if not _same_authority(card_url, endpoint_url):
+                span.set_outcome("validation_failure", reason="authority_mismatch")
+                raise DiscoveryError("Agent Card endpoint must use the configured card authority")
+            span.set_outcome("success")
+            return RemoteAgentDescriptor(
+                card_url=card_url,
+                endpoint_url=endpoint_url,
+                name=card.name,
+                version=card.version,
+                capabilities=tuple(skill.id for skill in card.skills),
+                card=MappingProxyType(MessageToDict(card, preserving_proto_field_name=False)),
             )
-        endpoint_url = interfaces[0].url
-        _validate_url(endpoint_url, policy)
-        if not _same_authority(card_url, endpoint_url):
-            raise DiscoveryError("Agent Card endpoint must use the configured card authority")
-        return RemoteAgentDescriptor(
-            card_url=card_url,
-            endpoint_url=endpoint_url,
-            name=card.name,
-            version=card.version,
-            capabilities=tuple(skill.id for skill in card.skills),
-            card=MappingProxyType(MessageToDict(card, preserving_proto_field_name=False)),
-        )
-    finally:
-        if owns_client:
-            await client.aclose()
+        finally:
+            if owns_client:
+                await client.aclose()
 
 
 def _validate_url(url: str, policy: DiscoveryPolicy) -> None:
