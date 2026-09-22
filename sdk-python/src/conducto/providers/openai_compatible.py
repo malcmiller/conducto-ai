@@ -97,7 +97,7 @@ TESTED_MINIMUM_LM_STUDIO_SERVER = "0.3.0"
 TESTED_MINIMUM_OPENAI_CLIENT = "1.0"
 _TOOL_CAPABLE_PROFILE_NAMES = frozenset({"vllm-tools", "lm-studio-tools"})
 
-#JSON Schema keywords Conducto both sends natively and validates locally for
+# JSON Schema keywords Conducto both sends natively and validates locally for
 #: this adapter. This subset is intentionally narrower than other adapters
 #: because OpenAI-shaped ``strict`` JSON Schema response formats reject
 #: keywords such as ``const``, length/item bounds, and schema combinators.
