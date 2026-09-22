@@ -66,6 +66,9 @@ class AuditEventName(StrEnum):
     MTLS_REJECTED = "security.mtls.rejected"
     DELEGATION_ATTENUATED = "security.delegation.attenuated"
     DELEGATION_REJECTED = "security.delegation.rejected"
+    REGISTRATION_REQUESTED = "catalog.registration.requested"
+    REGISTRATION_COMPLETED = "catalog.registration.completed"
+    REGISTRATION_EXPIRED = "catalog.registration.expired"
 
 
 class AuditDecision(StrEnum):
@@ -102,6 +105,7 @@ class AuditCategory(StrEnum):
     CRYPTOGRAPHY = "cryptography"
     EXECUTION = "execution"
     DELIVERY = "delivery"
+    CATALOG = "catalog"
 
 
 class AuditDeliveryMode(StrEnum):
@@ -355,6 +359,8 @@ class AuditEmitter:
             AuditEventName.REPLAY_REJECTED,
             AuditEventName.EXECUTION_COMPLETED,
             AuditEventName.EXECUTION_FAILED,
+            AuditEventName.REGISTRATION_COMPLETED,
+            AuditEventName.REGISTRATION_EXPIRED,
         }
 
     async def flush(self, timeout: float | None = None) -> None:

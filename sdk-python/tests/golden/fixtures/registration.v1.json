@@ -1,0 +1,26 @@
+{
+  "request": {
+    "protocol_version": "1",
+    "owner": "payments",
+    "environment": "production",
+    "agent_id": "payments.invoice",
+    "instance_id": "invoice-pod-1",
+    "idempotency_key": "create-1",
+    "issued_at": 1500.0,
+    "expected_generation": 0,
+    "correlation_id": "deployment-1",
+    "operation": "register",
+    "agent_card_url": "https://invoice.example/.well-known/agent-card.json",
+    "deployment_id": "release-42",
+    "deployment_type": "remote_container",
+    "provenance": "build-42",
+    "lease_seconds": 60.0
+  },
+  "safe_result": {
+    "code": "ok",
+    "correlation_id": "deployment-1",
+    "generation": 1,
+    "state": "active",
+    "lease_expires_at": 1560.0
+  }
+}

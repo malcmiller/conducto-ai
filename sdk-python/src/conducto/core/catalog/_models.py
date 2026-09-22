@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -128,6 +129,11 @@ class AgentInstanceRecord:
         healthy: Explicit health flag independent of lease expiration.
         lease_expires_at: Monotonic-clock timestamp the current lease expires.
         last_heartbeat_at: Monotonic-clock timestamp of the last renewal.
+        environment: Immutable managed deployment environment, empty for legacy entries.
+        deployment_id: Managed deployment attribution, empty for legacy entries.
+        provenance: Managed admission provenance, empty for legacy entries.
+        subject_id: Authenticated principal that admitted a managed instance.
+        issuer: Authentication issuer for the admitting principal.
     """
 
     instance_id: str
@@ -137,6 +143,11 @@ class AgentInstanceRecord:
     healthy: bool
     lease_expires_at: float
     last_heartbeat_at: float
+    environment: str = ""
+    deployment_id: str = ""
+    provenance: str = ""
+    subject_id: str = ""
+    issuer: str = ""
 
     def __post_init__(self) -> None:
         """Freeze the transport set."""
@@ -254,8 +265,8 @@ class CatalogEntry:
             raise CatalogValidationError("owner is required")
         if not is_absolute_http_url(self.agent_card_url):
             raise CatalogValidationError("agent_card_url must be an absolute http(s) URL")
-        if self.lease_seconds <= 0:
-            raise CatalogValidationError("lease_seconds must be positive")
+        if not math.isfinite(self.lease_seconds) or self.lease_seconds <= 0:
+            raise CatalogValidationError("lease_seconds must be finite and positive")
         object.__setattr__(self, "supported_versions", frozenset(self.supported_versions))
         object.__setattr__(self, "transports", frozenset(self.transports))
         object.__setattr__(self, "agent_card", freeze_json(self.agent_card))

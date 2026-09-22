@@ -8,6 +8,12 @@ or invokes a capability; that belongs to a future agent gateway that consumes
 catalog snapshots the same way `LocalAgentGateway` consumes `AgentRegistry`
 snapshots.
 
+Deployment automation uses the authenticated
+[registration control plane](deployment-registration.md), not direct
+`CatalogEntry` submission. It retrieves cards through transport policy and uses
+catalog-owned atomic managed operations for idempotency, instance generations,
+identity-bound leases, drain, removal, and revocation.
+
 ## Package ownership
 
 Import catalog contracts from `conducto.core.catalog`. The package separates

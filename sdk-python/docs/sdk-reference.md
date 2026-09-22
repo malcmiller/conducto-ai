@@ -27,6 +27,8 @@ not unrelated model, context, provider, or error types.
 | `conducto.core.gateway_models` | Discovery queries, descriptors, opaque bindings, outcomes |
 | `conducto.core.gateway_tools` | Bounded model-facing toolbox projection |
 | `conducto.core.catalog` | Governed remote catalog, providers, lifecycle and immutable records |
+| `conducto.registration` | Authenticated deployment admission, typed lifecycle requests/results and exact grants |
+| `conducto.registration.asgi`, `.client` | Optional registration HTTP server and deployment client; separate from A2A |
 | `conducto.core.delegation` | Bounded model/tool loop, configuration, outcomes, fallback |
 | `conducto.core.a2a_profile` | Pinned A2A constants and protocol validation |
 | `conducto.core.agent_card` | Agent Card specification version |

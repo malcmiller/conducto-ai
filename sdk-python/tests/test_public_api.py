@@ -1,6 +1,8 @@
 """Public Python package ownership is independent of the versioned wire format."""
 
 import importlib
+import subprocess
+import sys
 
 import conducto
 import conducto.core
@@ -36,6 +38,7 @@ def test_domain_packages_publish_contracts_without_umbrella_aliases() -> None:
         "conducto.core.provider_registry": ("ProviderRegistry", "ProviderClientConfig"),
         "conducto.core.gateway": ("AgentGateway", "LocalAgentGateway"),
         "conducto.core.catalog": ("AgentCatalog", "CatalogEntry"),
+        "conducto.registration": ("RegistrationService", "RegisterRequest", "RegistrationResult"),
         "conducto.core.delegation": ("DelegationConfig", "run_delegation"),
         "conducto.core.invocation_results": ("InvocationSuccess", "RoutingFailure"),
         "conducto.testing": ("FakeModel", "FakeModelRequest"),
@@ -46,3 +49,22 @@ def test_domain_packages_publish_contracts_without_umbrella_aliases() -> None:
     assert not hasattr(importlib.import_module("conducto.core.provider"), "FakeModel")
     registry = importlib.import_module("conducto.core.provider_registry").ProviderRegistry()
     assert not hasattr(registry, "register")
+
+
+def test_registration_adapters_do_not_make_core_depend_on_http_frameworks() -> None:
+    """Core and registration contracts import with HTTP adapters unavailable."""
+    code = """
+import builtins
+original = builtins.__import__
+def guarded(name, *args, **kwargs):
+    if name.split('.')[0] in {'httpx', 'starlette', 'fastapi', 'uvicorn'}:
+        raise ImportError('optional HTTP package unavailable')
+    return original(name, *args, **kwargs)
+builtins.__import__ = guarded
+import conducto
+import conducto.registration
+import conducto.registration.asgi
+assert conducto.registration.RegisterRequest
+"""
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
