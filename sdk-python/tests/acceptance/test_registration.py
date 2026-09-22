@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-from collections.abc import Awaitable, Callable, MutableMapping
+from collections.abc import Awaitable, Callable, Generator, MutableMapping
 from dataclasses import replace
 from typing import Any
 
@@ -90,6 +90,7 @@ class Harness:
         self.card = DeployedAgent().get_agent_card(ENDPOINT)
         self.card_status = 200
         self.card_requests: list[dict[str, str]] = []
+        self.card_query_strings: list[bytes] = []
         self.key = ec.generate_private_key(ec.SECP256R1())
         self.token_expiry = 3000
         self.validator = JWTBearerTokenValidator(
@@ -156,6 +157,7 @@ class Harness:
         """Serve the agent's actual generated card while invocation stays non-ready."""
         del receive
         self.card_requests.append({key.decode(): value.decode() for key, value in scope["headers"]})
+        self.card_query_strings.append(scope["query_string"])
         status = self.card_status if scope["path"] == "/.well-known/agent-card.json" else 503
         await send(
             {
@@ -494,6 +496,50 @@ def test_lost_admission_response_can_be_recovered_near_token_expiry() -> None:
             recovered = await harness.client.send(request)
             assert recovered == admitted
             assert recovered.lease_expires_at == 1560
+        finally:
+            await harness.close()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("auth_kind", ["basic", "bearer"])
+def test_discovery_does_not_inherit_control_plane_credentials(auth_kind: str) -> None:
+    class BearerAuth(httpx.Auth):
+        def auth_flow(
+            self, request: httpx.Request
+        ) -> Generator[httpx.Request, httpx.Response, None]:
+            request.headers["authorization"] = "Bearer private-handler-token"
+            yield request
+
+    async def run() -> None:
+        harness = Harness()
+        try:
+            auth = (
+                httpx.BasicAuth("deployment", "private-password")
+                if auth_kind == "basic"
+                else BearerAuth()
+            )
+            harness.discovery_http.auth = auth
+            harness.discovery_http.headers.update(
+                {
+                    "authorization": "Bearer private-default-token",
+                    "proxy-authorization": "Basic private-proxy-credential",
+                    "x-api-key": "private-api-key",
+                }
+            )
+            harness.discovery_http.cookies.set("session", "private-session")
+            harness.discovery_http.params = httpx.QueryParams({"access_token": "private-query"})
+            admitted = await harness.client.send(harness.request())
+            assert admitted.ready
+            (headers,) = harness.card_requests
+            assert (
+                not {"authorization", "proxy-authorization", "x-api-key", "cookie"} & headers.keys()
+            )
+            assert harness.card_query_strings == [b""]
+            assert headers["x-correlation-id"] == "deploy-1"
+            assert harness.discovery_http.auth is auth
+            assert harness.discovery_http.headers["x-api-key"] == "private-api-key"
+            assert not harness.discovery_http.is_closed
         finally:
             await harness.close()
 

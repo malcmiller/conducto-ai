@@ -18,8 +18,9 @@ class RegistrationGrant:
 
     Each grant covers one issuer, actor, owner, environment, and logical agent.
     Different instances may use different grants with the same identity tuple.
-    The card name and both URLs must match exactly; redirects and URL credentials
-    are forbidden. Scopes must additionally contain ``registration:<operation>``.
+    The card name and both URLs must match exactly; redirects, URL credentials,
+    invalid ports, and raw whitespace/control characters are forbidden. Scopes
+    must additionally contain ``registration:<operation>``.
     """
 
     issuer: str
@@ -53,14 +54,22 @@ class RegistrationGrant:
         if not math.isfinite(self.max_lease_seconds) or self.max_lease_seconds <= 0:
             raise ValueError("max_lease_seconds must be finite and positive")
         for url in (self.agent_card_url, self.endpoint_url):
-            parts = urlsplit(url)
+            if any(ord(character) <= 32 or ord(character) >= 127 for character in url):
+                raise ValueError("registration URLs must use printable ASCII without whitespace")
+            try:
+                parts = urlsplit(url)
+                port = parts.port
+            except ValueError:
+                raise ValueError("registration URLs must have a valid host and port") from None
             if (
                 parts.scheme not in {"https", "http"}
                 or not parts.hostname
+                or port == 0
                 or parts.username is not None
                 or parts.password is not None
-                or parts.query
-                or parts.fragment
+                or "?" in url
+                or "#" in url
+                or "\\" in url
             ):
                 raise ValueError("registration URLs must be absolute and credential-free")
         object.__setattr__(self, "operations", frozenset(self.operations))

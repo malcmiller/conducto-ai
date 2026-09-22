@@ -104,9 +104,15 @@ def _valid_success(request: RegistrationRequest, result: RegistrationResult) -> 
                 or result.lease_handle.get_secret_value() == request.lease_handle.get_secret_value()
             )
         )
-    expected_state = {"drain": "draining", "deregister": "removed", "revoke": "revoked"}
+    if request.operation == "drain":
+        # Draining an already-draining instance is an intentional generation-preserving no-op.
+        return result.state == "draining" and result.generation >= request.expected_generation
+    expected_state = {"deregister": "removed", "revoke": "revoked"}
     if request.operation in expected_state:
-        return result.state == expected_state[request.operation]
+        return (
+            result.state == expected_state[request.operation]
+            and result.generation > request.expected_generation
+        )
     return True
 
 
@@ -125,6 +131,8 @@ class RegistrationClient:
         Redirects are never followed. Transport failures and typed unavailable outcomes
         alone are retried. Timeout leaves mutation outcome uncertain; callers must not
         change the request or idempotency key when resolving that uncertainty.
+        Terminal mutations require an advanced generation; an already-draining
+        instance may acknowledge drain without advancing its generation.
     """
 
     def __init__(

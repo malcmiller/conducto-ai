@@ -174,7 +174,10 @@ async def discover_agent(
     Redirects are disabled. The configured card location and the card's advertised
     JSON-RPC endpoint are independently validated, including fresh DNS resolution.
     An optional bounded ASCII correlation identifier is propagated independently
-    of W3C trace context; authentication credentials are never forwarded.
+    of W3C trace context. Requests do not inherit a supplied client's default
+    authentication, headers, cookies, or query parameters. Applications still own
+    transport configuration and must keep control-plane credentials out of
+    discovery-specific transports and request hooks.
     """
     headers = {"accept": "application/json", "accept-encoding": "identity"}
     if correlation_id is not None:
@@ -199,13 +202,19 @@ async def discover_agent(
         client = http_client or httpx.AsyncClient(follow_redirects=False)
         try:
             try:
-                async with client.stream(
+                request = httpx.Request(
                     "GET",
                     card_url,
                     headers=inject_trace_context(headers),
+                    extensions={"timeout": httpx.Timeout(policy.request_timeout).as_dict()},
+                )
+                response = await client.send(
+                    request,
+                    auth=None,
                     follow_redirects=False,
-                    timeout=policy.request_timeout,
-                ) as response:
+                    stream=True,
+                )
+                try:
                     if response.is_redirect:
                         raise DiscoveryError("Agent Card redirects are not permitted")
                     response.raise_for_status()
@@ -226,6 +235,8 @@ async def discover_agent(
                         if size > policy.max_card_bytes:
                             raise LimitExceededError("Agent Card exceeds configured size limit")
                         chunks.append(chunk)
+                finally:
+                    await response.aclose()
             except httpx.HTTPError as exc:
                 span.set_error("transport_error")
                 raise DiscoveryError(f"Unable to retrieve Agent Card: {exc}") from exc

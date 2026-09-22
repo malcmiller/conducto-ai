@@ -14,11 +14,14 @@ from pydantic import SecretStr
 from conducto.registration.asgi import RegistrationASGI
 from conducto.registration.client import RegistrationClient
 from conducto.registration.models import (
+    DeregisterRequest,
+    DrainRequest,
     RegisterRequest,
     RegistrationCode,
     RegistrationRequest,
     RegistrationResult,
     RenewRequest,
+    RevokeRequest,
     StatusRequest,
     request_document,
     result_document,
@@ -710,6 +713,54 @@ def test_client_validates_renewal_shape(kind: str) -> None:
             result = await _client(http).send(request)
         assert result.ok is (kind == "valid")
         assert result.lease_handle is None
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("operation", ["drain", "deregister", "revoke"])
+@pytest.mark.parametrize("generation", [1, 2, 3])
+def test_client_checks_lifecycle_generations_and_allows_noop_drain(
+    operation: str, generation: int
+) -> None:
+    async def run() -> None:
+        request_type = {
+            "drain": DrainRequest,
+            "deregister": DeregisterRequest,
+            "revoke": RevokeRequest,
+        }[operation]
+        document: dict[str, Any] = {
+            "owner": "owner",
+            "environment": "test",
+            "agent_id": "agent",
+            "instance_id": "instance",
+            "idempotency_key": "lifecycle-1",
+            "issued_at": 100.0,
+            "correlation_id": "correlation-1",
+            "expected_generation": 2,
+        }
+        if operation != "revoke":
+            document["lease_handle"] = _HANDLE
+        request = request_type.model_validate(document)
+        state = {"drain": "draining", "deregister": "removed", "revoke": "revoked"}[operation]
+
+        def handle(_incoming: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "code": "ok",
+                    "correlation_id": request.correlation_id,
+                    "generation": generation,
+                    "state": state,
+                    "lease_expires_at": 200.0,
+                },
+            )
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http:
+            result = await _client(http).send(request)
+        expected_success = generation > 2 or (operation == "drain" and generation == 2)
+        assert result.ok is expected_success
+        if not expected_success:
+            assert result.code is RegistrationCode.SERVICE_UNAVAILABLE
 
     asyncio.run(run())
 

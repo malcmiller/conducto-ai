@@ -62,8 +62,12 @@ endpoint rule. The retrieved name and exact advertised endpoint must also match
 the grant. The caller cannot submit capability schemas or an Agent Card body.
 Card and registration responses must use identity content encoding; compressed
 responses are rejected before decoding so expansion cannot bypass byte bounds.
-Card URLs cannot contain credentials, queries, or fragments. Use network egress
-controls appropriate to the deployment in addition to discovery policy.
+Card and endpoint URLs must be printable ASCII without whitespace, credentials,
+queries, or fragments; explicit ports must be integers from 1 through 65535.
+Discovery requests do not inherit the supplied HTTP client's authentication,
+default headers, cookies, or query parameters. Keep control-plane credentials out
+of discovery transports and request hooks as well. Use network egress controls
+appropriate to the deployment in addition to discovery policy.
 
 `provenance` is an opaque build/attestation reference, **not** proof of signing.
 For cryptographic provenance, set the grant's `trust_policy_ref`, configure the
