@@ -178,11 +178,13 @@ class A2AHostLifecycle:
         """Run the bounded application startup check and become ready.
 
         Raises:
-            A2AStartupError: If the startup check fails or exceeds its deadline.
-                The host stays unready so no work is accepted.
+            A2AStartupError: If the host is closed, draining, or failed, or if
+                the startup check fails or exceeds its deadline. The host stays
+                unready so no work is accepted; a draining or failed host is
+                never silently revived to ready.
         """
-        if self._state is A2AHostState.CLOSED:
-            raise A2AStartupError("A2A host is closed", reason="closed")
+        if self._state in (A2AHostState.CLOSED, A2AHostState.DRAINING, A2AHostState.FAILED):
+            raise A2AStartupError(f"A2A host is {self._state.value}", reason=self._state.value)
         if self._on_startup is not None:
             try:
                 await asyncio.wait_for(
@@ -224,15 +226,17 @@ class A2AHostLifecycle:
         Notes:
             Readiness flips to ``False`` before the wait begins, so a load
             balancer stops sending work before any accepted request is disturbed.
-            Work still running when the drain deadline expires is cancelled and
-            every accepted task is driven out of an ambiguous active state.
+            Work still running after the drain grace period is cancelled and
+            bounded by ``cancellation_deadline_seconds`` (not a second full
+            ``drain_deadline_seconds`` wait), and every accepted task is driven
+            out of an ambiguous active state.
         """
         if self._state is A2AHostState.CLOSED:
             return
         self._state = A2AHostState.DRAINING
         expired = not await self._await_idle(self._config.drain_deadline_seconds)
         if expired:
-            await self._cancel_inflight(self._config.drain_deadline_seconds)
+            await self._cancel_inflight(self._config.cancellation_deadline_seconds)
             await self._sweep_active_tasks()
         emit_event(
             "a2a.host.drain",
@@ -334,8 +338,15 @@ class A2AHostLifecycle:
 
 
 async def _maybe_await(result: Awaitable[Any] | Any) -> None:
-    """Await a callable result only when it is awaitable."""
-    if asyncio.iscoroutine(result) or isinstance(result, asyncio.Future):
+    """Await a callable result only when it is awaitable.
+
+    Notes:
+        Detects any object implementing ``__await__`` (coroutines, futures, and
+        custom awaitables returned by an injected ``on_startup`` check or
+        resource closer), not only coroutine objects and :class:`asyncio.Future`
+        instances, so a custom awaitable is never treated as already complete.
+    """
+    if hasattr(result, "__await__"):
         await result
 
 

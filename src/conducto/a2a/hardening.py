@@ -39,8 +39,16 @@ FORWARDED_HEADERS: Final = frozenset(
     {"forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-port", "x-forwarded-proto"}
 )
 _DEFAULT_SCHEME_PORTS: Final = {"http": 80, "https": 443}
-_TRACEPARENT_PATTERN: Final = re.compile(r"\A[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}\Z")
-_TRACESTATE_PATTERN: Final = re.compile(r"\A[\x20-\x7e]{1,512}\Z")
+_TRACEPARENT_PATTERN: Final = re.compile(
+    r"\A(?P<version>[0-9a-f]{2})-(?P<trace_id>[0-9a-f]{32})-(?P<parent_id>[0-9a-f]{16})-[0-9a-f]{2}\Z"
+)
+_TRACESTATE_KEY_PATTERN: Final = re.compile(
+    r"\A(?:[a-z][a-z0-9_\-*/]{0,255}|[a-z0-9][a-z0-9_\-*/]{0,240}@[a-z][a-z0-9_\-*/]{0,13})\Z"
+)
+_TRACESTATE_VALUE_PATTERN: Final = re.compile(
+    r"\A(?:[\x20-\x2b\x2d-\x3c\x3e-\x7e]{0,255}[\x21-\x2b\x2d-\x3c\x3e-\x7e])?\Z"
+)
+_TRACESTATE_MAX_MEMBERS: Final = 32
 _TOKEN_PATTERN: Final = re.compile(r"\A[A-Za-z0-9\-._~+/]+=*\Z")
 _CORRELATION_PATTERN: Final = re.compile(r"\A[\x21-\x7e]{1,256}\Z")
 _SUBJECT_PATTERN: Final = re.compile(r"\A[\x20-\x7e]{1,256}\Z")
@@ -204,9 +212,11 @@ class A2AHostSecurityConfig:
                 "trusted_proxies is required before forwarded headers can be trusted"
             )
         for name, value in _int_limits(self).items():
-            if value <= 0:
+            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 raise A2AHostConfigurationError(f"{name} must be a positive integer")
         for name, seconds in _deadlines(self).items():
+            if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
+                raise A2AHostConfigurationError(f"{name} must be a finite positive number")
             if not math.isfinite(seconds) or seconds <= 0:
                 raise A2AHostConfigurationError(f"{name} must be a finite positive number")
         for name, probe in (
@@ -415,13 +425,29 @@ def _resolve_forwarded_headers(
     *,
     via_trusted_proxy: bool,
 ) -> frozenset[str]:
-    """Reject or strip forwarded headers that an untrusted peer asserted."""
+    """Reject or strip forwarded headers that were not explicitly trusted.
+
+    Notes:
+        A trusted proxy peer only authorizes the specific forwarded headers this
+        host is configured to trust; every other forwarded header present in the
+        request is stripped from the sanitized scope so it can never reach the
+        identity resolver, even though the immediate peer is trusted.
+    """
     present = {name for name in FORWARDED_HEADERS if headers.get(name)}
-    if not present or via_trusted_proxy:
+    if not present:
         return frozenset()
-    if config.reject_untrusted_forwarded_headers:
-        raise A2ARequestRejectedError("untrusted_forwarded_header", status_code=400)
-    return frozenset(present)
+    if not via_trusted_proxy:
+        if config.reject_untrusted_forwarded_headers:
+            raise A2ARequestRejectedError("untrusted_forwarded_header", status_code=400)
+        return frozenset(present)
+    trusted_names: set[str] = set()
+    if config.trust_forwarded_host:
+        trusted_names.add("x-forwarded-host")
+    if config.trust_forwarded_proto:
+        trusted_names.add("x-forwarded-proto")
+    if config.trust_forwarded_for:
+        trusted_names.add("x-forwarded-for")
+    return frozenset(present - trusted_names)
 
 
 def _effective_scheme(
@@ -458,8 +484,8 @@ def _effective_authority(
         raise A2ARequestRejectedError("missing_host", status_code=400)
     host, port = _split_authority(authority)
     if config.allowed_authorities:
-        candidates = {host if port is None else f"{host}:{port}", host}
-        if not candidates & config.allowed_authorities:
+        effective = host if port is None else f"{host}:{port}"
+        if effective not in config.allowed_authorities:
             raise A2ARequestRejectedError("authority_not_allowed", status_code=400)
         return host, port
     if config.allowed_hosts and host not in config.allowed_hosts:
@@ -596,15 +622,65 @@ def _validate_trace(
     for value in (traceparent, tracestate):
         if value and len(value.encode("latin-1")) > config.max_trace_header_bytes:
             raise A2ARequestRejectedError("trace_header_too_large", status_code=431)
-    if traceparent and not _TRACEPARENT_PATTERN.match(traceparent.lower()):
+    if traceparent and not _is_valid_traceparent(traceparent):
         dropped.add(TRACEPARENT_HEADER)
         dropped.add(TRACESTATE_HEADER)
         traceparent = ""
         tracestate = ""
-    if tracestate and not _TRACESTATE_PATTERN.match(tracestate):
+    if tracestate and not _is_valid_tracestate(tracestate):
         dropped.add(TRACESTATE_HEADER)
         tracestate = ""
-    return traceparent.lower(), tracestate, frozenset(dropped)
+    return traceparent, tracestate, frozenset(dropped)
+
+
+def _is_valid_traceparent(value: str) -> bool:
+    """Return whether ``value`` is a semantically valid W3C ``traceparent``.
+
+    Notes:
+        Matching is case-sensitive: the W3C specification requires lowercase
+        hex digits, so any uppercase character is invalid. The reserved
+        version ``ff`` and all-zero trace or parent IDs are rejected even
+        though they otherwise match the field grammar.
+    """
+    match = _TRACEPARENT_PATTERN.match(value)
+    if not match:
+        return False
+    version = match.group("version")
+    trace_id = match.group("trace_id")
+    parent_id = match.group("parent_id")
+    if version == "ff":
+        return False
+    if trace_id == "0" * 32:
+        return False
+    if parent_id == "0" * 16:
+        return False
+    return True
+
+
+def _is_valid_tracestate(value: str) -> bool:
+    """Return whether ``value`` is a semantically valid W3C ``tracestate``.
+
+    Notes:
+        Validates the full ``list-member`` grammar (bounded key and value
+        character sets, a bounded member count, and no duplicate keys) rather
+        than accepting arbitrary printable text.
+    """
+    members = [member.strip() for member in value.split(",")]
+    if not members or len(members) > _TRACESTATE_MAX_MEMBERS:
+        return False
+    seen: set[str] = set()
+    for member in members:
+        key, separator, member_value = member.partition("=")
+        if not separator:
+            return False
+        if not _TRACESTATE_KEY_PATTERN.match(key):
+            return False
+        if not _TRACESTATE_VALUE_PATTERN.match(member_value):
+            return False
+        if key in seen:
+            return False
+        seen.add(key)
+    return True
 
 
 def _resolve_mtls_subject(

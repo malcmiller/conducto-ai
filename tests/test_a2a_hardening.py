@@ -198,6 +198,9 @@ def _scope(
         {"trusted_proxies": frozenset({"not-an-address"})},
         {"allowed_ports": frozenset({0})},
         {"allowed_hosts": frozenset({"bad host"})},
+        {"max_page_size": 1.5},
+        {"max_accepted_concurrency": True},
+        {"request_deadline_seconds": True},
     ],
 )
 def test_invalid_configuration_is_rejected(kwargs: dict[str, Any]) -> None:
@@ -322,6 +325,7 @@ def test_repeated_host_header_is_ambiguous() -> None:
         ("agent.example", frozenset({"agent.example"}), True),
         ("agent.example:443", frozenset({"agent.example:443"}), True),
         ("agent.example:8443", frozenset({"agent.example:443"}), False),
+        ("agent.example:8443", frozenset({"agent.example"}), False),
         ("192.0.2.10", frozenset({"192.0.2.10"}), True),
         ("[2001:db8::1]", frozenset({"[2001:db8::1]"}), True),
     ],
@@ -449,6 +453,44 @@ def test_oversized_trace_header_is_rejected() -> None:
     assert error.value.reason == "trace_header_too_large"
 
 
+@pytest.mark.parametrize(
+    "traceparent",
+    [
+        "00-" + "A" * 32 + "-" + "b" * 16 + "-01",  # uppercase hex is invalid per W3C
+        "ff-" + "a" * 32 + "-" + "b" * 16 + "-01",  # reserved version
+        "00-" + "0" * 32 + "-" + "b" * 16 + "-01",  # all-zero trace-id
+        "00-" + "a" * 32 + "-" + "0" * 16 + "-01",  # all-zero parent-id
+    ],
+)
+def test_semantically_invalid_traceparent_values_are_dropped(traceparent: str) -> None:
+    """Traceparent values that satisfy the shape but violate W3C semantics are dropped."""
+    facts = evaluate_request(
+        _scope(headers={"traceparent": traceparent}), config=A2AHostSecurityConfig()
+    )
+    assert facts.traceparent == ""
+    assert "traceparent" in facts.dropped_headers
+
+
+def test_tracestate_with_invalid_member_grammar_is_dropped() -> None:
+    """A tracestate that is not a valid W3C member list is dropped, not propagated."""
+    facts = evaluate_request(
+        _scope(headers={"tracestate": "not a valid member list!!"}),
+        config=A2AHostSecurityConfig(),
+    )
+    assert facts.tracestate == ""
+    assert "tracestate" in facts.dropped_headers
+
+
+def test_tracestate_above_the_member_count_limit_is_dropped() -> None:
+    """A tracestate with more than 32 members exceeds W3C limits and is dropped."""
+    members = ",".join(f"v{index}=1" for index in range(33))
+    facts = evaluate_request(
+        _scope(headers={"tracestate": members}), config=A2AHostSecurityConfig()
+    )
+    assert facts.tracestate == ""
+    assert "tracestate" in facts.dropped_headers
+
+
 @pytest.mark.parametrize("delta", [-1, 0, 1])
 def test_correlation_header_boundaries(delta: int) -> None:
     """Correlation identifiers are bounded at, below, and above the limit."""
@@ -519,6 +561,31 @@ def test_trusted_proxy_forwarded_values_are_honored() -> None:
     )
     assert facts.via_trusted_proxy is True
     assert (facts.host, facts.scheme, facts.client) == ("public.example", "https", "198.51.100.7")
+
+
+def test_trusted_proxy_only_strips_forwarded_headers_it_is_not_trusted_for() -> None:
+    """A trusted peer asserts only the specific forwarded facts this host enabled."""
+    config = A2AHostSecurityConfig(
+        trusted_proxies=frozenset({"10.0.0.5"}),
+        trust_forwarded_host=True,
+        # trust_forwarded_proto and trust_forwarded_for remain False.
+    )
+    scope = _scope(
+        client=("10.0.0.5", 9000),
+        headers={
+            "x-forwarded-host": "public.example",
+            "x-forwarded-proto": "https",
+            "x-forwarded-for": "198.51.100.7",
+        },
+    )
+    facts = evaluate_request(scope, config=config)
+    assert facts.via_trusted_proxy is True
+    assert facts.host == "public.example"
+    assert "x-forwarded-host" not in facts.dropped_headers
+    assert {"x-forwarded-proto", "x-forwarded-for"} <= facts.dropped_headers
+    remaining = {key.decode("latin-1") for key, _ in sanitize_scope(scope, facts)["headers"]}
+    assert "x-forwarded-proto" not in remaining
+    assert "x-forwarded-for" not in remaining
 
 
 def test_forwarded_values_from_untrusted_peer_do_not_change_authority() -> None:
@@ -688,6 +755,49 @@ async def test_response_above_the_limit_returns_an_explicit_safe_failure() -> No
         response = await client.post(RPC_PATH, json=_send_payload(_message()), headers=_V1_HEADERS)
     assert response.status_code == 500
     assert response.json() == {"reason": "response_too_large"}
+
+
+@_sync
+async def test_outbound_task_metadata_above_the_limit_is_rejected() -> None:
+    """Metadata assembled onto the outbound task from the handler outcome is bounded."""
+
+    class _OversizedMetadataHandler(_Handler):
+        async def handle_message(
+            self,
+            message: Message,
+            *,
+            task_id: str,
+            context_id: str,
+            request_context: A2ARequestContext,
+        ) -> InvocationResult:
+            del message, context_id, request_context
+            self.entered.set()
+            return InvocationSuccess(correlation_id="x" * 4096, value={"echo": True})
+
+    handler = _OversizedMetadataHandler()
+    app, _, store = _build_app(config=A2AHostSecurityConfig(max_metadata_bytes=64), handler=handler)
+    async with _client(app) as client:
+        response = await client.post(RPC_PATH, json=_send_payload(_message()), headers=_V1_HEADERS)
+    assert "error" in response.json()
+    tasks, _ = await store.list(page_size=10)
+    assert [task.status.state for task in tasks] == [TaskState.TASK_STATE_FAILED]
+
+
+@_sync
+async def test_respond_never_exceeds_the_fixed_safety_ceiling() -> None:
+    """Probe and rejection responses are bounded by a fixed ceiling, not user config."""
+    from conducto.a2a import guard as guard_module
+
+    sent: list[Mapping[str, Any]] = []
+
+    async def send(message: Mapping[str, Any]) -> None:
+        sent.append(message)
+
+    await guard_module._respond(send, 200, {"reason": "x" * 4096})
+    assert sent[0]["status"] == 500
+    body = json.loads(sent[1]["body"])
+    assert body == {"reason": "response_too_large"}
+    assert len(sent[1]["body"]) <= guard_module._SAFE_RESPONSE_BYTE_CEILING
 
 
 # --------------------------------------------------------------------------- #
@@ -897,6 +1007,95 @@ async def test_explicit_cancellation_remains_owned_by_the_protocol_adapter() -> 
 
 
 @_sync
+async def test_adapter_failure_after_partial_response_is_not_flushed() -> None:
+    """A protocol-adapter failure after `response.start` discards the buffer and fails safely."""
+    from conducto.a2a.guard import A2ARequestGuard
+
+    config = A2AHostSecurityConfig()
+    store = InMemoryTaskRepository()
+    lifecycle = A2AHostLifecycle(config=config, task_repository=store)
+    lifecycle.mark_ready()
+    limiter = A2AConcurrencyLimiter(
+        limit=config.max_accepted_concurrency, per_key_limit=config.max_caller_concurrency
+    )
+
+    async def failing_app(
+        scope: Mapping[str, Any],
+        receive: Callable[[], Awaitable[Mapping[str, Any]]],
+        send: Callable[[Mapping[str, Any]], Awaitable[None]],
+    ) -> None:
+        del scope, receive
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        raise RuntimeError("adapter exploded after response.start was buffered")
+
+    guard = A2ARequestGuard(app=failing_app, config=config, lifecycle=lifecycle, limiter=limiter)
+
+    async def receive() -> Mapping[str, Any]:
+        return {"type": "http.request", "body": b"{}", "more_body": False}
+
+    sent: list[Mapping[str, Any]] = []
+
+    async def send(message: Mapping[str, Any]) -> None:
+        sent.append(message)
+
+    await guard(_scope(), receive, send)
+    assert len(sent) == 2
+    assert sent[0]["status"] == 500
+    assert json.loads(sent[1]["body"]) == {"reason": "internal_error"}
+
+
+@_sync
+async def test_orphaned_cancellation_stays_lifecycle_tracked_until_it_terminates() -> None:
+    """An execution that outlives its cancellation deadline is never abandoned."""
+    from conducto.a2a.guard import A2ARequestGuard
+
+    config = A2AHostSecurityConfig(
+        request_deadline_seconds=0.02, cancellation_deadline_seconds=0.02
+    )
+    store = InMemoryTaskRepository()
+    lifecycle = A2AHostLifecycle(config=config, task_repository=store)
+    lifecycle.mark_ready()
+    limiter = A2AConcurrencyLimiter(
+        limit=config.max_accepted_concurrency, per_key_limit=config.max_caller_concurrency
+    )
+    finished = asyncio.Event()
+
+    async def slow_app(
+        scope: Mapping[str, Any],
+        receive: Callable[[], Awaitable[Mapping[str, Any]]],
+        send: Callable[[Mapping[str, Any]], Awaitable[None]],
+    ) -> None:
+        del scope, receive, send
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.05)  # outlives the bounded cancellation wait
+            finished.set()
+            raise
+
+    guard = A2ARequestGuard(app=slow_app, config=config, lifecycle=lifecycle, limiter=limiter)
+
+    async def receive() -> Mapping[str, Any]:
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    sent: list[Mapping[str, Any]] = []
+
+    async def send(message: Mapping[str, Any]) -> None:
+        sent.append(message)
+
+    await guard(_scope(), receive, send)
+    assert json.loads(sent[-1]["body"]) == {"reason": "request_deadline_exceeded"}
+    assert lifecycle.in_flight == 1
+    await finished.wait()
+    for _ in range(1000):
+        if lifecycle.in_flight == 0:
+            break
+        await asyncio.sleep(0)
+    assert lifecycle.in_flight == 0
+
+
+@_sync
 async def test_drain_rejects_new_work_after_becoming_unready() -> None:
     """Drain marks the host unready first, then rejects newly arriving work."""
     app, _, _ = _build_app(config=A2AHostSecurityConfig(drain_deadline_seconds=0.05))
@@ -931,6 +1130,55 @@ async def test_drain_grace_expiry_cancels_inflight_and_clears_active_tasks() -> 
         task.status.state not in {TaskState.TASK_STATE_SUBMITTED, TaskState.TASK_STATE_WORKING}
         for task in tasks
     )
+
+
+@_sync
+async def test_drain_bounds_the_cancellation_wait_by_its_own_deadline() -> None:
+    """Drain's cancellation phase is bounded by its own deadline, not a second drain wait."""
+    release = asyncio.Event()
+
+    class _SlowToCancelHandler(_Handler):
+        async def handle_message(
+            self,
+            message: Message,
+            *,
+            task_id: str,
+            context_id: str,
+            request_context: A2ARequestContext,
+        ) -> InvocationResult:
+            del message, context_id, request_context
+            self.entered.set()
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                await release.wait()
+                raise
+            return InvocationSuccess(correlation_id=task_id, value={})
+
+    handler = _SlowToCancelHandler()
+    app, _, _ = _build_app(
+        config=A2AHostSecurityConfig(
+            drain_deadline_seconds=0.2,
+            cancellation_deadline_seconds=0.01,
+            request_deadline_seconds=10.0,
+        ),
+        handler=handler,
+    )
+    async with _client(app) as client:
+        request = asyncio.create_task(
+            client.post(RPC_PATH, json=_send_payload(_message()), headers=_V1_HEADERS)
+        )
+        await handler.entered.wait()
+        loop = asyncio.get_event_loop()
+        started = loop.time()
+        await app.drain()
+        elapsed = loop.time() - started
+        release.set()
+        await asyncio.gather(request, return_exceptions=True)
+    # Bounded by drain_deadline_seconds + cancellation_deadline_seconds (~0.21s); a
+    # regression that reuses drain_deadline_seconds for the cancellation phase would
+    # take roughly twice as long (~0.4s).
+    assert elapsed < 0.3
 
 
 # --------------------------------------------------------------------------- #
@@ -994,6 +1242,28 @@ async def test_lifespan_startup_failure_keeps_the_host_unready() -> None:
 
 
 @_sync
+async def test_startup_never_revives_a_draining_or_failed_host() -> None:
+    """Calling startup() again cannot move a draining or failed host back to ready."""
+    app, _, _ = _build_app(config=A2AHostSecurityConfig(drain_deadline_seconds=0.05))
+    await app.startup()
+    await app.drain()
+    with pytest.raises(A2AStartupError):
+        await app.startup()
+    assert app.lifecycle_state is A2AHostState.DRAINING
+
+    async def failing_on_startup() -> None:
+        raise RuntimeError("boom")
+
+    failed_app, _, _ = _build_app(on_startup=failing_on_startup)
+    with pytest.raises(A2AStartupError):
+        await failed_app.startup()
+    assert failed_app.lifecycle_state is A2AHostState.FAILED
+    with pytest.raises(A2AStartupError):
+        await failed_app.startup()
+    assert failed_app.lifecycle_state is A2AHostState.FAILED
+
+
+@_sync
 async def test_startup_deadline_failure_is_reported_without_detail() -> None:
     """A startup check that never completes fails with a stable reason code."""
 
@@ -1007,6 +1277,41 @@ async def test_startup_deadline_failure_is_reported_without_detail() -> None:
         await app.startup()
     assert error.value.reason == "startup_timeout"
     assert app.is_ready() is False
+
+
+class _ManualAwaitable:
+    """A custom awaitable that is neither a coroutine object nor an `asyncio.Future`."""
+
+    def __init__(self) -> None:
+        self._done = asyncio.Event()
+
+    def resolve(self) -> None:
+        """Allow one pending await on this object to complete."""
+        self._done.set()
+
+    def __await__(self) -> Any:
+        """Delegate awaiting to an internal event, without being a coroutine or Future."""
+        return self._done.wait().__await__()
+
+
+@_sync
+async def test_maybe_await_awaits_any_custom_awaitable_not_only_coroutines() -> None:
+    """A startup hook returning a bespoke awaitable is fully awaited before completion."""
+    awaitable = _ManualAwaitable()
+
+    def on_startup() -> _ManualAwaitable:
+        return awaitable
+
+    app, _, _ = _build_app(
+        on_startup=on_startup, config=A2AHostSecurityConfig(startup_deadline_seconds=5.0)
+    )
+    started = asyncio.create_task(app.startup())
+    await asyncio.sleep(0)
+    assert not started.done()
+    assert app.is_ready() is False
+    awaitable.resolve()
+    await started
+    assert app.is_ready() is True
 
 
 @_sync

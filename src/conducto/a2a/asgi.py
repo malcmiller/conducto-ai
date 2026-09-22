@@ -381,6 +381,8 @@ class _ConductoRequestHandler(RequestHandler):
         for artifact in task.artifacts:
             if len(artifact.parts) > self._config.max_artifact_parts:
                 raise A2APayloadLimitError("artifact_parts_exceeded")
+        if len(task.metadata):
+            enforce_metadata_limit(MessageToDict(task.metadata), self._config)
 
     async def on_message_send_stream(
         self, params: SendMessageRequest, context: ServerCallContext

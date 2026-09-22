@@ -31,6 +31,13 @@ from .lifecycle import A2AConcurrencyLimiter, A2AHostLifecycle
 
 _JSON_CONTENT_TYPE: Final = b"application/json"
 _NO_STORE: Final = b"no-store"
+_SAFE_RESPONSE_BYTE_CEILING: Final = 512
+"""Fixed internal bound for probe/rejection responses, independent of the
+user-configurable ``max_response_body_bytes``. These responses carry only a
+small, fixed vocabulary of internal reason codes; this ceiling is a defensive
+guarantee that they are never emitted unbounded, even under a very small
+configured ``max_response_body_bytes`` used to bound arbitrary protocol-adapter
+output."""
 
 
 class _RequestBodyLimitExceeded(Exception):
@@ -266,7 +273,10 @@ class A2ARequestGuard:
         finally:
             disconnect.cancel()
             overflow.cancel()
-            self._lifecycle.untrack(execution)
+            if execution.done():
+                self._lifecycle.untrack(execution)
+            else:
+                execution.add_done_callback(self._reap)
             await channel.aclose()
 
     async def _complete(
@@ -284,21 +294,23 @@ class A2ARequestGuard:
             await _reject(send, 500, "response_too_large")
             return
         if error is not None:
-            if not buffer.has_response:
-                emit_event(
-                    "a2a.request.failed",
-                    outcome="failure",
-                    error_category="protocol_adapter_failed",
-                )
-                await _reject(send, 500, "internal_error")
-                return
             emit_event(
                 "a2a.request.failed", outcome="failure", error_category="protocol_adapter_failed"
             )
+            await _reject(send, 500, "internal_error")
+            return
         await buffer.flush()
 
     async def _cancel(self, execution: asyncio.Task[None], *, reason: str) -> None:
-        """Cancel the protocol adapter and bound the cooperative cancellation wait."""
+        """Cancel the protocol adapter and bound the cooperative cancellation wait.
+
+        Notes:
+            When ``execution`` does not reach a terminal state within the bounded
+            wait, it is left running and lifecycle-tracked; the caller registers
+            :meth:`_reap` so the execution is never abandoned outside drain and
+            shutdown accounting, and it still terminalizes through the protocol
+            adapter's own cancellation-handling path once it finishes.
+        """
         emit_event(
             "a2a.request.terminated",
             outcome="cancelled" if reason != "request_deadline_exceeded" else "timeout",
@@ -308,6 +320,27 @@ class A2ARequestGuard:
             return
         execution.cancel()
         await asyncio.wait({execution}, timeout=self._config.cancellation_deadline_seconds)
+
+    def _reap(self, execution: asyncio.Task[None]) -> None:
+        """Untrack one execution that outlived its bounded cancellation wait.
+
+        Args:
+            execution: Completed protocol-adapter task registered as a done
+                callback after a bounded cancellation wait expired.
+
+        Notes:
+            The execution's outcome is retrieved so no unhandled exception or
+            cancellation is ever left unconsumed by the event loop.
+        """
+        if not execution.cancelled():
+            error = execution.exception()
+            if error is not None:
+                emit_event(
+                    "a2a.request.reaped",
+                    outcome="failure",
+                    error_category="orphaned_execution_failed",
+                )
+        self._lifecycle.untrack(execution)
 
 
 async def _invoke(
@@ -321,8 +354,20 @@ async def _invoke(
 
 
 async def _respond(send: Send, status: int, payload: dict[str, str]) -> None:
-    """Send one small JSON response with no dependency or credential detail."""
+    """Send one small JSON response with no dependency or credential detail.
+
+    Notes:
+        The emitted body is bounded by a fixed internal ceiling independent of
+        the configurable ``max_response_body_bytes``, so a probe or rejection
+        response can never be emitted unbounded even under a very small
+        configured limit for arbitrary protocol-adapter output. This never
+        triggers for the fixed, well-known reason vocabulary this module emits;
+        it is a defensive guarantee, not a normal code path.
+    """
     body = json.dumps(payload, sort_keys=True).encode("utf-8")
+    if len(body) > _SAFE_RESPONSE_BYTE_CEILING:
+        status = 500
+        body = json.dumps({"reason": "response_too_large"}, sort_keys=True).encode("utf-8")
     await send(
         {
             "type": "http.response.start",
