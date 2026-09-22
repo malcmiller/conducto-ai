@@ -67,4 +67,5 @@ testpaths = ["tests"]
 markers = [
     "acceptance: Milestone 1 quick-start acceptance flow (stable aggregate check).",
     "golden: Schema/golden-fixture tests pinning public wire contracts.",
+    "ollama: Opt-in tests against an already running local Ollama daemon.",
 ]
