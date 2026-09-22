@@ -9,8 +9,7 @@ supports the project but does not define Conducto's product architecture.
 .
 ├── AGENTS.md
 └── .github/
-    ├── instructions/
-    │   └── python.instructions.md
+    ├── copilot-instructions.md
     └── workflows/
         └── python-ci.yml
 ```
@@ -25,14 +24,14 @@ Repository-wide requirements live in [`AGENTS.md`](../AGENTS.md). They define:
 - mandatory validation and repository inspection
 - roadmap dependency discipline
 
-The path-scoped [`python.instructions.md`](../.github/instructions/python.instructions.md) adds
+The repository [`copilot-instructions.md`](../.github/copilot-instructions.md) adds
 Python requirements for typing, docstrings, tests, Ruff, mypy, packaging, and installed-wheel
 validation.
 
 The files are intentionally complementary:
 
 1. `AGENTS.md` applies repository-wide.
-2. `.github/instructions/python.instructions.md` adds Python-specific requirements.
+2. `.github/copilot-instructions.md` adds Python-specific requirements.
 3. An agent must satisfy both throughout this Python-only repository.
 
 Validation is part of implementation. Agents must not report Python code work as complete without

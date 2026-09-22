@@ -13,7 +13,15 @@ global discovery infrastructure.
 ## Declaring an agent
 
 `@a2a_agent` declares published identity and defaults. `@a2a_capability`
-declares a callable public capability, while `@tool` marks an internal export.
+declares a publishable governed capability, while `@tool` records an internal
+export on that agent instance.
+
+These are not two visibility levels for the same automatic invocation system.
+Capabilities enter runtime, registry, gateway, Agent Card, A2A, model-tool, and
+MCP flows when the corresponding policies admit them. An internal `@tool` is
+reflected into `BaseAgent.tools`, but currently has no automatic runtime or
+delegation execution path. See [Capabilities and tools](./capabilities-and-tools.md)
+for the complete comparison and the overloaded meanings of “tool.”
 
 ```python
 from conducto import BaseAgent, a2a_agent, a2a_capability
@@ -51,6 +59,9 @@ During `BaseAgent.__init__()`, `registration.py`:
 
 `BaseAgent.capabilities`, `tools`, and `registered_methods` return copies or
 immutable tuples rather than mutable internal dictionaries.
+
+An undecorated helper remains an ordinary Python method. Prefer that for
+implementation details that do not need reflected metadata.
 
 ## Agent Cards
 

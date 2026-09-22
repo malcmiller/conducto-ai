@@ -184,7 +184,11 @@ federation**.
 
 ## Documentation
 
-- [Documentation index](./docs/README.md)
+- [Start with Conducto in plain English](./docs/understanding/README.md)
+- [Build with Conducto](./docs/using/README.md)
+- [Understand the system design](./docs/system-design/README.md)
+- [Maintain and extend Conducto](./docs/maintainers/README.md)
+- [Complete documentation index](./docs/README.md)
 - [Python SDK architecture](./docs/architecture.md)
 - [Python SDK reference](./docs/sdk-reference.md)
 - [Python security and governance](./docs/security-and-governance.md)
