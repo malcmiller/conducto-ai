@@ -194,6 +194,7 @@ class McpToolExporter:
         arguments: Mapping[str, Any],
         *,
         principal: Principal | None = None,
+        authorization: AuthorizationContext | None = None,
         task_id: str,
         correlation_id: str = "",
         timeout: float | None = None,
@@ -205,6 +206,9 @@ class McpToolExporter:
             arguments: Raw MCP arguments, validated by the runtime.
             principal: Immutable stdio principal, or ``None`` for an anonymous
                 session that fails closed on protected capabilities.
+            authorization: Immutable authorization context supplied by an
+                authenticated transport. Its principal must match
+                ``principal`` when both are supplied.
             task_id: Stable task identifier for audit and approval lineage.
             correlation_id: Optional correlation identifier for the invocation.
             timeout: Earliest effective deadline for the invocation.
@@ -215,17 +219,29 @@ class McpToolExporter:
         Raises:
             McpToolNotFoundError: If the tool is not exported or the principal
                 is not eligible to invoke it.
+            McpExportError: If supplied authorization and principal disagree.
         """
         definition = self.tool(name)
-        if not definition.is_eligible_for(principal):
+        effective_principal = authorization.principal if authorization is not None else principal
+        if (
+            principal is not None
+            and authorization is not None
+            and principal != authorization.principal
+        ):
+            raise McpExportError("principal and authorization context disagree")
+        if not definition.is_eligible_for(effective_principal):
             raise McpToolNotFoundError(f"Unknown MCP tool '{name}'")
         agent = self._agents[definition.agent_id]
-        effective_correlation_id = correlation_id or self._runtime.new_correlation_id()
-        authorization = (
+        effective_correlation_id = (
+            authorization.correlation_id
+            if authorization is not None
+            else correlation_id or self._runtime.new_correlation_id()
+        )
+        effective_authorization = authorization or (
             None
-            if principal is None
+            if effective_principal is None
             else AuthorizationContext(
-                principal=principal,
+                principal=effective_principal,
                 task_id=task_id,
                 correlation_id=effective_correlation_id,
             )
@@ -236,7 +252,7 @@ class McpToolExporter:
             arguments,
             timeout=timeout,
             correlation_id=effective_correlation_id,
-            authorization=authorization,
+            authorization=effective_authorization,
         )
         return invocation_result_to_tool_outcome(result)
 
