@@ -15,6 +15,7 @@ SDK documentation for the flattened Python-only repository.
 - [Repository overview](./repository-overview.md) — repository purpose, structure, and key concepts.
 - [Communication paths and standards](./communication-and-standards.md) — A2A sequencing, local orchestration, container transport, and Microsoft Foundry-based model routing.
 - [Conducto A2A 1.0 profile](./a2a-1-profile.md) — pinned protocol provenance, feature matrix, compatibility policy, conformance fixtures, and update procedure.
+- [A2A ASGI server host](./a2a-server.md) — optional inbound ASGI adapter, Agent Card and JSON-RPC routes, task repository wiring, and the request-handler seam.
 - [Deployment topologies and federation](./deployment-and-federation.md) — local, container, Foundry, hybrid, and cross-organization scenarios plus ownership, trust, catalog, and workflow orchestration.
 - [Repository automation and agent guidance](./repository-automation.md) — coding-agent instructions, required validation, CI behavior, branch protection, and workflow maintenance.
 - [Architecture](./architecture.md) — component boundaries and end-to-end data flow.

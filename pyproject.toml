@@ -41,6 +41,7 @@ dependencies = [
     "a2a-sdk==1.1.5",
     "cryptography>=44.0.0",
     "packaging>=24.0",
+    "protobuf==7.36.2",
     "pydantic>=2.13.5",
 ]
 
@@ -56,6 +57,9 @@ registration = [
 ]
 mcp = [
     "mcp==2.2.0",
+]
+a2a-server = [
+    "a2a-sdk[http-server]==1.1.5",
 ]
 ollama = [
     "httpx>=0.28.1,<1.0",
@@ -79,7 +83,7 @@ opentelemetry = [
 
 [dependency-groups]
 dev = [
-    "conducto-ai[mcp,opentelemetry,test]",
+    "conducto-ai[a2a-server,mcp,opentelemetry,test]",
     "mypy>=1.14",
     "ruff>=0.9",
     "types-protobuf==7.35.1.20260906",
