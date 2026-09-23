@@ -169,6 +169,8 @@ jobs:
           wheel="$(ls dist/*.whl)"
           uv run --no-project --with "$wheel" python examples/quickstart.py
       - name: Installed-wheel smoke test (clean, no dev dependencies)
+        env:
+          CONDUCTO_REQUIRE_A2A_SERVER_SMOKE: "1"
         run: |
           wheel="$(ls dist/*.whl)"
           uv run --no-project --with "$wheel[a2a-server]" python scripts/smoke_test.py

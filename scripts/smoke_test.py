@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import os
 import runpy
 import sys
 from importlib import metadata
@@ -24,14 +25,20 @@ from pathlib import Path
 
 def _smoke_a2a_server() -> str:
     """Exercise the optional A2A server extra through the public ASGI API."""
+    require_a2a_server = os.environ.get("CONDUCTO_REQUIRE_A2A_SERVER_SMOKE") == "1"
     extras = metadata.metadata("conducto-ai").get_all("Provides-Extra") or []
     if "a2a-server" not in extras:
         return "A2A server smoke skipped: install the 'a2a-server' extra to exercise it."
 
-    import fastapi
-    import httpx
-    import starlette
-    import uvicorn
+    try:
+        import fastapi
+        import httpx
+        import starlette
+        import uvicorn
+    except ImportError:
+        if require_a2a_server:
+            raise
+        return "A2A server smoke skipped: install the 'a2a-server' extra to exercise it."
 
     assert fastapi.__version__ and starlette.__version__ and uvicorn.__version__
 

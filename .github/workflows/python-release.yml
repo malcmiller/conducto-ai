@@ -102,6 +102,8 @@ jobs:
           sdist="$(ls dist/*.tar.gz)"
           uv run --no-project python scripts/release_verify.py --wheel "$wheel" --sdist "$sdist" --output-dir release
       - name: Verify installed wheel quick start and smoke test
+        env:
+          CONDUCTO_REQUIRE_A2A_SERVER_SMOKE: "1"
         run: |
           wheel="$(ls dist/*.whl)"
           uv run --no-project --with "$wheel" python examples/quickstart.py
