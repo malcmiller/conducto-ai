@@ -48,6 +48,6 @@ jobs:
             curl --fail http://127.0.0.1:18000/livez && break
             sleep 1
           done
-          test "$(curl --fail --silent http://127.0.0.1:18000/readyz)" = '{"status":"ready"}'
-          docker stop --time 35 conducto-agent
+          curl --fail --silent http://127.0.0.1:18000/readyz | grep -q '"status": *"ready"'
+          docker stop --timeout 35 conducto-agent
           test "$(docker inspect conducto-agent --format '{{.State.ExitCode}}')" = "0"
