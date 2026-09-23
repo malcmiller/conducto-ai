@@ -24,6 +24,35 @@ _ROOT = Path(__file__).parents[2]
 _CARD_PATH = "/.well-known/agent-card.json"
 
 
+def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """Run one setup command and include captured output in failures."""
+    try:
+        return subprocess.run(
+            command,
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as error:
+        raise AssertionError(
+            "Command failed during installed-wheel acceptance setup:\n"
+            f"command: {error.cmd}\n"
+            f"exit code: {error.returncode}\n"
+            f"stdout:\n{error.stdout}\n"
+            f"stderr:\n{error.stderr}"
+        ) from error
+
+
+def _venv_python(environment: Path) -> Path:
+    """Return the platform-specific interpreter path in a virtual environment."""
+    return (
+        environment / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else environment / "bin" / "python"
+    )
+
+
 def _free_port() -> int:
     """Reserve an ephemeral loopback port until the child process binds it."""
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
@@ -35,15 +64,12 @@ def _wheel_environment(tmp_path: Path) -> Path:
     """Build and install the wheel plus its server extra in an isolated venv."""
     dist = tmp_path / "dist"
     constraints = tmp_path / "constraints.txt"
-    subprocess.run(
+    _run(
         ["uv", "build", "--wheel", "--out-dir", str(dist)],
         cwd=_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
     )
     wheel = next(dist.glob("*.whl"))
-    subprocess.run(
+    _run(
         [
             "uv",
             "export",
@@ -59,24 +85,32 @@ def _wheel_environment(tmp_path: Path) -> Path:
             str(constraints),
         ],
         cwd=_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
+    )
+    cache_prime_environment = tmp_path / "cache-prime"
+    _run(
+        ["uv", "venv", "--python", sys.executable, str(cache_prime_environment)],
+        cwd=tmp_path,
+    )
+    _run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(_venv_python(cache_prime_environment)),
+            "--constraint",
+            str(constraints),
+            f"{wheel}[a2a-server]",
+        ],
+        cwd=tmp_path,
     )
     environment = tmp_path / "installed"
-    subprocess.run(
+    _run(
         ["uv", "venv", "--python", sys.executable, str(environment)],
         cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
     )
-    python = (
-        environment / "Scripts" / "python.exe"
-        if os.name == "nt"
-        else environment / "bin" / "python"
-    )
-    subprocess.run(
+    python = _venv_python(environment)
+    _run(
         [
             "uv",
             "pip",
@@ -89,9 +123,6 @@ def _wheel_environment(tmp_path: Path) -> Path:
             f"{wheel}[a2a-server]",
         ],
         cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
     )
     return python
 
