@@ -24,6 +24,13 @@ execution to `Runtime`.
 Direct invocation is preferred for deterministic application workflows. It
 does not spend a model call selecting a target.
 
+Durable workflows are a separate, backend-neutral application boundary. Their
+adapter discovers and invokes capabilities through the gateway/runtime contract;
+they do not expose a workflow engine's APIs to agents or applications. See
+[ADR 0005](./decisions/0005-durable-workflow-backend.md) for the selected
+backend, in-memory CI contract, activity side-effect boundary, and the Story
+7.2 adapter design.
+
 ## Top-level model routing
 
 Use `OrchestratorAgent.route()` when a model must select one registered local
