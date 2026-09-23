@@ -222,20 +222,34 @@ class _ModelCallRecorder:
 class _InvocationState:
     def __init__(self) -> None:
         self._active = False
+        self._generation = 0
         self._model_tasks: set[asyncio.Task[Any]] = set()
+        self._context_generation: contextvars.ContextVar[int] = contextvars.ContextVar(
+            "conducto_invocation_generation",
+            default=0,
+        )
         self._lock = threading.Lock()
 
-    def activate(self) -> None:
-        """Activate the current invocation scope."""
+    def activate(self) -> contextvars.Token[int]:
+        """Activate the current invocation scope and invalidate stale child tasks."""
         with self._lock:
+            self._generation += 1
             self._active = True
+            return self._context_generation.set(self._generation)
 
-    def deactivate(self) -> None:
+    def deactivate(self, token: contextvars.Token[int] | None = None) -> None:
         """Deactivate the current invocation scope and cancel tracked model tasks."""
         with self._lock:
+            if not self._active:
+                if token is not None:
+                    self._context_generation.reset(token)
+                return
             self._active = False
+            self._generation += 1
             tasks = tuple(self._model_tasks)
             self._model_tasks.clear()
+        if token is not None:
+            self._context_generation.reset(token)
         for task in tasks:
             task.cancel()
 
@@ -243,6 +257,10 @@ class _InvocationState:
         """Ensure the invocation state is active before model gateway access."""
         with self._lock:
             if not self._active:
+                raise NoActiveRunContextError(
+                    "Model gateway is only available within its active runtime invocation"
+                )
+            if self._context_generation.get() != self._generation:
                 raise NoActiveRunContextError(
                     "Model gateway is only available within its active runtime invocation"
                 )
@@ -259,6 +277,10 @@ class _InvocationState:
             )
         with self._lock:
             if not self._active:
+                raise NoActiveRunContextError(
+                    "Model gateway is only available within its active runtime invocation"
+                )
+            if self._context_generation.get() != self._generation:
                 raise NoActiveRunContextError(
                     "Model gateway is only available within its active runtime invocation"
                 )
@@ -481,13 +503,13 @@ class RunContext:
         """Return model provenance recorded before a delegated invocation."""
         return self._model_calls.snapshot()
 
-    def activate_invocation(self) -> None:
+    def activate_invocation(self) -> contextvars.Token[int]:
         """Activate invocation-scoped model access for this context."""
-        self._invocation_state.activate()
+        return self._invocation_state.activate()
 
-    def deactivate_invocation(self) -> None:
+    def deactivate_invocation(self, token: contextvars.Token[int] | None = None) -> None:
         """Deactivate model access and cancel unfinished model calls."""
-        self._invocation_state.deactivate()
+        self._invocation_state.deactivate(token)
 
     def belongs_to(self, runtime: Runtime) -> bool:
         """Return whether this context was created by the given runtime."""
@@ -571,13 +593,13 @@ def require_run_context() -> RunContext:
 @contextmanager
 def use_run_context(context: RunContext) -> Iterator[RunContext]:
     """Activate a context and constrain its model gateways to this scope."""
-    context.activate_invocation()
+    invocation_token = context.activate_invocation()
     token = _CURRENT_RUN_CONTEXT.set(context)
     try:
         yield context
     finally:
         _CURRENT_RUN_CONTEXT.reset(token)
-        context.deactivate_invocation()
+        context.deactivate_invocation(invocation_token)
 
 
 def activate_run_context(context: RunContext) -> contextvars.Token[RunContext | None]:

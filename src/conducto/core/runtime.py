@@ -536,7 +536,15 @@ class Runtime:
         if binding is None:
             raise MissingModelDefaultError(f"Agent '{context.agent_id}' requires a model")
         lease = self._provider_registry.acquire(binding.registration)
+        from .run_context import get_run_context
+
+        current = get_run_context()
+        invocation_token: contextvars.Token[int] | None = None
+        context_token: contextvars.Token[RunContext | None] | None = None
         try:
+            if current is not context:
+                invocation_token = context.activate_invocation()
+                context_token = self.activate(context)
             return await complete_model_call(
                 context,
                 binding,
@@ -549,6 +557,10 @@ class Runtime:
                 clock=clock,
             )
         finally:
+            if context_token is not None:
+                self.deactivate(context_token)
+            if invocation_token is not None:
+                context.deactivate_invocation(invocation_token)
             await lease.release()
 
     @staticmethod
