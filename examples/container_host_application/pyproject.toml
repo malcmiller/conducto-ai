@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/container_host_application"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/container_host_application", "pyproject.toml"]
+
+[project]
+name = "container-host-application"
+version = "0.1.0"
+description = "Deterministic deployment applications for the Conducto container host example"
+requires-python = ">=3.12"
+dependencies = [
+    "conducto-ai[a2a-server]>=0.1.2",
+]
+

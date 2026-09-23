@@ -1,0 +1,7 @@
+{
+  "manifestVersion": "1",
+  "applications": {
+    "Agent A": "container_host_application.agent_a:build_app"
+  }
+}
+

@@ -1,9 +1,10 @@
-"""Reference process host for the immutable Conducto container image.
+"""Process host for the immutable Conducto container image.
 
 The host is intentionally model-neutral. It publishes a deterministic local
 capability so image verification never needs a model, provider credential, or
-network service. Applications can replace :func:`build_app` while retaining
-the same configuration and lifecycle boundary.
+network service. Deployment images can also bake a validated application
+manifest so one verified image digest can host multiple configured Conducto
+applications without accepting raw import paths from runtime input.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ import os
 import sys
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit
 
 from conducto import BaseAgent, Runtime, a2a_agent, a2a_capability
@@ -23,6 +24,11 @@ from conducto.a2a import (
     A2AAuthenticationRequest,
     A2AHostSecurityConfig,
     create_a2a_app,
+)
+from conducto.container_app import (
+    ResolvedContainerApplication,
+    resolve_container_application,
+    safe_container_application_metadata,
 )
 from conducto.core.model_config import RuntimeConfig
 from conducto.security import AuthorizationContext, Principal
@@ -201,7 +207,21 @@ async def _resolve_identity(request: A2AAuthenticationRequest) -> A2AAuthenticat
     )
 
 
-def build_app(config: ContainerConfig | None = None) -> Any:
+def build_host_security_config(config: ContainerConfig) -> A2AHostSecurityConfig:
+    """Build the immutable A2A host hardening policy for one container app."""
+    return A2AHostSecurityConfig(
+        allowed_paths=frozenset({config.a2a_endpoint, "/.well-known/agent-card.json"}),
+        liveness_path="/livez",
+        readiness_path="/readyz",
+        request_deadline_seconds=config.request_timeout_seconds,
+        shutdown_deadline_seconds=config.shutdown_grace_seconds,
+        drain_deadline_seconds=config.shutdown_grace_seconds,
+        max_accepted_concurrency=config.max_concurrency,
+        max_request_body_bytes=config.max_request_bytes,
+    )
+
+
+def build_reference_app(config: ContainerConfig | None = None) -> Any:
     """Build the reference ASGI application from immutable runtime settings."""
     selected = config or ContainerConfig.load()
     identity = _identity_resolver(selected)
@@ -211,17 +231,15 @@ def build_app(config: ContainerConfig | None = None) -> Any:
         public_url=selected.public_url,
         endpoint_path=selected.a2a_endpoint,
         identity_resolver=identity,
-        security_config=A2AHostSecurityConfig(
-            allowed_paths=frozenset({selected.a2a_endpoint, "/.well-known/agent-card.json"}),
-            liveness_path="/livez",
-            readiness_path="/readyz",
-            request_deadline_seconds=selected.request_timeout_seconds,
-            shutdown_deadline_seconds=selected.shutdown_grace_seconds,
-            drain_deadline_seconds=selected.shutdown_grace_seconds,
-            max_accepted_concurrency=selected.max_concurrency,
-            max_request_body_bytes=selected.max_request_bytes,
-        ),
+        security_config=build_host_security_config(selected),
     )
+
+
+def build_app(config: ContainerConfig | None = None) -> Any:
+    """Build the selected container ASGI application from immutable settings."""
+    selected = config or ContainerConfig.load()
+    app, _resolved, _metadata = _build_selected_application(selected)
+    return app
 
 
 def _diagnostic(error: ValueError) -> str:
@@ -230,6 +248,18 @@ def _diagnostic(error: ValueError) -> str:
     for name in _SECRET_NAMES:
         message = message.replace(name, "<redacted>")
     return f"configuration invalid: {message}"
+
+
+def _build_selected_application(
+    config: ContainerConfig,
+) -> tuple[Any, ResolvedContainerApplication, dict[str, Any]]:
+    """Resolve, build, and annotate the configured container application."""
+    resolved = resolve_container_application(config)
+    metadata = safe_container_application_metadata(config, resolved)
+    app = cast(Any, resolved.build(config))
+    app.conducto_container_metadata = metadata
+    app.conducto_container_application = resolved.key
+    return app, resolved, metadata
 
 
 def _identity_resolver(
@@ -262,14 +292,25 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = ContainerConfig.load()
-        build_app(config)
+        app, resolved, metadata = _build_selected_application(config)
         if args.check_config:
-            print(json.dumps({"status": "valid", "agent_id": config.agent_id}, sort_keys=True))
+            print(
+                json.dumps(
+                    {
+                        "agent_id": config.agent_id,
+                        "application_key": resolved.key,
+                        "manifest_version": resolved.manifest_version,
+                        "safe_metadata": metadata,
+                        "status": "valid",
+                    },
+                    sort_keys=True,
+                )
+            )
             return 0
         import uvicorn
 
         uvicorn.run(
-            build_app(config),
+            app,
             host=config.bind_host,
             port=config.bind_port,
             log_config=None,
