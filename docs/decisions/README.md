@@ -9,6 +9,7 @@ accident.
 | [0002](./0002-capability-first-boundaries.md) | Agents declare capabilities but do not own infrastructure | Accepted |
 | [0003](./0003-framework-neutral-asgi.md) | ASGI is the hosting contract; web frameworks remain optional | Accepted |
 | [0004](./0004-authority-only-attenuates.md) | Nested authority and budgets only attenuate | Accepted |
+| [0005](./0005-durable-workflow-backend.md) | Temporal is the default durable workflow backend behind Conducto contracts | Accepted |
 
 ## ADR format
 
