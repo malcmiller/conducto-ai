@@ -1,4 +1,3 @@
-
 """Discover and invoke a hosted demo agent from an installed Conducto wheel.
 
 This module is the third process in the installed-package A2A example. It
