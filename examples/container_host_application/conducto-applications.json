@@ -1,0 +1,10 @@
+{
+  "manifestVersion": "1",
+  "applications": {
+    "reference": "conducto.container:build_reference_app",
+    "orchestrator": "container_host_application.orchestrator:build_app",
+    "agent-a": "container_host_application.agent_a:build_app",
+    "agent-b": "container_host_application.agent_b:build_app"
+  }
+}
+

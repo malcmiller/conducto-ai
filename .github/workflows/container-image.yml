@@ -7,8 +7,11 @@ on:
       - "Dockerfile"
       - "pyproject.toml"
       - "uv.lock"
+      - "docs/container-image.md"
+      - "examples/container_host_application/**"
       - "src/**"
       - "tests/test_container.py"
+      - "tests/container_host_application/**"
       - ".github/workflows/container-image.yml"
   push:
     branches: [main]
@@ -17,8 +20,11 @@ on:
       - "Dockerfile"
       - "pyproject.toml"
       - "uv.lock"
+      - "docs/container-image.md"
+      - "examples/container_host_application/**"
       - "src/**"
       - "tests/test_container.py"
+      - "tests/container_host_application/**"
       - ".github/workflows/container-image.yml"
 
 jobs:
@@ -51,3 +57,30 @@ jobs:
           curl --fail --silent http://127.0.0.1:18000/readyz | grep -q '"status": *"ready"'
           docker stop --timeout 35 conducto-agent
           test "$(docker inspect conducto-agent --format '{{.State.ExitCode}}')" = "0"
+      - name: Build deployment example image
+        run: |
+          docker build \
+            --build-arg BASE_IMAGE=conducto-agent:ci \
+            --file examples/container_host_application/Dockerfile \
+            --tag conducto-container-host:ci \
+            examples/container_host_application
+      - name: Validate deployment example image selections
+        run: |
+          docker run --rm --read-only \
+            --tmpfs /tmp/conducto:rw,noexec,nosuid,size=64m \
+            --mount type=tmpfs,destination=/var/lib/conducto \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            -e CONDUCTO_APPLICATION=orchestrator \
+            conducto-container-host:ci --check-config | grep -q '"application_key": *"orchestrator"'
+          docker run --rm --read-only \
+            --tmpfs /tmp/conducto:rw,noexec,nosuid,size=64m \
+            --mount type=tmpfs,destination=/var/lib/conducto \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            -e CONDUCTO_APPLICATION=agent-a \
+            conducto-container-host:ci --check-config | grep -q '"application_key": *"agent-a"'
+          docker run --rm --read-only \
+            --tmpfs /tmp/conducto:rw,noexec,nosuid,size=64m \
+            --mount type=tmpfs,destination=/var/lib/conducto \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            -e CONDUCTO_APPLICATION=agent-b \
+            conducto-container-host:ci --check-config | grep -q '"application_key": *"agent-b"'
