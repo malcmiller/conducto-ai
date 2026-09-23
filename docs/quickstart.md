@@ -103,6 +103,17 @@ installed wheel. Install the wheel with the optional `mcp` extra
 official MCP SDK client; without the extra that section reports that it was
 skipped.
 
+To verify the optional A2A server dependency surface from an independently
+installed wheel, use:
+
+```bash
+uv run --no-project --with "$wheel[a2a-server]" python scripts/smoke_test.py
+```
+
+That bounded smoke test asserts the wheel metadata advertises
+`a2a-server`, imports Uvicorn/FastAPI/Starlette, and creates the public
+Conducto ASGI host without importing the checkout source tree.
+
 ## What the example demonstrates
 
 `examples/quickstart.py` defines `InvoiceAgent` and `IncidentAgent`, publishes

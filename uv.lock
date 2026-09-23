@@ -47,6 +47,15 @@ wheels = [
 ]
 
 [[package]]
+name = "annotated-doc"
+version = "0.0.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/8e/38aa427ed5402449e226975b649c5dc73ccadfefeb95e6aecb8f8ea4b6b6/annotated_doc-0.0.5.tar.gz", hash = "sha256:c7e58ce09192557605d8bbd92836d7e1d520ac9580096042c0bfd197efacf1bb", size = 10758, upload-time = "2026-07-28T13:50:58.129Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3e/30/e900b21425a860e195f32e37657aa1f7c7f2b1bfb26f03ca209b90933c06/annotated_doc-0.0.5-py3-none-any.whl", hash = "sha256:117bac03a25ede5df5440e855b32d556049ca169ead221505badf432fed4b101", size = 5302, upload-time = "2026-07-28T13:50:57.239Z" },
+]
+
+[[package]]
 name = "annotated-types"
 version = "0.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -460,6 +469,8 @@ dependencies = [
 [package.optional-dependencies]
 a2a-server = [
     { name = "a2a-sdk", extra = ["http-server"] },
+    { name = "fastapi" },
+    { name = "uvicorn" },
 ]
 mcp = [
     { name = "mcp" },
@@ -502,6 +513,7 @@ requires-dist = [
     { name = "azure-ai-projects", marker = "extra == 'microsoft-foundry'", specifier = ">=1.0.0b11" },
     { name = "azure-identity", marker = "extra == 'microsoft-foundry'", specifier = ">=1.17" },
     { name = "cryptography", specifier = ">=44.0.0" },
+    { name = "fastapi", marker = "extra == 'a2a-server'", specifier = ">=0.115,<1.0" },
     { name = "httpx", marker = "extra == 'ollama'", specifier = ">=0.28.1,<1.0" },
     { name = "httpx", marker = "extra == 'openai'", specifier = ">=0.28.1,<1.0" },
     { name = "httpx", marker = "extra == 'registration'", specifier = ">=0.28.1,<1.0" },
@@ -514,6 +526,7 @@ requires-dist = [
     { name = "protobuf", specifier = "==7.36.2" },
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=9.1.1" },
+    { name = "uvicorn", marker = "extra == 'a2a-server'", specifier = ">=0.34,<1.0" },
 ]
 provides-extras = ["registration", "mcp", "a2a-server", "ollama", "openai", "microsoft-foundry", "test", "opentelemetry"]
 
@@ -586,6 +599,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d9/e3/49afa1bc180e0d28008ec6bcdf82a4072d1c7a41032b5b759b60814ca4b0/culsans-0.11.0.tar.gz", hash = "sha256:0b43d0d05dce6106293d114c86e3fb4bfc63088cfe8ff08ed3fe36891447fe33", size = 107546, upload-time = "2025-12-31T23:15:38.196Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e0/5d/9fb19fb38f6d6120422064279ea5532e22b84aa2be8831d49607194feda3/culsans-0.11.0-py3-none-any.whl", hash = "sha256:278d118f63fc75b9db11b664b436a1b83cc30d9577127848ba41420e66eb5a47", size = 21811, upload-time = "2025-12-31T23:15:37.189Z" },
+]
+
+[[package]]
+name = "fastapi"
+version = "0.141.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "annotated-doc" },
+    { name = "pydantic" },
+    { name = "starlette" },
+    { name = "typing-extensions" },
+    { name = "typing-inspection" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/8a/02/91e3416a8fdd715abb903a952a6bec7cdd8d14eed55d415fc8595524c319/fastapi-0.141.1.tar.gz", hash = "sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1", size = 425799, upload-time = "2026-07-29T17:18:05.568Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/cb/03/10388a42375ee7e4ac9b94eb2c5c569c8b5795e377e701c9ac3ad63de890/fastapi-0.141.1-py3-none-any.whl", hash = "sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3", size = 131954, upload-time = "2026-07-29T17:18:04.364Z" },
 ]
 
 [[package]]

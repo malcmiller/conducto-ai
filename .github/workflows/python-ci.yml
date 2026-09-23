@@ -169,9 +169,11 @@ jobs:
           wheel="$(ls dist/*.whl)"
           uv run --no-project --with "$wheel" python examples/quickstart.py
       - name: Installed-wheel smoke test (clean, no dev dependencies)
+        env:
+          CONDUCTO_REQUIRE_A2A_SERVER_SMOKE: "1"
         run: |
           wheel="$(ls dist/*.whl)"
-          uv run --no-project --with "$wheel" python scripts/smoke_test.py
+          uv run --no-project --with "$wheel[a2a-server]" python scripts/smoke_test.py
       - name: Upload built distributions
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -60,6 +60,8 @@ mcp = [
 ]
 a2a-server = [
     "a2a-sdk[http-server]==1.1.5",
+    "fastapi>=0.115,<1.0",
+    "uvicorn>=0.34,<1.0",
 ]
 ollama = [
     "httpx>=0.28.1,<1.0",

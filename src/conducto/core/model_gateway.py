@@ -120,18 +120,22 @@ class ModelGateway:
         """
         task = self._context.begin_model_call()
         try:
-            return await self._runtime.complete(
-                self._context,
-                messages,
-                structured_output=structured_output,
-                model=self._reference,
-                tools=tools,
-                tool_results=tool_results,
-                required_capabilities=required_capabilities,
-                effective_deadline=effective_deadline,
-                purpose=purpose,
-                clock=clock,
-            )
+            try:
+                return await self._runtime.complete(
+                    self._context,
+                    messages,
+                    structured_output=structured_output,
+                    model=self._reference,
+                    tools=tools,
+                    tool_results=tool_results,
+                    required_capabilities=required_capabilities,
+                    effective_deadline=effective_deadline,
+                    purpose=purpose,
+                    clock=clock,
+                )
+            except asyncio.CancelledError:
+                self._context.require_active()
+                raise
         finally:
             self._context.end_model_call(task)
 
@@ -181,6 +185,7 @@ async def complete_model_call(
     clock: Callable[[], float] = time.monotonic,
 ) -> ModelCallResult:
     """Execute one resolved provider call without mutating the run context."""
+    context.require_active()
     if context.cancellation.cancelled:
         raise asyncio.CancelledError
     resolved = binding.model

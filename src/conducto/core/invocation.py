@@ -295,17 +295,21 @@ async def invoke_agent(
             }
             try:
                 if inspect.iscoroutinefunction(target):
-                    return await target(**call_arguments)
+                    result = await target(**call_arguments)
+                else:
 
-                def run_sync() -> Any:
-                    """Execute a synchronous capability under the shared runtime lock."""
-                    with execution_lock:
-                        return target(**call_arguments)
+                    def run_sync() -> Any:
+                        """Execute a synchronous capability under the shared runtime lock."""
+                        with execution_lock:
+                            return target(**call_arguments)
 
-                return await asyncio.to_thread(run_sync)
+                    result = await asyncio.to_thread(run_sync)
+                context.deactivate_invocation()
+                return result
             except asyncio.CancelledError:
                 raise
             except Exception as capability_error:
+                context.deactivate_invocation()
                 raise _CapabilityExecutionError(capability_error) from capability_error
 
         async def execute_until_cancelled() -> Any:
@@ -343,8 +347,24 @@ async def invoke_agent(
         )
         emit_event(INVOCATION_STARTED)
         try:
+            execution_task = asyncio.create_task(execute_until_cancelled())
+            # Yield once so the capability task has a scheduling opportunity before
+            # the timeout countdown begins. This prevents a scheduler race where a
+            # very short timeout expires before the target capability actually starts.
+            await asyncio.sleep(0)
             remaining = context.remaining_timeout()
-            result = await asyncio.wait_for(execute_until_cancelled(), timeout=remaining)
+            try:
+                result = await asyncio.wait_for(asyncio.shield(execution_task), timeout=remaining)
+            except asyncio.CancelledError:
+                execution_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await execution_task
+                raise
+            except TimeoutError:
+                execution_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await execution_task
+                raise
             serialized = serialize_result(result)
             emit_event(
                 INVOCATION_COMPLETED,
