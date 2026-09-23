@@ -105,7 +105,7 @@ jobs:
         run: |
           wheel="$(ls dist/*.whl)"
           uv run --no-project --with "$wheel" python examples/quickstart.py
-          uv run --no-project --with "$wheel" python scripts/smoke_test.py
+          uv run --no-project --with "$wheel[a2a-server]" python scripts/smoke_test.py
       - name: Verify sdist rebuilds the same version
         run: |
           mkdir isolated
