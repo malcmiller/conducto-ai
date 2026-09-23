@@ -60,7 +60,15 @@ from conducto.core.invocation_results import (
     InvocationValidationFailure,
 )
 
-from .errors import A2ADependencyError, A2AServerError
+from .errors import (
+    A2ADependencyError,
+    A2AHostConfigurationError,
+    A2APayloadLimitError,
+    A2ARequestRejectedError,
+    A2AServerError,
+    A2AShutdownError,
+    A2AStartupError,
+)
 from .factory import create_a2a_app
 from .handler import (
     A2ACancellableRequestHandler,
@@ -68,6 +76,8 @@ from .handler import (
     A2ARequestContext,
     A2ARequestHandler,
 )
+from .hardening import A2AHostSecurityConfig, A2AMTLSIdentityExtractor, A2ATransportFacts
+from .lifecycle import A2AConcurrencyLimiter, A2AHostLifecycle, A2AHostState
 from .profile import A2A_SERVER_EXTRA, require_a2a_server_dependency
 from .runtime import (
     A2AAuthenticatedIdentity,
@@ -79,9 +89,11 @@ from .runtime import (
 
 if TYPE_CHECKING:
     from .asgi import A2AASGI
+    from .guard import A2ARequestGuard
 
 _LAZY_EXPORTS = {
     "A2AASGI": "conducto.a2a.asgi",
+    "A2ARequestGuard": "conducto.a2a.guard",
 }
 
 
@@ -226,15 +238,27 @@ __all__ = [
     "A2AAuthenticatedIdentity",
     "A2AAuthenticationRequest",
     "A2ACancellableRequestHandler",
+    "A2AConcurrencyLimiter",
     "A2AContextRequestHandler",
     "A2ACapabilityBinding",
     "A2ADependencyError",
+    "A2AHostConfigurationError",
+    "A2AHostLifecycle",
+    "A2AHostSecurityConfig",
+    "A2AHostState",
     "A2AIdentityResolver",
+    "A2AMTLSIdentityExtractor",
+    "A2APayloadLimitError",
     "A2AProtocolError",
     "A2ARequestContext",
+    "A2ARequestGuard",
     "A2ARequestHandler",
+    "A2ARequestRejectedError",
     "A2ARuntimeHandler",
     "A2AServerError",
+    "A2AShutdownError",
+    "A2AStartupError",
+    "A2ATransportFacts",
     "CONDUCTO_PARAMETER_EXTENSION_URI",
     "create_a2a_app",
     "invocation_result_to_task",
