@@ -126,6 +126,9 @@ uv build
 wheel=$(ls dist/*.whl)
 uv run --no-project --with "$wheel" python examples/quickstart.py
 uv run --no-project --with "$wheel" python scripts/smoke_test.py
+uv run --no-project --with "$wheel[a2a-server]" python scripts/smoke_test.py
+uv run --no-project --with "$wheel[a2a-server]" python -m uvicorn \
+  conducto.examples.a2a_hosting:app --host 127.0.0.1 --port 8001
 ```
 
 Optional integrations are installed with package extras such as

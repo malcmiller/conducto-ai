@@ -18,7 +18,84 @@ import io
 import json
 import runpy
 import sys
+from importlib import metadata
 from pathlib import Path
+
+
+def _smoke_a2a_server() -> str:
+    """Exercise the optional A2A server extra through the public ASGI API."""
+    try:
+        import fastapi
+        import httpx
+        import starlette
+        import uvicorn
+    except ImportError:
+        return "A2A server smoke skipped: install the 'a2a-server' extra to exercise it."
+
+    extras = metadata.metadata("conducto-ai").get_all("Provides-Extra") or []
+    assert "a2a-server" in extras
+    assert fastapi.__version__ and starlette.__version__ and uvicorn.__version__
+
+    from conducto import BaseAgent, Runtime, a2a_agent, a2a_capability
+    from conducto.a2a import (
+        A2AAuthenticatedIdentity,
+        A2AAuthenticationRequest,
+        A2AHostSecurityConfig,
+        create_a2a_app,
+    )
+    from conducto.security import AuthorizationContext, Principal
+
+    @a2a_agent(
+        name="SmokeA2AServerAgent",
+        version="1.0.0",
+        description="Installed-wheel A2A server smoke test agent.",
+    )
+    class SmokeA2AServerAgent(BaseAgent):
+        """Expose one deterministic capability through the standard host factory."""
+
+        @a2a_capability(name="echo", description="Echo a deterministic value.")
+        def echo(self, value: str) -> dict[str, str]:
+            """Return the supplied value."""
+            return {"value": value}
+
+    async def resolve_identity(request: A2AAuthenticationRequest) -> A2AAuthenticatedIdentity:
+        """Return deterministic authority for the bounded local smoke request."""
+        return A2AAuthenticatedIdentity(
+            AuthorizationContext(
+                principal=Principal(
+                    subject_id="smoke",
+                    issuer="smoke",
+                    audience="SmokeA2AServerAgent",
+                    scopes=frozenset(),
+                ),
+                task_id=request.task_id,
+                correlation_id=request.correlation_id,
+            )
+        )
+
+    async def exercise() -> None:
+        app = create_a2a_app(
+            agent=SmokeA2AServerAgent(),
+            runtime=Runtime(),
+            public_url="http://127.0.0.1:8999",
+            identity_resolver=resolve_identity,
+            security_config=A2AHostSecurityConfig(readiness_path="/readyz"),
+        )
+        await app.startup()
+        try:
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://127.0.0.1:8999",
+            ) as client:
+                ready = await client.get("/readyz")
+                card = await client.get("/.well-known/agent-card.json")
+            assert ready.json() == {"status": "ready"}
+            assert card.json()["name"] == "SmokeA2AServerAgent"
+        finally:
+            await app.aclose()
+
+    asyncio.run(exercise())
+    return "A2A server smoke passed: optional extra metadata and ASGI host are available."
 
 
 def _smoke_mcp_stdio() -> str:
@@ -133,6 +210,7 @@ def main() -> int:
 
     asyncio.run(invoke())
 
+    print(_smoke_a2a_server())
     example = Path(__file__).resolve().parents[1] / "examples" / "agent_chaining.py"
     chaining = runpy.run_path(str(example))
     asyncio.run(chaining["main"]())
