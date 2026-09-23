@@ -26,6 +26,7 @@ def create_a2a_app(
     runtime: Runtime,
     public_url: str,
     identity_resolver: A2AIdentityResolver,
+    endpoint_path: str = _A2A_RPC_PATH,
     task_repository: TaskRepository | None = None,
     clock: Callable[[], float] = time.time,
     max_timeout: float = 300.0,
@@ -43,6 +44,7 @@ def create_a2a_app(
         agent: Reflected Conducto agent to publish and invoke.
         runtime: Canonical runtime that owns governed capability execution.
         public_url: Absolute HTTP(S) origin visible to remote A2A clients.
+        endpoint_path: Exact path used for the JSON-RPC endpoint.
         identity_resolver: Required application-owned authentication boundary.
         task_repository: Optional task persistence implementation. An isolated
             in-memory repository is created when omitted.
@@ -71,7 +73,7 @@ def create_a2a_app(
         subprocess. Every accepted capability invocation enters ``runtime``
         through :class:`A2ARuntimeHandler`.
     """
-    endpoint_url = _derive_endpoint_url(public_url)
+    endpoint_url = _derive_endpoint_url(public_url, endpoint_path)
     from .asgi import A2AASGI
 
     handler = A2ARuntimeHandler(
@@ -103,7 +105,7 @@ def create_a2a_app(
     )
 
 
-def _derive_endpoint_url(public_url: str) -> str:
+def _derive_endpoint_url(public_url: str, endpoint_path: str) -> str:
     """Derive the canonical JSON-RPC endpoint from an absolute public origin."""
     if not isinstance(public_url, str) or not public_url or public_url != public_url.strip():
         raise ValueError("public_url must be a non-empty absolute HTTP(S) origin")
@@ -120,7 +122,15 @@ def _derive_endpoint_url(public_url: str) -> str:
         raise ValueError("public_url contains an invalid port") from error
     if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
         raise ValueError("public_url must not contain a path, query, or fragment")
-    return f"{parsed.scheme.lower()}://{parsed.netloc}{_A2A_RPC_PATH}"
+    if (
+        not endpoint_path.startswith("/")
+        or endpoint_path != endpoint_path.strip()
+        or "?" in endpoint_path
+        or "#" in endpoint_path
+        or endpoint_path == "/"
+    ):
+        raise ValueError("endpoint_path must be a non-root absolute path")
+    return f"{parsed.scheme.lower()}://{parsed.netloc}{endpoint_path}"
 
 
 __all__ = ["create_a2a_app"]
