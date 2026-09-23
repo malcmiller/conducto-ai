@@ -50,7 +50,11 @@ def _wheel_environment(tmp_path: Path) -> Path:
         capture_output=True,
         text=True,
     )
-    python = environment / "Scripts" / "python.exe"
+    python = (
+        environment / "Scripts" / "python.exe"
+        if os.name == "nt"
+        else environment / "bin" / "python"
+    )
     subprocess.run(
         ["uv", "pip", "install", "--python", str(python), f"{wheel}[a2a-server]"],
         cwd=tmp_path,
