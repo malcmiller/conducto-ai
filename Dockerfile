@@ -8,7 +8,7 @@ RUN python -m pip install --no-cache-dir uv==0.8.14
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
 RUN uv build --wheel --out-dir /wheel \
- && uv export --locked --no-dev --extra a2a-server --no-emit-project --format requirements-txt --output-file /wheel/requirements.txt \
+ && uv export --locked --no-dev --extra a2a-server --no-emit-project --format requirements.txt --output-file /wheel/requirements.txt \
  && uv venv /opt/venv \
  && uv pip install --python /opt/venv/bin/python --requirement /wheel/requirements.txt \
  && uv pip install --python /opt/venv/bin/python --no-deps /wheel/conducto_ai-*.whl
@@ -34,5 +34,5 @@ USER 65532:65532
 EXPOSE 8000
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=3 \
-  CMD ["python", "-c", "import json,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=2); assert json.load(r)['status']=='alive'"]
+  CMD ["python", "-c", "import json,os,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('CONDUCTO_BIND_PORT','8000')+'/livez', timeout=2); assert json.load(r)['status']=='alive'"]
 ENTRYPOINT ["python", "-m", "conducto.container"]

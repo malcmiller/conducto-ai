@@ -16,10 +16,12 @@ docker build \
   --build-arg IMAGE_VERSION="0.1.2-$REVISION" \
   --tag conducto-agent:0.1.2-"$REVISION" .
 docker image inspect conducto-agent:0.1.2-"$REVISION" \
-  --format '{{index .RepoDigests 0}}'
+  --format 'local-image={{.Id}}'
 ```
 
-Promotion records the resulting `repo@sha256:...` digest, source revision,
+Local builds expose an immutable image ID. After pushing to a registry, record
+the resulting `repo@sha256:...` digest with `docker buildx imagetools inspect`
+or registry inspection. Promotion records that digest, source revision,
 platform, wheel filename, lockfile checksum, SBOM, provenance attestation, and
 scanner result. Never promote a mutable tag.
 

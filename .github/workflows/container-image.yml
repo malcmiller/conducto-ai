@@ -1,0 +1,53 @@
+name: Container image
+
+on:
+  pull_request:
+    paths:
+      - ".dockerignore"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/**"
+      - "tests/test_container.py"
+      - ".github/workflows/container-image.yml"
+  push:
+    branches: [main]
+    paths:
+      - ".dockerignore"
+      - "Dockerfile"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/**"
+      - "tests/test_container.py"
+      - ".github/workflows/container-image.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --tag conducto-agent:ci .
+      - name: Validate image metadata
+        run: |
+          test "$(docker image inspect conducto-agent:ci --format '{{.Config.User}}')" = "65532:65532"
+          docker run --rm --read-only \
+            --tmpfs /tmp/conducto:rw,noexec,nosuid,size=64m \
+            --mount type=tmpfs,destination=/var/lib/conducto \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            conducto-agent:ci --check-config
+      - name: Exercise probes and graceful termination
+        run: |
+          docker run --detach --name conducto-agent \
+            --read-only --tmpfs /tmp/conducto:rw,noexec,nosuid,size=64m \
+            --mount type=tmpfs,destination=/var/lib/conducto \
+            --cap-drop=ALL --security-opt=no-new-privileges \
+            --publish 18000:8000 conducto-agent:ci
+          trap 'docker rm --force conducto-agent' EXIT
+          for attempt in $(seq 1 30); do
+            curl --fail http://127.0.0.1:18000/livez && break
+            sleep 1
+          done
+          test "$(curl --fail --silent http://127.0.0.1:18000/readyz)" = '{"status":"ready"}'
+          docker stop --time 35 conducto-agent
+          test "$(docker inspect conducto-agent --format '{{.State.ExitCode}}')" = "0"

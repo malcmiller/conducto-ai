@@ -123,7 +123,8 @@ def _derive_endpoint_url(public_url: str, endpoint_path: str) -> str:
     if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
         raise ValueError("public_url must not contain a path, query, or fragment")
     if (
-        not endpoint_path.startswith("/")
+        not isinstance(endpoint_path, str)
+        or not endpoint_path.startswith("/")
         or endpoint_path != endpoint_path.strip()
         or "?" in endpoint_path
         or "#" in endpoint_path

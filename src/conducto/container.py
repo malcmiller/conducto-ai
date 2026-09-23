@@ -12,9 +12,10 @@ import argparse
 import json
 import os
 import sys
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from conducto import BaseAgent, Runtime, a2a_agent, a2a_capability
 from conducto.a2a import (
@@ -23,6 +24,7 @@ from conducto.a2a import (
     A2AHostSecurityConfig,
     create_a2a_app,
 )
+from conducto.core.model_config import RuntimeConfig
 from conducto.security import AuthorizationContext, Principal
 
 _PREFIX = "CONDUCTO_"
@@ -125,7 +127,14 @@ class ContainerConfig:
                 item.strip() for item in values["scopes"].split(",") if item.strip()
             )
         elif "scopes" in values:
-            values["scopes"] = tuple(values["scopes"])
+            scopes = values["scopes"]
+            if (
+                isinstance(scopes, (str, bytes))
+                or not isinstance(scopes, (list, tuple, set, frozenset))
+                or any(not isinstance(scope, str) for scope in scopes)
+            ):
+                raise ValueError("scopes must be a sequence of strings")
+            values["scopes"] = tuple(scopes)
         result = cls(**values)
         if not result.agent_id.strip():
             raise ValueError("agent_id must not be empty")
@@ -139,6 +148,17 @@ class ContainerConfig:
             raise ValueError("log_format must be 'json' or 'text'")
         if not result.a2a_endpoint.startswith("/"):
             raise ValueError("a2a_endpoint must start with '/'")
+        if result.a2a_endpoint == "/" or any(
+            marker in result.a2a_endpoint for marker in ("?", "#", " ", "\r", "\n")
+        ):
+            raise ValueError("a2a_endpoint must be a non-root path without query or fragment")
+        parsed_url = urlsplit(result.public_url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise ValueError("public_url must be an absolute HTTP(S) origin")
+        if parsed_url.path not in {"", "/"} or parsed_url.query or parsed_url.fragment:
+            raise ValueError("public_url must not contain a path, query, or fragment")
+        if not result.provider_type.strip():
+            raise ValueError("provider_type must not be empty")
         if any(name in result.model_reference.lower() for name in _SECRET_NAMES):
             raise ValueError("model_reference must not contain secret-like material")
         return result
@@ -151,6 +171,13 @@ class ContainerConfig:
 )
 class ReferenceAgent(BaseAgent):
     """Expose one deterministic capability for single-container smoke tests."""
+
+    def __init__(self, config: ContainerConfig) -> None:
+        """Initialize the agent with the deployment-selected model reference."""
+        super().__init__(model_reference=config.model_reference)
+        self.agent_metadata = replace(
+            self.agent_metadata, name=config.agent_id, version=config.agent_version
+        )
 
     @a2a_capability(name="echo", description="Return a deterministic local value.")
     def echo(self, value: str) -> dict[str, str]:
@@ -177,12 +204,13 @@ async def _resolve_identity(request: A2AAuthenticationRequest) -> A2AAuthenticat
 def build_app(config: ContainerConfig | None = None) -> Any:
     """Build the reference ASGI application from immutable runtime settings."""
     selected = config or ContainerConfig.load()
+    identity = _identity_resolver(selected)
     return create_a2a_app(
-        agent=ReferenceAgent(),
-        runtime=Runtime(),
+        agent=ReferenceAgent(selected),
+        runtime=Runtime(config=RuntimeConfig(default_model=selected.model_reference)),
         public_url=selected.public_url,
         endpoint_path=selected.a2a_endpoint,
-        identity_resolver=_resolve_identity,
+        identity_resolver=identity,
         security_config=A2AHostSecurityConfig(
             allowed_paths=frozenset({selected.a2a_endpoint, "/.well-known/agent-card.json"}),
             liveness_path="/livez",
@@ -204,6 +232,29 @@ def _diagnostic(error: ValueError) -> str:
     return f"configuration invalid: {message}"
 
 
+def _identity_resolver(
+    config: ContainerConfig,
+) -> Any:
+    """Build an identity resolver from deployment trust metadata."""
+
+    async def resolve(request: A2AAuthenticationRequest) -> A2AAuthenticatedIdentity:
+        """Return the configured, credential-free authority facts."""
+        return A2AAuthenticatedIdentity(
+            AuthorizationContext(
+                principal=Principal(
+                    subject_id="container-local",
+                    issuer=config.issuer or "conducto-container",
+                    audience=config.audience or config.agent_id,
+                    scopes=frozenset(config.scopes),
+                ),
+                task_id=request.task_id,
+                correlation_id=request.correlation_id,
+            )
+        )
+
+    return resolve
+
+
 def main(argv: list[str] | None = None) -> int:
     """Validate configuration and run the installed reference host."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -211,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = ContainerConfig.load()
+        build_app(config)
         if args.check_config:
             print(json.dumps({"status": "valid", "agent_id": config.agent_id}, sort_keys=True))
             return 0
