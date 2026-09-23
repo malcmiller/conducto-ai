@@ -14,18 +14,33 @@ _ROOT = Path(__file__).resolve().parents[2]
 
 
 def _docker_available() -> bool:
-    """Return whether Docker is installed and the daemon is reachable."""
+    """Return whether Docker is installed, reachable, and runs Linux containers.
+
+    The example deployment image is Linux-only. Windows CI runners typically
+    ship Docker configured for Windows containers, which cannot pull the
+    ``python:3.12-slim-bookworm`` base image, so this check also confirms the
+    daemon's container OS before allowing the build-based test to run.
+    """
     binary = shutil.which("docker")
     if binary is None:
         return False
-    result = subprocess.run(
+    info_result = subprocess.run(
         [binary, "info"],
         cwd=_ROOT,
         capture_output=True,
         text=True,
         check=False,
     )
-    return result.returncode == 0
+    if info_result.returncode != 0:
+        return False
+    os_result = subprocess.run(
+        [binary, "version", "--format", "{{.Server.Os}}"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return os_result.returncode == 0 and os_result.stdout.strip() == "linux"
 
 
 @pytest.mark.skipif(not _docker_available(), reason="docker is not available")
