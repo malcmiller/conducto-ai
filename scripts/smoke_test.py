@@ -24,16 +24,15 @@ from pathlib import Path
 
 def _smoke_a2a_server() -> str:
     """Exercise the optional A2A server extra through the public ASGI API."""
-    try:
-        import fastapi
-        import httpx
-        import starlette
-        import uvicorn
-    except ImportError:
+    extras = metadata.metadata("conducto-ai").get_all("Provides-Extra") or []
+    if "a2a-server" not in extras:
         return "A2A server smoke skipped: install the 'a2a-server' extra to exercise it."
 
-    extras = metadata.metadata("conducto-ai").get_all("Provides-Extra") or []
-    assert "a2a-server" in extras
+    import fastapi
+    import httpx
+    import starlette
+    import uvicorn
+
     assert fastapi.__version__ and starlette.__version__ and uvicorn.__version__
 
     from conducto import BaseAgent, Runtime, a2a_agent, a2a_capability

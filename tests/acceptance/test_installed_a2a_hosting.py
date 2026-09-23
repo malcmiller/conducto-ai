@@ -34,6 +34,7 @@ def _free_port() -> int:
 def _wheel_environment(tmp_path: Path) -> Path:
     """Build and install the wheel plus its server extra in an isolated venv."""
     dist = tmp_path / "dist"
+    constraints = tmp_path / "constraints.txt"
     subprocess.run(
         ["uv", "build", "--wheel", "--out-dir", str(dist)],
         cwd=_ROOT,
@@ -42,6 +43,26 @@ def _wheel_environment(tmp_path: Path) -> Path:
         text=True,
     )
     wheel = next(dist.glob("*.whl"))
+    subprocess.run(
+        [
+            "uv",
+            "export",
+            "--locked",
+            "--no-dev",
+            "--extra",
+            "a2a-server",
+            "--no-emit-project",
+            "--no-hashes",
+            "--format",
+            "requirements.txt",
+            "--output-file",
+            str(constraints),
+        ],
+        cwd=_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     environment = tmp_path / "installed"
     subprocess.run(
         ["uv", "venv", "--python", sys.executable, str(environment)],
@@ -56,13 +77,36 @@ def _wheel_environment(tmp_path: Path) -> Path:
         else environment / "bin" / "python"
     )
     subprocess.run(
-        ["uv", "pip", "install", "--python", str(python), f"{wheel}[a2a-server]"],
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            "--offline",
+            "--constraint",
+            str(constraints),
+            f"{wheel}[a2a-server]",
+        ],
         cwd=tmp_path,
         check=True,
         capture_output=True,
         text=True,
     )
     return python
+
+
+def _observability_path(temporary_directory: Path, agent: str, port: int) -> Path:
+    """Return the deterministic per-process observability file path."""
+    return temporary_directory / f"{agent}-{port}-observability.jsonl"
+
+
+def _observations(temporary_directory: Path, agent: str, port: int) -> list[dict[str, Any]]:
+    """Read deterministic observability records emitted by one hosted process."""
+    path = _observability_path(temporary_directory, agent, port)
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 def _installed_environment_assertions(python: Path) -> None:
@@ -117,6 +161,9 @@ def _start_agent(
             "CONDUCTO_DEMO_COMPOSITION": composition,
             "PYTHONUNBUFFERED": "1",
         }
+    )
+    environment["CONDUCTO_DEMO_OBSERVABILITY_PATH"] = str(
+        _observability_path(temporary_directory, agent, port)
     )
     if downstream_card_url is not None:
         environment["CONDUCTO_DEMO_DOWNSTREAM_CARD_URL"] = downstream_card_url
@@ -290,11 +337,12 @@ def test_installed_wheel_hosts_independent_agents_and_delegates(
             check=True,
             capture_output=True,
             text=True,
+            timeout=10,
         )
         value = json.loads(orchestrated.stdout)
         assert value["value"] == "receipt-7"
         assert value["correlation_id"] == "installed-chain-1"
-        assert value["scopes"] == ["demo:downstream", "demo:invoke"]
+        assert value["scopes"] == ["demo:downstream"]
 
         async def exercise() -> None:
             card_a = await discover_agent(
@@ -309,7 +357,17 @@ def test_installed_wheel_hosts_independent_agents_and_delegates(
             )
             assert card_a.name == "InstalledDemoAgentA"
             assert card_b.name == "InstalledDemoAgentB"
+            card_a_payload = dict(card_a.card)
             card = dict(card_b.card)
+            denied_delegate = await _send(
+                agent_a_port,
+                _skill(card_a_payload, "delegate"),
+                {"value": "denied"},
+                correlation_id="installed-delegate-denied",
+                scopes="",
+            )
+            assert denied_delegate["status"]["state"] == "TASK_STATE_REJECTED"
+            assert denied_delegate["metadata"]["reason"] == "authorization_denied"
             denied = await _send(
                 agent_b_port,
                 _skill(card, "restricted"),
@@ -337,6 +395,18 @@ def test_installed_wheel_hosts_independent_agents_and_delegates(
             assert timed_out["metadata"]["reason"] == "timeout"
 
         asyncio.run(exercise())
+        agent_a_observations = _observations(tmp_path, "agent-a", agent_a_port)
+        agent_b_observations = _observations(tmp_path, "agent-b", agent_b_port)
+        assert len(agent_a_observations) == 1
+        assert len(agent_b_observations) == 1
+        assert agent_a_observations[0]["correlation_id"] == "installed-chain-1"
+        assert agent_b_observations[0]["correlation_id"] == "installed-chain-1"
+        assert agent_a_observations[0]["delegated_scopes"] == ["demo:downstream"]
+        assert agent_b_observations[0]["scopes"] == ["demo:downstream"]
+        assert agent_a_observations[0]["downstream_task_id"] == agent_b_observations[0]["task_id"]
+        assert agent_b_observations[0]["lineage"] == [agent_a_observations[0]["task_id"]]
+        assert value["task_id"] == agent_b_observations[0]["task_id"]
+        assert value["lineage"] == [agent_a_observations[0]["task_id"]]
         _stop(agent_b)
         with pytest.raises(DiscoveryError):
             asyncio.run(

@@ -17,9 +17,11 @@ import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from a2a.client import ClientCallContext
 from a2a.types.a2a_pb2 import Message, Part, Role, SendMessageRequest, TaskState
 
 from conducto import BaseAgent, Runtime, a2a_agent, a2a_capability, get_run_context
@@ -35,6 +37,7 @@ from conducto.transport import A2AClient, DiscoveryPolicy, discover_agent
 
 _LOOPBACK_HOST = "127.0.0.1"
 _DEFAULT_SCOPES = frozenset({"demo:invoke", "demo:downstream"})
+_DELEGATED_SCOPES = frozenset({"demo:downstream"})
 
 
 def _environment(name: str, default: str = "") -> str:
@@ -55,6 +58,16 @@ def _port() -> int:
     if not 1 <= port <= 65535:
         raise RuntimeError("CONDUCTO_DEMO_PORT must be between 1 and 65535")
     return port
+
+
+def _record_observation(agent: str, capability: str, payload: dict[str, Any]) -> None:
+    """Append deterministic demo observability when the acceptance test requests it."""
+    path = os.environ.get("CONDUCTO_DEMO_OBSERVABILITY_PATH")
+    if not path:
+        return
+    record = {"agent": agent, "capability": capability, **payload}
+    with Path(path).open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n")
 
 
 async def resolve_demo_identity(request: A2AAuthenticationRequest) -> A2AAuthenticatedIdentity:
@@ -109,13 +122,15 @@ class DownstreamAgent(BaseAgent):
         assert isinstance(metadata, dict)
         a2a_metadata = metadata.get("a2a")
         assert isinstance(a2a_metadata, dict)
-        return {
+        result = {
             "value": value,
             "correlation_id": context.correlation_id,
             "task_id": authorization.task_id,
             "lineage": a2a_metadata.get("lineage", []),
             "scopes": sorted(authorization.principal.scopes),
         }
+        _record_observation("agent-b", "process", result)
+        return result
 
     @require_scope("demo:required")
     @a2a_capability(name="restricted", description="Require a scope not granted by default.")
@@ -149,6 +164,7 @@ class DelegatingAgent(BaseAgent):
         self._downstream_card_url = downstream_card_url
         super().__init__()
 
+    @require_scope("demo:invoke")
     @a2a_capability(name="delegate", description="Delegate one value to Agent B.")
     async def delegate(self, value: str) -> dict[str, Any]:
         """Discover Agent B and invoke its published process skill through A2A."""
@@ -192,9 +208,15 @@ class DelegatingAgent(BaseAgent):
             if remaining_timeout is not None:
                 metadata["timeoutSeconds"] = remaining_timeout
             message.metadata.update({"x-conducto": metadata})
+            delegated_scopes = sorted(authorization.principal.scopes & _DELEGATED_SCOPES)
             events = [
                 event
-                async for event in await client.send_message(SendMessageRequest(message=message))
+                async for event in await client.send_message(
+                    SendMessageRequest(message=message),
+                    context=ClientCallContext(
+                        service_parameters={"x-demo-scopes": ",".join(delegated_scopes)}
+                    ),
+                )
             ]
         finally:
             await client.close()
@@ -204,6 +226,18 @@ class DelegatingAgent(BaseAgent):
         value = json.loads(artifact.parts[0].text)
         if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
             raise RuntimeError("downstream agent returned an invalid deterministic result")
+        _record_observation(
+            "agent-a",
+            "delegate",
+            {
+                "correlation_id": context.correlation_id,
+                "delegated_scopes": delegated_scopes,
+                "downstream_lineage": value.get("lineage", []),
+                "downstream_task_id": value.get("task_id", ""),
+                "task_id": authorization.task_id,
+                "value": value.get("value", ""),
+            },
+        )
         return value
 
 
