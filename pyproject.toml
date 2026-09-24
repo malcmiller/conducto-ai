@@ -107,7 +107,8 @@ convention = "google"
 [tool.mypy]
 python_version = "3.12"
 packages = ["conducto"]
-mypy_path = "src"
+mypy_path = "src:tests/acceptance/containerized/fixtures/identity/src:tests/acceptance/containerized/fixtures/model/src"
+exclude = "^tests/acceptance/containerized/fixtures/(identity|model)/src/"
 strict = true
 warn_unused_ignores = true
 
