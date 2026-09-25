@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, get_type_hints
+from typing import Any, get_args, get_type_hints
 
 from pydantic import BaseModel, PydanticInvalidForJsonSchema, TypeAdapter, ValidationError
 
@@ -111,10 +111,13 @@ def build_return_schema(target: Callable[..., Any]) -> dict[str, Any] | None:
         ValueError: If a present return annotation cannot be represented as a
             deterministic JSON Schema.
     """
-    adapter = _annotation_adapter(_return_annotation(target))
-    if adapter is None:
+    annotation = _return_annotation(target)
+    if annotation is inspect.Signature.empty or annotation is None:
         return None
-    schema = _adapter_schema(adapter)
+    try:
+        schema = dict(TypeAdapter(annotation).json_schema())
+    except (PydanticInvalidForJsonSchema, TypeError, ValueError) as error:
+        raise ValueError(f"Unsupported gateway output schema: {error}") from error
     _validate_schema(schema)
     return schema
 
@@ -131,6 +134,8 @@ def _annotation_adapter(annotation: Any) -> TypeAdapter[Any] | None:
         return None
     if annotation is Any:
         return None
+    if not _references_pydantic_annotation(annotation):
+        return None
     try:
         adapter = TypeAdapter(annotation)
         schema = adapter.json_schema()
@@ -139,6 +144,12 @@ def _annotation_adapter(annotation: Any) -> TypeAdapter[Any] | None:
     if not _references_pydantic_model(annotation, schema):
         return None
     return adapter
+
+
+def _references_pydantic_annotation(annotation: Any) -> bool:
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return True
+    return any(_references_pydantic_annotation(item) for item in get_args(annotation))
 
 
 def _adapter_schema(adapter: TypeAdapter[Any] | None) -> dict[str, Any]:
