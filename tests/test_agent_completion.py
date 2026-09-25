@@ -115,8 +115,16 @@ def test_agent_completion_requires_an_active_run_context() -> None:
 
 
 def test_agent_completion_rejects_empty_message_sequences() -> None:
-    with pytest.raises(ValueError, match="requires at least one message"):
-        asyncio.run(_CompletionAgent().complete(()))
+    async def exercise() -> None:
+        runtime, _registry, _provider = _runtime()
+        context = runtime.create_run_context(agent_id="CompletionAgent", call_override="model")
+        with (
+            use_run_context(context),
+            pytest.raises(ValueError, match="requires at least one message"),
+        ):
+            await _CompletionAgent().complete(())
+
+    asyncio.run(exercise())
 
 
 def test_agent_completion_rejects_blank_prompts() -> None:
