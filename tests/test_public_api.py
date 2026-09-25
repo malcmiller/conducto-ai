@@ -65,6 +65,14 @@ def test_domain_packages_publish_contracts_without_umbrella_aliases() -> None:
             "create_a2a_app",
         ),
         "conducto.testing": ("FakeModel", "FakeModelRequest"),
+        "conducto.resources": (
+            "DataSourceLifecycle",
+            "DataSourceNotReadyError",
+            "ContentBatch",
+            "ProvisioningConfig",
+            "ReadinessCheck",
+            "ReadinessPolicy",
+        ),
     }
     for module_name, symbols in owners.items():
         module = importlib.import_module(module_name)

@@ -64,6 +64,7 @@ The detailed reference remains authoritative:
 
 - [Agents and registration](./agents-and-registration.md)
 - [Capabilities and tools](./capabilities-and-tools.md)
+- [Data source lifecycle](./data-source-lifecycle.md)
 - [Agent chaining](./agent-chaining.md)
 - [Orchestration and delegation](./orchestration-and-delegation.md)
 - [Gateway and discovery](./gateway-and-discovery.md)
