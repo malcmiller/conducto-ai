@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 from pydantic import BaseModel
 
@@ -24,6 +24,7 @@ from .run_context import require_run_context
 
 if TYPE_CHECKING:
     from .delegation import DelegationConfig, DelegationOutcome
+    from .model_gateway import ModelCallResult
 
 __all__ = ["BaseAgent"]
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -115,6 +116,26 @@ class BaseAgent:
             response_type=response_type,
         )
 
+    @overload
+    async def complete(
+        self,
+        prompt: str | Sequence[ChatMessage],
+        *,
+        model: ModelReference | str | None = None,
+        tools: Sequence[ProviderToolDefinition] = (),
+        structured_output: StructuredOutputRequest,
+    ) -> ModelCallResult: ...
+
+    @overload
+    async def complete(
+        self,
+        prompt: str | Sequence[ChatMessage],
+        *,
+        model: ModelReference | str | None = None,
+        tools: Sequence[ProviderToolDefinition] = (),
+        structured_output: None = None,
+    ) -> Any: ...
+
     async def complete(
         self,
         prompt: str | Sequence[ChatMessage],
@@ -139,14 +160,20 @@ class BaseAgent:
                 Conducto derives the contract from that annotation and returns
                 the validated typed value. When explicitly supplied, this
                 schema is used as an escape hatch and the raw model call result
-                is returned. Outside a typed capability, omission sends a
-                permissive non-required object contract because the provider
-                protocol requires one.
+                is returned even when a derived capability contract exists.
+                Outside a typed capability, omission sends a permissive
+                non-required object contract because the provider protocol
+                requires one.
 
         Returns:
             The validated typed capability value for derived contracts, or the
             provider result and invocation metadata for explicit/permissive
             contracts.
+
+        Notes:
+            Passing ``structured_output`` is an explicit override and disables
+            derived capability return validation for this call. Omit it to use
+            the active capability's Pydantic return annotation.
 
         Raises:
             asyncio.CancelledError: If the active invocation is cancelled.
