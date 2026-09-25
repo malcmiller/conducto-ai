@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from decimal import Decimal
 
 import pytest
 from pydantic import ValidationError
@@ -63,6 +64,10 @@ def test_retrieval_contracts_are_immutable_deterministic_and_json_safe() -> None
         RetrievalQuery(query=" ")
     with pytest.raises(ValidationError, match="score must be finite"):
         RetrievedDocument(text="text", source="source", score=float("nan"))
+    with pytest.raises(ValidationError, match="score must be finite"):
+        RetrievedDocument(text="text", source="source", score="inf")
+    with pytest.raises(ValidationError, match="score must be finite"):
+        RetrievedDocument(text="text", source="source", score=Decimal("NaN"))
     with pytest.raises(ValidationError, match="unsupported value object"):
         RetrievedDocument(text="text", source="source", metadata={"bad": object()})
     with pytest.raises(ValidationError, match="Instance is frozen"):

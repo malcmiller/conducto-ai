@@ -84,8 +84,15 @@ class RetrievedDocument(BaseModel):
 
     @field_validator("score", mode="before")
     @classmethod
-    def _finite_score(cls, value: object) -> object:
-        if isinstance(value, bool) or (isinstance(value, int | float) and not math.isfinite(value)):
+    def _reject_boolean_score(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("score must be finite")
+        return value
+
+    @field_validator("score")
+    @classmethod
+    def _finite_score(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
             raise ValueError("score must be finite")
         return value
 

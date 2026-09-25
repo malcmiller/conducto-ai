@@ -32,6 +32,7 @@ from ..provider import (
     build_terminal_output_request,
     parse_model_decision,
 )
+from ..retrieval import RetrievalProvenance
 from ..run_context import (
     InvocationMetadata,
     ModelCallProvenance,
@@ -78,6 +79,7 @@ async def run_delegation(
     records: list[DelegationToolCallRecord] = []
     results: list[ToolResultEnvelope] = []
     ordered_model_calls: list[ModelCallProvenance] = []
+    ordered_retrievals: list[RetrievalProvenance] = list(context.retrievals())
     fallback_pending = False
 
     def finish(
@@ -119,7 +121,7 @@ async def run_delegation(
             resolution_source=base_metadata.resolution_source,
             usage=usage or aggregate_usage(ordered_model_calls),
             model_calls=tuple(ordered_model_calls),
-            retrievals=base_metadata.retrievals,
+            retrievals=tuple(ordered_retrievals),
             attributes=base_metadata.attributes,
             instruction_chain=base_metadata.instruction_chain,
         )
@@ -323,6 +325,8 @@ async def run_delegation(
                 else ()
             )
             ordered_model_calls.extend(child_model_calls)
+            if isinstance(child_metadata, InvocationMetadata):
+                ordered_retrievals.extend(child_metadata.retrievals)
             fallback_allowed = config.fallback.permits(envelope.status)
             records.append(
                 DelegationToolCallRecord(

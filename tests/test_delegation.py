@@ -4,7 +4,15 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from conducto import AgentRegistry, BaseAgent, Runtime, a2a_agent, a2a_capability
+from conducto import (
+    AgentRegistry,
+    BaseAgent,
+    RetrievedDocument,
+    Runtime,
+    a2a_agent,
+    a2a_capability,
+    retriever,
+)
 from conducto.core.delegation import (
     DelegationConfig,
     DelegationFallbackPolicy,
@@ -67,6 +75,17 @@ class Worker(BaseAgent):
     def fail(self) -> str:
         type(self).calls += 1
         raise RuntimeError("sensitive child failure")
+
+    @retriever(name="retrieve", description="Retrieve a value.", citations=True)
+    def retrieve(self, query: str) -> list[RetrievedDocument]:
+        type(self).calls += 1
+        return [
+            RetrievedDocument(
+                text=f"sensitive payload: {query}",
+                source="memory",
+                citation="memory#value",
+            )
+        ]
 
 
 @a2a_agent(name="BlockingWorker", version="1.0.0", description="Blocking worker.")
@@ -241,6 +260,41 @@ def test_one_tool_result_is_matched_and_terminal_output_is_validated() -> None:
             "delegation_turn",
             "delegation_turn",
         ]
+
+    asyncio.run(exercise())
+
+
+def test_delegated_retriever_preserves_payload_free_provenance() -> None:
+    async def exercise() -> None:
+        agents = AgentRegistry()
+        agents.register(Worker())
+        probe = Runtime(agent_registry=agents)
+        tool_id = await _tool_id(probe, _policy("retrieve"))
+        runtime, _model = _runtime(
+            FakeModel(
+                script=(
+                    _call(tool_id, "retrieve-1", {"query": "policy"}),
+                    _terminal("complete"),
+                )
+            ),
+            registry=agents,
+        )
+
+        outcome = await _run(
+            runtime,
+            DelegationConfig(toolbox=_policy("retrieve")),
+        )
+
+        assert outcome.code is DelegationOutcomeCode.SUCCESS
+        assert [item.to_dict() for item in outcome.metadata.retrievals] == [
+            {
+                "retriever_id": "retrieve",
+                "document_count": 1,
+                "sources": ["memory"],
+                "citations": ["memory#value"],
+            }
+        ]
+        assert "sensitive payload" not in repr(outcome.metadata.to_dict())
 
     asyncio.run(exercise())
 
