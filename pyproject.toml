@@ -10,7 +10,7 @@ include = ["src/conducto", "README.md", "LICENSE", "pyproject.toml"]
 
 [project]
 name = "conducto-ai"
-version = "0.1.2"
+version = "0.2.0"
 description = "A capability-first Python framework for building governed multi-agent systems"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.12"
