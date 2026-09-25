@@ -298,6 +298,7 @@ class SecurityPipeline:
         agent_id: str,
         capability_id: str,
         context: AuthorizationContext,
+        instruction_chain: tuple[str, ...] = (),
     ) -> Any:
         """Consume an approved challenge, then execute its protected work.
 
@@ -307,6 +308,9 @@ class SecurityPipeline:
             agent_id: Agent bound to the invocation.
             capability_id: Capability bound to the invocation.
             context: Immutable authorization context for the invocation.
+            instruction_chain: Resolved, ordered instruction chain -- runtime
+                policy, then agent, then capability instructions -- recorded
+                on the approval lifecycle audit events emitted here.
 
         Returns:
             The callback result, awaited when necessary.
@@ -335,6 +339,7 @@ class SecurityPipeline:
                 "expired",
                 challenge_id=decision.approval_id,
                 required=False,
+                instruction_chain=instruction_chain,
             )
             raise
         except KeyError as error:
@@ -363,6 +368,7 @@ class SecurityPipeline:
                 "expired",
                 challenge_id=decision.approval_id,
                 required=False,
+                instruction_chain=instruction_chain,
             )
             raise
         if not decision.approved:
@@ -377,6 +383,7 @@ class SecurityPipeline:
                 challenge_id=challenge.approval_id,
                 policy_version=challenge.policy_version,
                 required=True,
+                instruction_chain=instruction_chain,
             )
             raise AuthorizationDeniedError("approval was denied")
         if self.store.state(challenge.approval_id).value != "working":
@@ -391,6 +398,7 @@ class SecurityPipeline:
                 challenge_id=challenge.approval_id,
                 policy_version=challenge.policy_version,
                 required=True,
+                instruction_chain=instruction_chain,
             )
             raise ApprovalRequiredError("additional approvals are required")
         await self._emit(
@@ -404,6 +412,7 @@ class SecurityPipeline:
             challenge_id=challenge.approval_id,
             policy_version=challenge.policy_version,
             required=True,
+            instruction_chain=instruction_chain,
         )
         self.store.complete(challenge.approval_id)
         result = execute()
@@ -418,8 +427,22 @@ class SecurityPipeline:
         agent_id: str,
         capability_id: str,
         context: AuthorizationContext,
+        instruction_chain: tuple[str, ...] = (),
     ) -> ApprovalChallenge:
-        """Cancel a pending approval and emit its auditable lifecycle outcome."""
+        """Cancel a pending approval and emit its auditable lifecycle outcome.
+
+        Args:
+            approval_id: Identifier of the pending approval to cancel.
+            agent_id: Agent bound to the invocation.
+            capability_id: Capability bound to the invocation.
+            context: Immutable authorization context for the invocation.
+            instruction_chain: Resolved, ordered instruction chain -- runtime
+                policy, then agent, then capability instructions -- recorded
+                on the approval lifecycle audit events emitted here.
+
+        Returns:
+            The canceled approval challenge.
+        """
         if self.store is None:
             raise InvalidApprovalStateError("an approval store is required to cancel")
         try:
@@ -435,6 +458,7 @@ class SecurityPipeline:
                 "expired",
                 challenge_id=approval_id,
                 required=False,
+                instruction_chain=instruction_chain,
             )
             raise
         await self._emit(
@@ -448,6 +472,7 @@ class SecurityPipeline:
             challenge_id=challenge.approval_id,
             policy_version=challenge.policy_version,
             required=False,
+            instruction_chain=instruction_chain,
         )
         return challenge
 

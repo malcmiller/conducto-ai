@@ -12,6 +12,7 @@ from conducto.security.approval import ApprovalDecision
 from conducto.security.context import AuthorizationContext, delegate_context
 
 from .agent import BaseAgent
+from .instructions import resolve_instruction_chain
 from .invocation_results import (
     InvocationResult,
     InvocationSuccess,
@@ -34,6 +35,10 @@ from .run_context import get_run_context, use_run_context
 from .runtime import Runtime
 
 __all__ = ["OrchestratorAgent"]
+
+_ROUTING_INSTRUCTIONS = (
+    "Choose one capability from the structured local registry. Return only the requested schema."
+)
 
 
 class OrchestratorAgent(BaseAgent):
@@ -102,6 +107,11 @@ class OrchestratorAgent(BaseAgent):
             active_context.authorization if active_context is not None else None,
             authorization,
         )
+        instruction_chain = resolve_instruction_chain(
+            self.runtime.config.policy_instructions,
+            self.agent_metadata.instructions,
+            _ROUTING_INSTRUCTIONS,
+        )
         context = self.runtime.create_run_context(
             agent_id=self.agent_metadata.name,
             agent_config=self.agent_config,
@@ -110,6 +120,7 @@ class OrchestratorAgent(BaseAgent):
             correlation_id=correlation_id,
             required_capabilities=frozenset({"structured_output"}),
             authorization=effective_authorization,
+            instruction_chain=instruction_chain,
         )
 
         assert context.model is not None
@@ -124,16 +135,9 @@ class OrchestratorAgent(BaseAgent):
                 required=False,
             )
             messages = (
-                ChatMessage(
-                    role="system",
-                    content=(
-                        "Choose one capability from the structured local registry. "
-                        "Return only the requested schema."
-                    ),
-                ),
                 ChatMessage(role="user", content=user_input),
                 ChatMessage(
-                    role="system",
+                    role="user",
                     content=json.dumps(routing_metadata, sort_keys=True),
                 ),
             )

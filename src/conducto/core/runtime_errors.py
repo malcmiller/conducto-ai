@@ -16,6 +16,19 @@ class NoActiveRunContextError(ConductoError):
     """Model-backed code was called without an active runtime invocation."""
 
 
+class UntrustedSystemMessageError(ConductoError, ValueError):
+    """A capability supplied a ``system``-role message to a runtime model call.
+
+    The framework composes the sole system-role message from the resolved,
+    trusted instruction chain (runtime policy, then agent, then capability
+    instructions) so that callers cannot inject, replace, or suppress those
+    instructions. Capability code must not construct its own ``system``-role
+    :class:`~conducto.core.provider.ChatMessage`; declare persona or
+    behavioral text through ``@a2a_agent``/``@a2a_capability`` ``instructions``
+    instead.
+    """
+
+
 class ModelResolutionError(ConductoError):
     """Base error raised before model-backed work begins."""
 

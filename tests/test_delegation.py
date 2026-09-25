@@ -164,6 +164,36 @@ def test_no_tool_terminal_response_does_not_invoke_gateway() -> None:
     asyncio.run(exercise())
 
 
+def test_delegation_outcome_metadata_preserves_the_run_context_instruction_chain() -> None:
+    """Delegated outcomes must report the same instruction chain as their run context.
+
+    Regression test for a delegation outcome that reconstructed
+    ``InvocationMetadata`` without copying ``instruction_chain`` from the run
+    context's own metadata, silently dropping governed instructions from
+    delegated provenance even though the underlying model calls were composed
+    with them.
+    """
+
+    async def exercise() -> None:
+        runtime, _model = _runtime(FakeModel(_terminal("done")))
+        context = runtime.create_run_context(
+            agent_id="Caller",
+            call_override="model",
+            instruction_chain=("Runtime policy.", "Agent persona."),
+        )
+        with use_run_context(context):
+            outcome = await run_delegation(
+                context,
+                (ChatMessage(role="user", content="complete the task"),),
+                config=DelegationConfig(),
+                response_type=Answer,
+            )
+        assert outcome.code is DelegationOutcomeCode.SUCCESS
+        assert outcome.metadata.instruction_chain == ("Runtime policy.", "Agent persona.")
+
+    asyncio.run(exercise())
+
+
 def test_required_capability_unavailable_fails_before_model_call() -> None:
     async def exercise() -> None:
         runtime, model = _runtime(FakeModel(_terminal("unused")))

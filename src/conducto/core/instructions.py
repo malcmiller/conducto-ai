@@ -18,6 +18,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from .provider import ChatMessage
+from .runtime_errors import UntrustedSystemMessageError
 
 __all__ = [
     "compose_system_message",
@@ -85,8 +86,17 @@ def compose_system_message(
 ) -> tuple[ChatMessage, ...]:
     """Prepend one composed system message for a resolved instruction chain.
 
+    The framework exclusively owns the system role of a runtime-issued model
+    call: the sole system-role message is always the one composed here from
+    the trusted, resolved instruction chain. This guarantees that a caller
+    cannot inject, replace, or suppress trusted instructions by supplying a
+    competing ``system``-role message alongside its arguments.
+
     Args:
-        messages: Conversation history for the provider request.
+        messages: Conversation history for the provider request. Must not
+            already contain a ``system``-role message; declare persona or
+            behavioral text through ``@a2a_agent``/``@a2a_capability``
+            ``instructions`` instead.
         instruction_chain: Resolved, ordered instruction chain to compose
             into the system role, as produced by
             :func:`resolve_instruction_chain`.
@@ -95,7 +105,18 @@ def compose_system_message(
         The original messages unchanged when ``instruction_chain`` is empty;
         otherwise a new tuple with one system :class:`ChatMessage` -- built
         by joining the chain with blank lines -- prepended.
+
+    Raises:
+        UntrustedSystemMessageError: If ``messages`` already contains a
+            ``system``-role message. The framework owns the system role, so
+            capability code must not construct one directly.
     """
+    if any(message.role == "system" for message in messages):
+        raise UntrustedSystemMessageError(
+            "Capability-supplied messages must not use the 'system' role; the "
+            "runtime composes the sole system message from the resolved, "
+            "trusted instruction chain."
+        )
     if not instruction_chain:
         return tuple(messages)
     composed = "\n\n".join(instruction_chain)

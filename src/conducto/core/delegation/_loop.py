@@ -120,6 +120,7 @@ async def run_delegation(
             usage=usage or aggregate_usage(ordered_model_calls),
             model_calls=tuple(ordered_model_calls),
             attributes=base_metadata.attributes,
+            instruction_chain=base_metadata.instruction_chain,
         )
         return DelegationOutcome(
             code=code,

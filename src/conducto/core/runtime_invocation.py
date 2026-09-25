@@ -93,7 +93,8 @@ async def resume_approved_capability(
     cancellation: CancellationState | None,
 ) -> InvocationResult:
     """Resume a persisted approval through the same invocation pipeline."""
-    from .invocation import invoke_agent
+    from .instructions import resolve_instruction_chain
+    from .invocation import _resolve_capability, invoke_agent
 
     async def execute() -> InvocationResult:
         return await invoke_agent(
@@ -121,6 +122,13 @@ async def resume_approved_capability(
             if candidate is requested:
                 capability_name = name
                 break
+    resolved = _resolve_capability(agent, capability)
+    capability_metadata = resolved[1].capability if resolved is not None else None
+    instruction_chain = resolve_instruction_chain(
+        runtime.config.policy_instructions,
+        agent.agent_metadata.instructions,
+        capability_metadata.instructions if capability_metadata is not None else None,
+    )
     try:
         return cast(
             InvocationResult,
@@ -130,6 +138,7 @@ async def resume_approved_capability(
                 agent_id=agent.agent_metadata.name,
                 capability_id=capability_name,
                 context=authorization,
+                instruction_chain=instruction_chain,
             ),
         )
     except SecurityError as error:
