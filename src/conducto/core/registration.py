@@ -194,6 +194,7 @@ def resolve_export_metadata(
         description=metadata.description or inspect.getdoc(method),
         model_required=metadata.model_required,
         tags=metadata.tags,
+        instructions=metadata.instructions,
     )
 
 

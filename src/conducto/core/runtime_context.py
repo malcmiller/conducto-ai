@@ -36,11 +36,31 @@ def build_run_context(
     delegation_budget: DelegationBudget | None,
     delegation_frame: DelegationFrame | None,
     cancellation: CancellationState | None,
+    instruction_chain: tuple[str, ...] = (),
 ) -> RunContext:
     """Build a context without amplifying its parent's deadlines or authority.
 
     Parent state is inherited only from a context owned by the same runtime.
     Model selection has already completed before this function is called.
+
+    Args:
+        runtime: Runtime that owns the created context.
+        agent_id: Agent identifier associated with the run.
+        run: Run-level timeout, metadata, and policy configuration.
+        binding: Resolved model binding, if a model was selected.
+        correlation_id: Correlation identifier for the run.
+        run_id: Explicit run identifier, or empty to derive one.
+        authorization: Authenticated authorization context, if any.
+        allowed_capabilities: Capability set bounded by the parent context.
+        delegation_budget: Root delegation limits when there is no parent.
+        delegation_frame: Frame appended to the parent's delegation path.
+        cancellation: Cancellation state for a root invocation.
+        instruction_chain: Resolved, ordered instruction chain -- runtime
+            policy, then agent, then capability instructions -- to record on
+            the created context and compose into its model calls.
+
+    Returns:
+        A task-local run context associated with this runtime.
     """
     active_context = get_run_context()
     parent = (
@@ -111,6 +131,7 @@ def build_run_context(
             else (delegation_budget or DelegationBudget())
         ),
         policy_context=run,
+        instruction_chain=instruction_chain,
         _runtime=runtime,
         _agent_registry=runtime.agent_registry,
         _binding=binding,

@@ -163,13 +163,25 @@ class ModelPolicy(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ModelCallProvenance:
-    """Credential-free provenance for one provider request."""
+    """Credential-free provenance for one provider request.
+
+    Attributes:
+        purpose: Logical purpose recorded for this call.
+        model_reference: Model reference selected for this call.
+        provider: Provider name that served this call.
+        resolution_source: Precedence source that selected the model.
+        usage: Provider-neutral token and cost usage for this call.
+        instruction_chain: Resolved, ordered instruction chain composed into
+            the system role of this call, in runtime policy, agent, then
+            capability precedence.
+    """
 
     purpose: str
     model_reference: str
     provider: str
     resolution_source: ModelResolutionSource
     usage: Usage = field(default_factory=Usage)
+    instruction_chain: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize provenance metadata to a JSON-serializable dictionary.
@@ -183,6 +195,7 @@ class ModelCallProvenance:
             "provider": self.provider,
             "resolution_source": self.resolution_source.value,
             "usage": self.usage.model_dump(),
+            "instruction_chain": list(self.instruction_chain),
         }
 
 
@@ -295,7 +308,24 @@ class _InvocationState:
 
 @dataclass(frozen=True, slots=True)
 class InvocationMetadata:
-    """Credential-free model provenance and usage for a result envelope."""
+    """Credential-free model provenance and usage for a result envelope.
+
+    Attributes:
+        run_id: Identifier for the run that produced this metadata.
+        correlation_id: Correlation identifier propagated across delegation.
+        parent_run_id: Parent run identifier, when this run was delegated.
+        delegation_path: Ordered delegation frames leading to this run.
+        model_reference: Model reference resolved for the run, if any.
+        provider: Provider name that served the run, if any.
+        resolution_source: Precedence source that selected the model.
+        usage: Aggregated provider-neutral usage across recorded calls.
+        model_calls: Ordered provenance for each recorded provider call.
+        attributes: Frozen run metadata attributes.
+        instruction_chain: Resolved, ordered instruction chain applied to
+            this run's model calls, in runtime policy, agent, then
+            capability precedence. Attributable evidence of instruction
+            resolution for provenance and audit output.
+    """
 
     run_id: str
     correlation_id: str
@@ -307,6 +337,7 @@ class InvocationMetadata:
     usage: Usage = field(default_factory=Usage)
     model_calls: tuple[ModelCallProvenance, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
+    instruction_chain: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "attributes", freeze_metadata(self.attributes))
@@ -333,6 +364,7 @@ class InvocationMetadata:
             "usage": self.usage.model_dump(),
             "model_calls": [call.to_dict() for call in self.model_calls],
             "attributes": thaw_metadata(self.attributes),
+            "instruction_chain": list(self.instruction_chain),
         }
 
     def with_model_calls(
@@ -368,7 +400,14 @@ class InvocationMetadata:
 
 @dataclass(frozen=True, slots=True)
 class RunContext:
-    """Immutable, task-local execution context with a resolved model snapshot."""
+    """Immutable, task-local execution context with a resolved model snapshot.
+
+    Attributes:
+        instruction_chain: Resolved, ordered instruction chain -- runtime
+            policy, then agent, then capability instructions -- composed
+            into the system role of every model call issued from this
+            context. See :func:`conducto.core.instructions.resolve_instruction_chain`.
+    """
 
     run_id: str
     correlation_id: str
@@ -388,6 +427,7 @@ class RunContext:
     )
     authorization: AuthorizationContext | None = field(default=None, repr=False, compare=False)
     policy_context: RunConfig = field(default_factory=RunConfig, repr=False, compare=False)
+    instruction_chain: tuple[str, ...] = ()
     _runtime: Runtime | None = field(default=None, repr=False, compare=False)
     _agent_registry: AgentRegistry | None = field(default=None, repr=False, compare=False)
     _binding: _ResolvedModelBinding | None = field(default=None, repr=False, compare=False)
@@ -405,6 +445,7 @@ class RunContext:
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", freeze_metadata(self.metadata))
         object.__setattr__(self, "delegation_path", tuple(self.delegation_path))
+        object.__setattr__(self, "instruction_chain", tuple(self.instruction_chain))
         if self.allowed_capabilities is not None:
             object.__setattr__(
                 self,
@@ -543,6 +584,7 @@ class RunContext:
                 for frame in self.delegation_path
             ],
             "remaining_delegation_budget": asdict(self.remaining_delegation_budget),
+            "instruction_chain": list(self.instruction_chain),
         }
 
     def invocation_metadata(self, usage: Usage | None = None) -> InvocationMetadata:
@@ -566,6 +608,7 @@ class RunContext:
             usage=aggregate_usage(calls) if calls else (usage or Usage()),
             model_calls=calls,
             attributes=self.metadata,
+            instruction_chain=self.instruction_chain,
         )
 
 

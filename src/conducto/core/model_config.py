@@ -172,9 +172,25 @@ class RunConfig:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
-    """Immutable runtime-wide model defaults."""
+    """Immutable runtime-wide model defaults.
+
+    Attributes:
+        default_model: Default model reference used when no agent- or
+            call-level override is supplied.
+        policy_instructions: Runtime-owned policy instructions applied first
+            in the resolved instruction chain, ahead of any agent or
+            capability instructions. These are trusted, framework-level
+            text that callers cannot override, suppress, or reorder.
+    """
 
     default_model: ModelReference | str | None = None
+    policy_instructions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "default_model", normalize_reference(self.default_model))
+        normalized_instructions = tuple(self.policy_instructions)
+        if any(
+            not isinstance(entry, str) or not entry.strip() for entry in normalized_instructions
+        ):
+            raise ValueError("Runtime policy instructions must be non-empty strings")
+        object.__setattr__(self, "policy_instructions", normalized_instructions)

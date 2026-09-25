@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import dataclasses
 import os
 import threading
 import time
@@ -18,6 +19,7 @@ from conducto.security import (
     SecurityPipeline,
 )
 
+from .instructions import compose_system_message
 from .model_config import (
     AgentModelConfig,
     ModelReference,
@@ -98,10 +100,48 @@ class Runtime:
         gateway_max_results: int = 20,
         gateway_max_serialized_bytes: int = 64 * 1024,
         gateway_clock: Callable[[], float] = time.monotonic,
+        policy_instructions: Sequence[str] = (),
     ) -> None:
+        """Initialize a runtime with its provider, security, and gateway configuration.
+
+        Args:
+            provider_registry: Optional provider registry. Defaults to a new registry.
+            config: Optional runtime-wide model defaults and policy instructions.
+            policy: Optional model selection policy hook.
+            security_pipeline: Optional security guardrail and audit pipeline.
+            agent_registry: Optional local agent registry. Defaults to a new registry.
+            gateway_policy: Optional local capability gateway policy.
+            agent_catalog: Optional remote agent catalog for gateway discovery.
+            gateway_transport: Optional remote gateway transport, required with
+                ``agent_catalog``.
+            gateway_remote_policy: Optional remote gateway invocation policy.
+            gateway_allowed_deployments: Optional deployment types permitted for
+                gateway discovery.
+            gateway_selection_policy: Optional gateway target selection policy.
+            gateway_preferred_agents: Optional preferred agent bindings by capability.
+            gateway_binding_ttl: Time-to-live in seconds for gateway bindings.
+            gateway_max_results: Maximum discovery results returned by the gateway.
+            gateway_max_serialized_bytes: Maximum serialized gateway payload size.
+            gateway_clock: Monotonic clock used for gateway timing.
+            policy_instructions: Runtime-owned policy instructions merged into
+                ``config.policy_instructions``. Applied first, ahead of any
+                agent or capability instructions, in every resolved
+                instruction chain. Trusted, framework-level text that callers
+                cannot override, suppress, or reorder through invocation
+                arguments.
+
+        Raises:
+            ValueError: If exactly one of ``agent_catalog`` and
+                ``gateway_transport`` is configured.
+        """
         self._provider_registry = provider_registry or ProviderRegistry()
         self._model_resolver = ModelResolver(self._provider_registry)
         self.config = config or RuntimeConfig()
+        if policy_instructions:
+            self.config = dataclasses.replace(
+                self.config,
+                policy_instructions=self.config.policy_instructions + tuple(policy_instructions),
+            )
         self.policy = policy
         self.security_pipeline = security_pipeline or SecurityPipeline(InMemoryApprovalStore())
         if agent_registry is None:
@@ -359,6 +399,7 @@ class Runtime:
         delegation_budget: DelegationBudget | None = None,
         delegation_frame: DelegationFrame | None = None,
         cancellation: CancellationState | None = None,
+        instruction_chain: tuple[str, ...] = (),
     ) -> RunContext:
         """Create a new run context for an invocation.
 
@@ -375,6 +416,9 @@ class Runtime:
             delegation_budget: Root delegation limits when there is no parent context.
             delegation_frame: Optional frame appended to the parent's delegation path.
             cancellation: Optional cancellation state for a root invocation.
+            instruction_chain: Resolved, ordered instruction chain -- runtime
+                policy, then agent, then capability instructions -- to record
+                on the context and compose into its model calls.
 
         Returns:
             A task-local run context associated with this runtime.
@@ -401,6 +445,7 @@ class Runtime:
             delegation_budget=delegation_budget,
             delegation_frame=delegation_frame,
             cancellation=cancellation,
+            instruction_chain=instruction_chain,
         )
 
     def resolve_model(
@@ -545,10 +590,11 @@ class Runtime:
             if current is not context:
                 invocation_token = context.activate_invocation()
                 context_token = self.activate(context)
+            composed_messages = compose_system_message(messages, context.instruction_chain)
             return await complete_model_call(
                 context,
                 binding,
-                messages,
+                composed_messages,
                 structured_output=structured_output,
                 tools=tools,
                 tool_results=tool_results,

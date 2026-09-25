@@ -19,6 +19,7 @@ from conducto.security.errors import SecurityError
 
 from .agent import BaseAgent
 from .agent_card import stable_skill_id
+from .instructions import resolve_instruction_chain
 from .invocation_results import (
     InvocationCancelled,
     InvocationFailure,
@@ -180,6 +181,11 @@ async def invoke_agent(
     effective_run = run_config or RunConfig()
     if timeout_value is not None:
         effective_run = dataclasses.replace(effective_run, timeout=timeout_value)
+    instruction_chain = resolve_instruction_chain(
+        runtime.config.policy_instructions,
+        agent.agent_metadata.instructions,
+        capability_metadata.instructions if capability_metadata is not None else None,
+    )
     context = runtime.create_run_context(
         agent_id=agent_id,
         agent_config=agent_model_config,
@@ -191,6 +197,7 @@ async def invoke_agent(
         delegation_budget=delegation_budget,
         delegation_frame=DelegationFrame(agent_id, capability_name),
         cancellation=cancellation,
+        instruction_chain=instruction_chain,
     )
     invocation_timeout = context.timeout
     target = registered.callable
@@ -258,6 +265,7 @@ async def invoke_agent(
             agent_id=agent_id,
             capability_id=capability_name,
             approved_approval_id=approved_approval_id,
+            instruction_chain=context.instruction_chain,
         )
         if not security_result.allowed:
             if security_result.challenge is not None:
@@ -344,6 +352,7 @@ async def invoke_agent(
             capability_id=capability_name,
             outcome=AuditOutcome.SUCCESS,
             reason_code="started",
+            instruction_chain=context.instruction_chain,
         )
         emit_event(INVOCATION_STARTED)
         try:
@@ -378,6 +387,7 @@ async def invoke_agent(
                 capability_id=capability_name,
                 outcome=AuditOutcome.SUCCESS,
                 reason_code="completed",
+                instruction_chain=context.instruction_chain,
             )
             invocation_span.set_outcome("success")
             return InvocationSuccess(
@@ -413,6 +423,7 @@ async def invoke_agent(
                 capability_id=capability_name,
                 outcome=AuditOutcome.FAILURE,
                 reason_code="timeout",
+                instruction_chain=context.instruction_chain,
             )
             emit_event(
                 INVOCATION_TIMED_OUT,
@@ -435,6 +446,7 @@ async def invoke_agent(
                 capability_id=capability_name,
                 outcome=AuditOutcome.FAILURE,
                 reason_code="capability_exception",
+                instruction_chain=context.instruction_chain,
             )
             emit_event(
                 INVOCATION_FAILED,
@@ -458,6 +470,7 @@ async def invoke_agent(
                 capability_id=capability_name,
                 outcome=AuditOutcome.FAILURE,
                 reason_code="unsupported_return_value",
+                instruction_chain=context.instruction_chain,
             )
             emit_event(
                 INVOCATION_FAILED,
@@ -490,6 +503,7 @@ async def invoke_agent(
                 capability_id=capability_name,
                 outcome=AuditOutcome.FAILURE,
                 reason_code="internal_error",
+                instruction_chain=context.instruction_chain,
             )
             emit_event(
                 INVOCATION_FAILED,
