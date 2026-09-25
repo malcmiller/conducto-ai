@@ -414,6 +414,7 @@ def _build_agent_descriptor(
                 schema_digest=digest,
                 required_scopes=guardrails.scopes,
                 approval_required=bool(guardrails.approvals),
+                policy=registered.policy,
             )
         )
     return AgentDescriptor(

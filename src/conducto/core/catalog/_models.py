@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 from ..agent_card import is_absolute_http_url
+from ..decorators import CapabilityPolicyMetadata
 from ..gateway_models import CapabilityDescriptor, canonical_json, freeze_json, thaw_json
 
 
@@ -67,6 +68,7 @@ class CatalogCapabilityDescriptor:
         modality: Primary input modality (media type) for this capability.
         required_scopes: Scopes required to authorize an invocation.
         approval_required: Whether the destination requires human approval.
+        policy: Immutable governance metadata declared by the capability.
     """
 
     capability_id: str
@@ -79,6 +81,7 @@ class CatalogCapabilityDescriptor:
     modality: str
     required_scopes: tuple[str, ...] = ()
     approval_required: bool = False
+    policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
 
     def __post_init__(self) -> None:
         """Freeze mutable fields so the descriptor is safe to share."""
@@ -116,6 +119,7 @@ class CatalogCapabilityDescriptor:
             schema_digest=digest,
             required_scopes=self.required_scopes,
             approval_required=self.approval_required,
+            policy=self.policy,
         )
 
 

@@ -51,6 +51,40 @@ The reflected capability can participate in:
 Every invocation still enters the canonical runtime. Discoverability never
 grants authority by itself.
 
+### Declaring capability policy metadata
+
+Capabilities can declare immutable authorization, execution, side-effect, and
+data-sensitivity metadata alongside their published contract:
+
+```python
+from decimal import Decimal
+
+from conducto import (
+    a2a_capability,
+    budget,
+    classification,
+    requires_scope,
+    side_effect,
+    timeout,
+)
+
+
+@a2a_capability(name="create_refund", description="Creates a customer refund.")
+@requires_scope("refund.write")
+@side_effect("writes_external_system")
+@timeout(seconds=5)
+@budget(max_model_calls=0, max_cost_usd=Decimal("2.50"))
+@classification("confidential")
+def create_refund(order_id: str, amount: float) -> str:
+    return f"refund:{order_id}:{amount}"
+```
+
+These decorators may be stacked in any order with `@a2a_capability`.
+`requires_scope` also installs the existing runtime authorization guardrail.
+The declared metadata is available through immutable capability descriptors and
+is published in Conducto's optional Agent Card extension; it does not alter A2A
+standard fields or grant additional authority.
+
 ## `@tool`: internal export metadata
 
 Use `@tool` only when code needs to identify a method as an internal export on
