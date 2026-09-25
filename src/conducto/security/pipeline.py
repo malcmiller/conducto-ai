@@ -177,11 +177,26 @@ class SecurityPipeline:
         agent_id: str = "",
         capability_id: str = "",
         approved_approval_id: str | None = None,
+        instruction_chain: tuple[str, ...] = (),
     ) -> GuardrailResult:
         """Check guardrails and deliver mandatory pre-execution evidence.
 
         Existing synchronous callers may retain ``check``; runtime invocation
         uses this method, so required audit acceptance is enforced before work.
+
+        Args:
+            target: Resolved capability callable.
+            context: Authenticated execution context.
+            arguments: Validated capability arguments.
+            agent_id: Agent bound to the invocation.
+            capability_id: Capability bound to the invocation.
+            approved_approval_id: Approval ID used by an approved resume.
+            instruction_chain: Resolved, ordered instruction chain -- runtime
+                policy, then agent, then capability instructions -- recorded
+                on emitted audit evidence for this invocation.
+
+        Returns:
+            A typed allowed, approval-required, or authorization-failure result.
         """
         from conducto.core.telemetry import (
             SPAN_SECURITY_APPROVAL,
@@ -235,6 +250,7 @@ class SecurityPipeline:
                 challenge_id=result.challenge.approval_id,
                 policy_version=result.challenge.policy_version,
                 required=True,
+                instruction_chain=instruction_chain,
             )
         elif result.allowed:
             await self._emit(
@@ -246,6 +262,7 @@ class SecurityPipeline:
                 AuditOutcome.SUCCESS,
                 "authorized",
                 required=True,
+                instruction_chain=instruction_chain,
             )
             await self._emit(
                 AuditEventName.EXECUTION_ACCEPTED,
@@ -256,6 +273,7 @@ class SecurityPipeline:
                 AuditOutcome.SUCCESS,
                 "audit_accepted",
                 required=True,
+                instruction_chain=instruction_chain,
             )
         else:
             assert result.error is not None
@@ -268,6 +286,7 @@ class SecurityPipeline:
                 AuditOutcome.REJECTED,
                 getattr(result.error, "reason_code", "authorization_denied"),
                 required=True,
+                instruction_chain=instruction_chain,
             )
         return result
 
@@ -441,8 +460,21 @@ class SecurityPipeline:
         capability_id: str,
         outcome: AuditOutcome,
         reason_code: str,
+        instruction_chain: tuple[str, ...] = (),
     ) -> None:
-        """Emit lifecycle evidence after pre-execution acceptance."""
+        """Emit lifecycle evidence after pre-execution acceptance.
+
+        Args:
+            name: Audit event name to emit.
+            context: Authenticated execution context, if any.
+            agent_id: Agent bound to the invocation.
+            capability_id: Capability bound to the invocation.
+            outcome: Recorded outcome for this lifecycle event.
+            reason_code: Stable machine-readable reason for the outcome.
+            instruction_chain: Resolved, ordered instruction chain -- runtime
+                policy, then agent, then capability instructions -- recorded
+                on this lifecycle event for provenance and audit output.
+        """
         await self._emit(
             name,
             context,
@@ -452,6 +484,7 @@ class SecurityPipeline:
             outcome,
             reason_code,
             required=False,
+            instruction_chain=instruction_chain,
         )
 
     async def _emit(
@@ -467,6 +500,7 @@ class SecurityPipeline:
         challenge_id: str = "",
         policy_version: str = "1",
         required: bool,
+        instruction_chain: tuple[str, ...] = (),
     ) -> None:
         if self.audit_emitter is None:
             return
@@ -506,6 +540,7 @@ class SecurityPipeline:
                     if outcome in (AuditOutcome.FAILURE, AuditOutcome.REJECTED)
                     else AuditSeverity.INFO
                 ),
+                instruction_chain=instruction_chain,
             ),
             required=required,
         )

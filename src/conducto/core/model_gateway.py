@@ -292,6 +292,7 @@ async def complete_model_call(
         provider=resolved.provider,
         resolution_source=resolved.source,
         usage=result.usage,
+        instruction_chain=context.instruction_chain,
     )
     context.record_model_call(model_call)
     metadata = InvocationMetadata(
@@ -303,5 +304,6 @@ async def complete_model_call(
         usage=result.usage,
         model_calls=(model_call,),
         attributes=context.metadata,
+        instruction_chain=context.instruction_chain,
     )
     return ModelCallResult(result, metadata)

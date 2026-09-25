@@ -118,6 +118,13 @@ def build_agent_card(
         )
         parameter_schemas[skill_id] = registered.parameter_schema
 
+    conducto_params: dict[str, Any] = {
+        "parameters": parameter_schemas,
+        "skillIdStrategy": ("conducto-<sha256(agent-name:capability-name)[:16]>"),
+    }
+    if metadata.publish_instructions and metadata.instructions is not None:
+        conducto_params["instructions"] = metadata.instructions
+
     card = {
         "name": metadata.name,
         "description": metadata.description,
@@ -139,14 +146,7 @@ def build_agent_card(
                         "Conducto reflected JSON parameter schemas keyed by A2A skill id."
                     ),
                     "required": False,
-                    "params": {
-                        "x-conducto": {
-                            "parameters": parameter_schemas,
-                            "skillIdStrategy": (
-                                "conducto-<sha256(agent-name:capability-name)[:16]>"
-                            ),
-                        }
-                    },
+                    "params": {"x-conducto": conducto_params},
                 }
             ],
         },

@@ -122,6 +122,12 @@ class AuditEvent:
     Schema evolution is additive for optional fields within a version. Breaking
     changes require a new ``schema_version``; sinks must reject unknown versions.
     ``sequence`` provides causal ordering only within one task.
+
+    Attributes:
+        instruction_chain: Resolved, ordered instruction chain -- runtime
+            policy, then agent, then capability instructions -- attributed
+            to this audit event. Attributable evidence of instruction
+            resolution for provenance and audit output.
     """
 
     event_name: AuditEventName
@@ -147,6 +153,7 @@ class AuditEvent:
     occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     sequence: int = 0
     extensions: Mapping[str, str | int | float | bool] = field(default_factory=dict, repr=False)
+    instruction_chain: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Normalize UTC timestamps and reject unsafe extension data."""
@@ -158,6 +165,7 @@ class AuditEvent:
             raise ValueError("audit event timestamp must be timezone-aware")
         object.__setattr__(self, "occurred_at", self.occurred_at.astimezone(UTC))
         object.__setattr__(self, "extensions", MappingProxyType(_safe_extensions(self.extensions)))
+        object.__setattr__(self, "instruction_chain", tuple(self.instruction_chain))
 
     @property
     def schema_version(self) -> str:

@@ -28,6 +28,14 @@ class AgentMetadata:
         model_required: Whether capabilities require a resolved model unless
             they explicitly opt out.
         tags: Opaque discovery tags inherited by the agent's capabilities.
+        instructions: Optional persona and behavioral instructions for the
+            agent. Composed into the system role of runtime-issued model
+            calls after runtime-owned policy instructions and before any
+            capability instructions. Callers cannot inject, replace, or
+            suppress this text through invocation arguments.
+        publish_instructions: Whether ``instructions`` may be published on
+            the agent card. Defaults to ``False``, so instructions remain
+            unpublished unless explicitly opted in.
     """
 
     name: str
@@ -36,6 +44,8 @@ class AgentMetadata:
     default_model: str | None = None
     model_required: bool = False
     tags: frozenset[str] = frozenset()
+    instructions: str | None = None
+    publish_instructions: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,12 +58,17 @@ class ExportMetadata:
         model_required: Per-export model requirement. ``None`` inherits the
             agent requirement; ``False`` declares deterministic execution.
         tags: Opaque discovery tags for this export.
+        instructions: Optional capability-level instructions that refine the
+            agent and runtime policy instructions. Composed last in the
+            resolved instruction chain; never removes or replaces the
+            instructions that precede it.
     """
 
     name: str | None = None
     description: str | None = None
     model_required: bool | None = None
     tags: frozenset[str] = frozenset()
+    instructions: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +94,8 @@ def a2a_agent(
     default_model: str | None = None,
     model_required: bool = False,
     tags: tuple[str, ...] = (),
+    instructions: str | None = None,
+    publish_instructions: bool = False,
 ) -> T: ...
 
 
@@ -91,6 +108,8 @@ def a2a_agent(
     default_model: str | None = None,
     model_required: bool = False,
     tags: tuple[str, ...] = (),
+    instructions: str | None = None,
+    publish_instructions: bool = False,
 ) -> Callable[[T], T]: ...
 
 
@@ -103,6 +122,8 @@ def a2a_agent(
     default_model: str | None = None,
     model_required: bool = False,
     tags: tuple[str, ...] = (),
+    instructions: str | None = None,
+    publish_instructions: bool = False,
 ) -> T | Callable[[T], T]:
     """Declare a class as an A2A agent.
 
@@ -122,6 +143,14 @@ def a2a_agent(
         model_required: Whether exports require a model by default. Individual
             capabilities and tools may override this setting.
         tags: Opaque discovery tags inherited by capabilities.
+        instructions: Optional persona and behavioral instructions for the
+            agent. The runtime composes these into the system role of every
+            model call it issues, after runtime-owned policy instructions
+            and before any capability instructions. Callers cannot inject,
+            replace, or suppress this text through invocation arguments.
+        publish_instructions: Whether ``instructions`` may be published on
+            the agent card. Defaults to ``False``; instructions remain
+            unpublished unless explicitly opted in.
 
     Returns:
         The decorated class, or a decorator when called with keyword
@@ -129,8 +158,8 @@ def a2a_agent(
 
     Raises:
         TypeError: If the decorated value is not a class.
-        ValueError: If ``version``, ``name``, or ``description`` is empty
-            or contains only whitespace.
+        ValueError: If ``version``, ``name``, ``description``, or
+            ``instructions`` is empty or contains only whitespace.
     """
 
     def decorate(agent_class: T) -> T:
@@ -159,6 +188,8 @@ def a2a_agent(
             default_model=_normalize_optional_text(default_model),
             model_required=model_required,
             tags=_normalize_tags(tags),
+            instructions=_normalize_optional_text(instructions),
+            publish_instructions=publish_instructions,
         )
         setattr(agent_class, _AGENT_METADATA_ATTRIBUTE, metadata)
         return agent_class
@@ -174,6 +205,7 @@ def a2a_capability(
     description: str | None = None,
     model_required: bool | None = None,
     tags: tuple[str, ...] = (),
+    instructions: str | None = None,
 ) -> Callable[[F], F]:
     """Expose a method as an A2A capability.
 
@@ -189,14 +221,18 @@ def a2a_capability(
             inherits the agent setting; ``False`` explicitly permits
             deterministic execution without a configured model.
         tags: Opaque tags used by capability discovery.
+        instructions: Optional capability-level instructions that refine
+            the agent's instructions. Composed last in the resolved
+            instruction chain, after runtime policy and agent instructions;
+            never removes or replaces the instructions that precede it.
 
     Returns:
         A decorator that preserves and returns the decorated callable.
 
     Raises:
         TypeError: If the decorated value is not callable.
-        ValueError: If ``name`` or ``description`` is empty or contains only
-            whitespace.
+        ValueError: If ``name``, ``description``, or ``instructions`` is
+            empty or contains only whitespace.
     """
 
     return _export_decorator(
@@ -205,6 +241,7 @@ def a2a_capability(
         description=description,
         model_required=model_required,
         tags=tags,
+        instructions=instructions,
     )
 
 
@@ -214,6 +251,7 @@ def tool(
     description: str | None = None,
     model_required: bool | None = None,
     tags: tuple[str, ...] = (),
+    instructions: str | None = None,
 ) -> Callable[[F], F]:
     """Register a method as an internal Conducto tool.
 
@@ -229,14 +267,16 @@ def tool(
             the agent setting; ``False`` explicitly permits deterministic
             execution without a configured model.
         tags: Opaque tags attached to the tool metadata.
+        instructions: Optional tool-level instructions that refine the
+            agent's instructions in the resolved instruction chain.
 
     Returns:
         A decorator that preserves and returns the decorated callable.
 
     Raises:
         TypeError: If the decorated value is not callable.
-        ValueError: If ``name`` or ``description`` is empty or contains only
-            whitespace.
+        ValueError: If ``name``, ``description``, or ``instructions`` is
+            empty or contains only whitespace.
     """
 
     return _export_decorator(
@@ -245,6 +285,7 @@ def tool(
         description=description,
         model_required=model_required,
         tags=tags,
+        instructions=instructions,
     )
 
 
@@ -305,6 +346,7 @@ def _export_decorator(
     description: str | None,
     model_required: bool | None,
     tags: tuple[str, ...],
+    instructions: str | None = None,
 ) -> Callable[[F], F]:
     """Create a decorator for one of the supported method export kinds."""
 
@@ -313,6 +355,7 @@ def _export_decorator(
         description=_normalize_optional_text(description),
         model_required=model_required,
         tags=_normalize_tags(tags),
+        instructions=_normalize_optional_text(instructions),
     )
 
     def decorate(value: F) -> F:
