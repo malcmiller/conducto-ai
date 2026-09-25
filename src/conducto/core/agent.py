@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypeVar, overload
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -116,26 +117,6 @@ class BaseAgent:
             response_type=response_type,
         )
 
-    @overload
-    async def complete(
-        self,
-        prompt: str | Sequence[ChatMessage],
-        *,
-        model: ModelReference | str | None = None,
-        tools: Sequence[ProviderToolDefinition] = (),
-        structured_output: StructuredOutputRequest,
-    ) -> ModelCallResult: ...
-
-    @overload
-    async def complete(
-        self,
-        prompt: str | Sequence[ChatMessage],
-        *,
-        model: ModelReference | str | None = None,
-        tools: Sequence[ProviderToolDefinition] = (),
-        structured_output: None = None,
-    ) -> Any: ...
-
     async def complete(
         self,
         prompt: str | Sequence[ChatMessage],
@@ -143,7 +124,7 @@ class BaseAgent:
         model: ModelReference | str | None = None,
         tools: Sequence[ProviderToolDefinition] = (),
         structured_output: StructuredOutputRequest | None = None,
-    ) -> Any:
+    ) -> ModelCallResult:
         """Complete a prompt through the active runtime's governed model path.
 
         This method requires an active capability invocation. The runtime owns
@@ -157,23 +138,22 @@ class BaseAgent:
             tools: Optional provider-neutral tools available to the model.
             structured_output: Optional native structured-output contract. When
                 omitted inside a capability with a Pydantic return annotation,
-                Conducto derives the contract from that annotation and returns
-                the validated typed value. When explicitly supplied, this
-                schema is used as an escape hatch and the raw model call result
-                is returned even when a derived capability contract exists.
-                Outside a typed capability, omission sends a permissive
-                non-required object contract because the provider protocol
-                requires one.
+                Conducto derives the contract from that annotation and stores
+                the validated typed value in ``result.structured``. When
+                explicitly supplied, this schema is used as an escape hatch even
+                when a derived capability contract exists. Outside a typed
+                capability, omission sends a permissive non-required object
+                contract because the provider protocol requires one.
 
         Returns:
-            The validated typed capability value for derived contracts, or the
-            provider result and invocation metadata for explicit/permissive
-            contracts.
+            The provider result and invocation metadata. For derived contracts,
+            ``result.structured`` contains the validated typed value.
 
         Notes:
             Passing ``structured_output`` is an explicit override and disables
             derived capability return validation for this call. Omit it to use
-            the active capability's Pydantic return annotation.
+            the active capability's Pydantic return annotation while preserving
+            the standard ``ModelCallResult`` envelope.
 
         Raises:
             asyncio.CancelledError: If the active invocation is cancelled.
@@ -209,7 +189,8 @@ class BaseAgent:
             structured_output=output_contract.request,
             tools=tools,
         )
-        return output_contract.validate(call.result.structured)
+        typed_value = output_contract.validate(call.result.structured)
+        return replace(call, result=call.result.model_copy(update={"structured": typed_value}))
 
     @property
     def registered_methods(self) -> tuple[RegisteredMethod, ...]:

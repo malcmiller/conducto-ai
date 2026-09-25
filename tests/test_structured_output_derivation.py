@@ -52,14 +52,16 @@ class _StructuredAgent(BaseAgent):
     @a2a_capability(name="answer", description="Return a typed answer.")
     async def answer(self, prompt: str) -> _Answer:
         """Return an answer validated from the derived model schema."""
-        value = await self.complete(prompt)
+        call = await self.complete(prompt)
+        value = call.result.structured
         assert isinstance(value, _Answer)
         return value
 
     @a2a_capability(name="items", description="Return typed items.")
     async def items(self, prompt: str) -> list[_Item]:
         """Return root-level typed items validated from the derived schema."""
-        value = await self.complete(prompt)
+        call = await self.complete(prompt)
+        value = call.result.structured
         assert isinstance(value, list)
         assert all(isinstance(item, _Item) for item in value)
         return value
@@ -71,7 +73,8 @@ class _StructuredAgent(BaseAgent):
     )
     async def override(self, prompt: str) -> Mapping[str, Any]:
         """Return raw structured output constrained by an explicit schema."""
-        value = await self.complete(prompt)
+        call = await self.complete(prompt)
+        value = call.result.structured
         assert isinstance(value, dict)
         return value
 
