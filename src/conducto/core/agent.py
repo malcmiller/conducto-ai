@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
 __all__ = ["BaseAgent"]
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+# The provider contract always requires a request; this preserves optional output validation.
 _OPTIONAL_STRUCTURED_OUTPUT = StructuredOutputRequest(
     name="completion",
     schema={"type": "object"},
@@ -139,7 +140,9 @@ class BaseAgent:
             The provider result and invocation metadata.
 
         Raises:
+            asyncio.CancelledError: If the active invocation is cancelled.
             NoActiveRunContextError: If called outside an active runtime invocation.
+            TimeoutError: If the active invocation's deadline has expired.
         """
         messages = (
             (ChatMessage(role="user", content=prompt),)
