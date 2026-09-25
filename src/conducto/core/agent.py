@@ -30,6 +30,15 @@ __all__ = ["BaseAgent"]
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
+def _optional_structured_output() -> StructuredOutputRequest:
+    """Build the permissive contract required by the provider protocol."""
+    return StructuredOutputRequest(
+        name="completion",
+        schema={"type": "object"},
+        required=False,
+    )
+
+
 class BaseAgent:
     """Base class for reflected Conducto agents.
 
@@ -127,8 +136,8 @@ class BaseAgent:
             model: Optional model reference override for this completion.
             tools: Optional provider-neutral tools available to the model.
             structured_output: Optional native structured-output contract. When
-                omitted, the completion may return provider content without
-                requiring structured output.
+                omitted, the runtime sends a permissive non-required object
+                contract because the provider protocol requires one.
 
         Returns:
             The provider result and invocation metadata.
@@ -145,12 +154,7 @@ class BaseAgent:
         )
         return await require_run_context().models.require(model).complete(
             messages,
-            structured_output=structured_output
-            or StructuredOutputRequest(
-                name="completion",
-                schema={"type": "object"},
-                required=False,
-            ),
+            structured_output=structured_output or _optional_structured_output(),
             tools=tools,
         )
 
