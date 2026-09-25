@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from conducto.core.agent import BaseAgent
+from conducto.core.data_sources import DataSourceRegistry
 from conducto.core.runtime import Runtime
 from conducto.transport.tasks import InMemoryTaskRepository, TaskRepository
 
@@ -26,6 +27,7 @@ def create_a2a_app(
     runtime: Runtime,
     public_url: str,
     identity_resolver: A2AIdentityResolver,
+    data_sources: DataSourceRegistry | None = None,
     endpoint_path: str = _A2A_RPC_PATH,
     task_repository: TaskRepository | None = None,
     clock: Callable[[], float] = time.time,
@@ -46,6 +48,8 @@ def create_a2a_app(
         public_url: Absolute HTTP(S) origin visible to remote A2A clients.
         endpoint_path: Exact path used for the JSON-RPC endpoint.
         identity_resolver: Required application-owned authentication boundary.
+        data_sources: Optional configured source metadata used to register the
+            hosted agent's declared dependencies.
         task_repository: Optional task persistence implementation. An isolated
             in-memory repository is created when omitted.
         clock: UTC timestamp source used for inbound deadline conversion.
@@ -80,6 +84,7 @@ def create_a2a_app(
         runtime=runtime,
         agent=agent,
         identity_resolver=identity_resolver,
+        data_sources=data_sources,
         clock=clock,
         max_timeout=max_timeout,
         max_delegation_depth=max_delegation_depth,

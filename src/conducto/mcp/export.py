@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Any
 
 from conducto.core.agent import BaseAgent
+from conducto.core.data_sources import DataSourceRegistry
 from conducto.core.gateway_models import CapabilityDescriptor, freeze_json, thaw_json
 from conducto.core.registry import AgentRegistry
 from conducto.core.runtime import Runtime
@@ -96,6 +97,7 @@ class McpToolExporter:
         policy: McpExportPolicy,
         agents: Sequence[BaseAgent] = (),
         registry: AgentRegistry | None = None,
+        data_sources: DataSourceRegistry | None = None,
     ) -> None:
         """Build the immutable exported tool list for one server instance.
 
@@ -105,6 +107,8 @@ class McpToolExporter:
             agents: Agent instances exported without a shared registry.
             registry: Registry whose current snapshot supplies canonical
                 capability metadata and dispatch targets.
+            data_sources: Configured source metadata used when building a
+                private registry for ``agents``.
 
         Raises:
             McpExportError: If neither agents nor a registry are supplied, or
@@ -117,7 +121,9 @@ class McpToolExporter:
         """
         if registry is None and not agents:
             raise McpExportError("An MCP exporter requires agents or a registry snapshot source")
-        source = registry if registry is not None else _registry_for(agents)
+        source = (
+            registry if registry is not None else _registry_for(agents, data_sources=data_sources)
+        )
         self._runtime = runtime
         self._policy = policy
         self._agents: dict[str, BaseAgent] = {}
@@ -331,9 +337,11 @@ class McpToolExporter:
                 )
 
 
-def _registry_for(agents: Sequence[BaseAgent]) -> AgentRegistry:
+def _registry_for(
+    agents: Sequence[BaseAgent], *, data_sources: DataSourceRegistry | None = None
+) -> AgentRegistry:
     """Build a private registry so agent exports use canonical descriptors."""
-    registry = AgentRegistry()
+    registry = AgentRegistry(data_sources=data_sources)
     for agent in agents:
         registry.register(agent)
     return registry
