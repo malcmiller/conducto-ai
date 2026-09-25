@@ -90,7 +90,7 @@ wall-clock sleep.
 
 | Criterion | Temporal | Dapr Workflow | Result |
 |---|---|---|---|
-| Python and .NET maturity | First-party SDKs and established replay model | Supported SDKs, but orchestration operational behavior is coupled to Dapr runtime releases | Temporal |
+| Python maturity | First-party SDK and established replay model | Supported Python SDK, but orchestration operational behavior is coupled to Dapr runtime releases | Temporal |
 | Replay and side-effect boundary | Strict workflow/activity separation and replay tooling | Activity separation is available, but replay and state-store behavior need more deployment-specific proof | Temporal |
 | Approval, timer, retry, cancellation, compensation | Signals, durable timers, retries, cancellation; compensation remains Conducto policy | External events, durable timers, retries, cancellation; compensation remains Conducto policy | Temporal |
 | Restart and long-running upgrade | Worker recovery and explicit workflow versioning are first-class | Recovery depends on sidecar, Scheduler, Placement, and state-store topology; upgrade evidence is less direct | Temporal |
@@ -117,9 +117,9 @@ docker run --rm --name conducto-temporal -p 7233:7233 temporalio/auto-setup:1.28
 docker stop conducto-temporal
 ```
 
-The spike records the exact `temporalio` Python package and Temporal .NET SDK
-versions in its lockfiles, runs a Python worker/client and a .NET worker/client
-against `localhost:7233`, and captures history with the matching `temporal`
+The spike records the exact `temporalio` Python package version in its lockfile,
+runs a Python worker and client against `localhost:7233`, and captures history
+with the matching `temporal`
 CLI. Workflow code may only use deterministic Temporal APIs; network,
 capability, model, and clock side effects belong in activities. The service
 image, SDK packages, histories, search attributes, and deployment metadata are
@@ -134,9 +134,9 @@ dapr run --app-id conducto-dapr-worker --dapr-http-port 3500 -- python worker.py
 dapr uninstall --all --yes
 ```
 
-The corresponding Python and .NET workers use only fake capabilities and prove
-the same event, timer, retry, cancellation, restart, and accepted-side-effect
-scenarios. The experiment must additionally stop/restart the sidecar and
+The corresponding Python worker uses only fake capabilities and proves the same
+event, timer, retry, cancellation, restart, and accepted-side-effect scenarios.
+The experiment must additionally stop/restart the sidecar and
 state-store, then remove all initialized containers/components. Dapr workflow
 state, component configuration, sidecar endpoints, Scheduler/Placement
 topology, and state-store implementation are Dapr-private.
@@ -148,7 +148,7 @@ adapter conformance tests. No unrecorded prototype may become a production API.
 ## Consequences
 
 - Story 7.2 implements only the neutral contract and the Temporal adapter; it
-  must not export `temporalio` or .NET/Dapr types from `conducto`.
+  must not export `temporalio` or Dapr types from `conducto`.
 - Required tests exercise the in-memory adapter and deterministic fakes.
   Temporal integration tests are explicitly opt-in and separately provision
   their local service.
@@ -173,7 +173,7 @@ adapter conformance tests. No unrecorded prototype may become a production API.
 ## Exit criteria for reconsideration
 
 Revisit this decision if Temporal cannot meet the in-memory contract with
-deterministic tests, fails Python/.NET worker parity, materially blocks
+deterministic tests, fails Python worker parity, materially blocks
 Conducto security/identity integration, exceeds agreed operational cost, or if
 Dapr demonstrates equivalent recovery and version-upgrade behavior with a
 lower measured operational burden. A change requires the same conformance
