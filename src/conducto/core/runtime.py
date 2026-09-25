@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     )
     from .invocation_results import InvocationResult
     from .registry import AgentRegistry
+    from .structured import CapabilityOutputContract
 
 __all__ = ["Runtime"]
 
@@ -400,7 +401,7 @@ class Runtime:
         delegation_frame: DelegationFrame | None = None,
         cancellation: CancellationState | None = None,
         instruction_chain: tuple[str, ...] = (),
-        output_contract: Any = None,
+        output_contract: CapabilityOutputContract | None = None,
     ) -> RunContext:
         """Create a new run context for an invocation.
 

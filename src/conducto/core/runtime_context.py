@@ -21,6 +21,7 @@ from .run_context import (
 
 if TYPE_CHECKING:
     from .runtime import Runtime
+    from .structured import CapabilityOutputContract
 
 
 def build_run_context(
@@ -37,7 +38,7 @@ def build_run_context(
     delegation_frame: DelegationFrame | None,
     cancellation: CancellationState | None,
     instruction_chain: tuple[str, ...] = (),
-    output_contract: Any = None,
+    output_contract: CapabilityOutputContract | None = None,
 ) -> RunContext:
     """Build a context without amplifying its parent's deadlines or authority.
 

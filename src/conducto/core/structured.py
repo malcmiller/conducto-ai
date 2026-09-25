@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, get_args, get_type_hints
 
@@ -33,7 +34,7 @@ class CapabilityOutputContract:
         Returns:
             A mutable JSON-compatible copy suitable for publication.
         """
-        return dict(self.request.json_schema)
+        return deepcopy(dict(self.request.json_schema))
 
     def validate(self, value: Any) -> Any:
         """Validate provider output and return the typed capability value.
