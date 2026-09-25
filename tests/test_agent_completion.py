@@ -114,6 +114,11 @@ def test_agent_completion_requires_an_active_run_context() -> None:
         asyncio.run(_CompletionAgent().complete("Write a draft."))
 
 
+def test_agent_completion_rejects_empty_message_sequences() -> None:
+    with pytest.raises(ValueError, match="requires at least one message"):
+        asyncio.run(_CompletionAgent().complete(()))
+
+
 def test_agent_completion_honors_cancellation_and_deadlines() -> None:
     async def exercise() -> None:
         runtime, _registry, provider = _runtime()

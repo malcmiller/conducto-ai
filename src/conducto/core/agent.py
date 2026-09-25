@@ -146,12 +146,15 @@ class BaseAgent:
             asyncio.CancelledError: If the active invocation is cancelled.
             NoActiveRunContextError: If called outside an active runtime invocation.
             TimeoutError: If the active invocation's deadline has expired.
+            ValueError: If no prompt messages are provided.
         """
         messages = (
             (ChatMessage(role="user", content=prompt),)
             if isinstance(prompt, str)
             else tuple(prompt)
         )
+        if not messages:
+            raise ValueError("Completion requires at least one message")
         return await require_run_context().models.require(model).complete(
             messages,
             structured_output=structured_output or _optional_structured_output(),
