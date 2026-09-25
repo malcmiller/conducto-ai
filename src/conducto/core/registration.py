@@ -15,6 +15,7 @@ from .parameter_schema import (
     build_parameter_model,
     build_parameter_schema,
 )
+from .structured import CapabilityOutputContract, build_capability_output_contract
 
 
 class AgentRegistrationError(ValueError):
@@ -30,6 +31,8 @@ class RegisteredMethod:
         callable: Bound callable that implements the capability or tool.
         parameter_schema: Generated JSON schema for the callable arguments.
         parameter_model: Generated Pydantic model for validating arguments.
+        output_contract: Derived structured-output contract for the capability
+            return value, if the return annotation or metadata declares one.
         capability: Capability metadata, if the method is exported as a capability.
         tool: Tool metadata, if the method is exported as a tool.
     """
@@ -38,6 +41,7 @@ class RegisteredMethod:
     callable: Callable[..., Any]
     parameter_schema: dict[str, Any]
     parameter_model: type[BaseModel]
+    output_contract: CapabilityOutputContract | None = None
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
 
@@ -86,16 +90,26 @@ def register_decorated_methods(
         except ParameterSchemaError as error:
             raise AgentRegistrationError(str(error)) from error.__cause__
 
+        capability_metadata = resolve_export_metadata(
+            attribute_name,
+            bound_method,
+            metadata.capability,
+        )
         registered = RegisteredMethod(
             attribute_name=attribute_name,
             callable=bound_method,
             parameter_schema=parameter_schema,
             parameter_model=parameter_model,
-            capability=resolve_export_metadata(
-                attribute_name,
-                bound_method,
-                metadata.capability,
+            output_contract=(
+                build_capability_output_contract(
+                    bound_method,
+                    name=f"{agent_type.__name__}_{attribute_name}_Output",
+                    schema_override=capability_metadata.output_schema,
+                )
+                if capability_metadata is not None
+                else None
             ),
+            capability=capability_metadata,
             tool=resolve_export_metadata(
                 attribute_name,
                 bound_method,
@@ -195,6 +209,7 @@ def resolve_export_metadata(
         model_required=metadata.model_required,
         tags=metadata.tags,
         instructions=metadata.instructions,
+        output_schema=metadata.output_schema,
     )
 
 

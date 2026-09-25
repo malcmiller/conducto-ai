@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from .model_resolution import ResolvedModel, _ResolvedModelBinding
     from .registry import AgentRegistry
     from .runtime import Runtime
+    from .structured import CapabilityOutputContract
 
 
 @dataclass(frozen=True, slots=True)
@@ -436,6 +437,7 @@ class RunContext:
     authorization: AuthorizationContext | None = field(default=None, repr=False, compare=False)
     policy_context: RunConfig = field(default_factory=RunConfig, repr=False, compare=False)
     instruction_chain: tuple[str, ...] = ()
+    output_contract: CapabilityOutputContract | None = None
     _runtime: Runtime | None = field(default=None, repr=False, compare=False)
     _agent_registry: AgentRegistry | None = field(default=None, repr=False, compare=False)
     _binding: _ResolvedModelBinding | None = field(default=None, repr=False, compare=False)

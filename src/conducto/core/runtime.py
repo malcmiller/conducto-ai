@@ -400,6 +400,7 @@ class Runtime:
         delegation_frame: DelegationFrame | None = None,
         cancellation: CancellationState | None = None,
         instruction_chain: tuple[str, ...] = (),
+        output_contract: Any = None,
     ) -> RunContext:
         """Create a new run context for an invocation.
 
@@ -419,6 +420,8 @@ class Runtime:
             instruction_chain: Resolved, ordered instruction chain -- runtime
                 policy, then agent, then capability instructions -- to record
                 on the context and compose into its model calls.
+            output_contract: Optional structured-output contract for the active
+                capability return value.
 
         Returns:
             A task-local run context associated with this runtime.
@@ -446,6 +449,7 @@ class Runtime:
             delegation_frame=delegation_frame,
             cancellation=cancellation,
             instruction_chain=instruction_chain,
+            output_contract=output_contract,
         )
 
     def resolve_model(

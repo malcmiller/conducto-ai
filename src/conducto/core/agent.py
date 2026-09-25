@@ -24,7 +24,6 @@ from .run_context import require_run_context
 
 if TYPE_CHECKING:
     from .delegation import DelegationConfig, DelegationOutcome
-    from .model_gateway import ModelCallResult
 
 __all__ = ["BaseAgent"]
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
@@ -123,7 +122,7 @@ class BaseAgent:
         model: ModelReference | str | None = None,
         tools: Sequence[ProviderToolDefinition] = (),
         structured_output: StructuredOutputRequest | None = None,
-    ) -> ModelCallResult:
+    ) -> Any:
         """Complete a prompt through the active runtime's governed model path.
 
         This method requires an active capability invocation. The runtime owns
@@ -136,11 +135,18 @@ class BaseAgent:
             model: Optional model reference override for this completion.
             tools: Optional provider-neutral tools available to the model.
             structured_output: Optional native structured-output contract. When
-                omitted, the runtime sends a permissive non-required object
-                contract because the provider protocol requires one.
+                omitted inside a capability with a Pydantic return annotation,
+                Conducto derives the contract from that annotation and returns
+                the validated typed value. When explicitly supplied, this
+                schema is used as an escape hatch and the raw model call result
+                is returned. Outside a typed capability, omission sends a
+                permissive non-required object contract because the provider
+                protocol requires one.
 
         Returns:
-            The provider result and invocation metadata.
+            The validated typed capability value for derived contracts, or the
+            provider result and invocation metadata for explicit/permissive
+            contracts.
 
         Raises:
             asyncio.CancelledError: If the active invocation is cancelled.
@@ -157,15 +163,26 @@ class BaseAgent:
         )
         if not messages:
             raise ValueError("Completion requires at least one message")
-        return (
-            await require_run_context()
-            .models.require(model)
-            .complete(
+        context = require_run_context()
+        if structured_output is not None:
+            return await context.models.require(model).complete(
                 messages,
-                structured_output=structured_output or _optional_structured_output(),
+                structured_output=structured_output,
                 tools=tools,
             )
+        output_contract = context.output_contract
+        if output_contract is None:
+            return await context.models.require(model).complete(
+                messages,
+                structured_output=_optional_structured_output(),
+                tools=tools,
+            )
+        call = await context.models.require(model).complete(
+            messages,
+            structured_output=output_contract.request,
+            tools=tools,
         )
+        return output_contract.validate(call.result.structured)
 
     @property
     def registered_methods(self) -> tuple[RegisteredMethod, ...]:
