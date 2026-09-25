@@ -43,6 +43,7 @@ class RegisteredMethod:
         capability: Capability metadata, if the method is exported as a capability.
         tool: Tool metadata, if the method is exported as a tool.
         policy: Immutable governance policy declared for the method.
+        data_sources: Sorted external data-source names declared for the method.
         retriever: Retrieval-specific metadata for retriever capabilities.
     """
 
@@ -54,6 +55,7 @@ class RegisteredMethod:
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
     policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
+    data_sources: tuple[str, ...] = ()
     retriever: RetrieverMetadata | None = None
 
 
@@ -84,6 +86,11 @@ def register_decorated_methods(
         metadata = get_method_metadata(declared_value)
         if metadata is None:
             continue
+        if metadata.data_sources and metadata.capability is None:
+            raise AgentRegistrationError(
+                f"{agent_type.__name__}.{attribute_name} declares data sources "
+                "but is not an A2A capability"
+            )
 
         bound_method = getattr(agent, attribute_name)
         if not callable(bound_method):
@@ -131,6 +138,7 @@ def register_decorated_methods(
                 metadata.tool,
             ),
             policy=metadata.policy,
+            data_sources=metadata.data_sources,
             retriever=metadata.retriever,
         )
         if registered.capability is not None:

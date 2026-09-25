@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -100,6 +101,19 @@ def _entry(
     )
 
 
+def _card_with_data_source_dependencies(value: object) -> dict[str, Any]:
+    card = deepcopy(_card())
+    card["capabilities"]["extensions"].append(
+        {
+            "uri": "https://conducto.ai/a2a/extensions/parameters/v1",
+            "description": "params",
+            "required": False,
+            "params": {"x-conducto": {"dataSourceDependencies": value}},
+        }
+    )
+    return card
+
+
 class _Clock:
     def __init__(self) -> None:
         self.now = 0.0
@@ -146,6 +160,36 @@ def test_rejected_admission_preserves_generation_leases_revision_and_snapshot() 
         catalog.register_instance(
             _entry(instance_id="rejected", card=_card(input_schema={"type": "string"}))
         )
+    assert catalog.revision == snapshot.revision
+    assert catalog.get("org.demo") == original
+    assert catalog.snapshot() == snapshot
+
+
+@pytest.mark.parametrize(
+    ("dependencies", "message"),
+    [
+        ("not-an-object", "must be an object"),
+        ({"unknown-skill": ["source"]}, "unknown skill"),
+        ({"skill-1": "source"}, "must be a sequence"),
+        ({"skill-1": [None]}, "non-empty strings"),
+        ({"skill-1": [" "]}, "non-empty strings"),
+    ],
+)
+def test_malformed_data_source_dependencies_reject_without_mutating_catalog(
+    dependencies: object, message: str
+) -> None:
+    catalog = AgentCatalog(clock=_Clock())
+    original = catalog.register_instance(_entry())
+    snapshot = catalog.snapshot()
+
+    with pytest.raises(CatalogValidationError, match=message):
+        catalog.register_instance(
+            _entry(
+                instance_id="rejected",
+                card=_card_with_data_source_dependencies(dependencies),
+            )
+        )
+
     assert catalog.revision == snapshot.revision
     assert catalog.get("org.demo") == original
     assert catalog.snapshot() == snapshot

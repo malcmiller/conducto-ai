@@ -18,6 +18,7 @@ from google.protobuf.json_format import MessageToDict
 
 from conducto.core.agent import BaseAgent
 from conducto.core.agent_card import stable_skill_id
+from conducto.core.data_sources import DataSourceRegistry
 from conducto.core.gateway._bindings import BindingAuthority
 from conducto.core.gateway_models import (
     CapabilityBinding,
@@ -176,6 +177,8 @@ class A2ARuntimeHandler:
         agent: Hosted agent. It is registered with ``runtime.agent_registry`` when
             absent; a conflicting registration fails construction.
         identity_resolver: Application-owned authentication and identity resolver.
+        data_sources: Optional configured source metadata copied into the runtime
+            registry before the hosted agent is registered.
         clock: UTC timestamp source used to convert inbound deadlines to timeouts.
         max_timeout: Maximum timeout accepted from transport metadata.
         max_delegation_depth: Maximum transport-requested delegation depth.
@@ -194,6 +197,7 @@ class A2ARuntimeHandler:
         runtime: Runtime,
         agent: BaseAgent,
         identity_resolver: A2AIdentityResolver,
+        data_sources: DataSourceRegistry | None = None,
         clock: Callable[[], float] = time.time,
         max_timeout: float = _DEFAULT_MAX_TIMEOUT,
         max_delegation_depth: int = _DEFAULT_MAX_DELEGATION_DEPTH,
@@ -206,6 +210,14 @@ class A2ARuntimeHandler:
         self._runtime = runtime
         self._agent = agent
         self._identity_resolver = identity_resolver
+        if data_sources is not None:
+            registered_sources = {
+                source.name for source in runtime.agent_registry.snapshot().data_sources
+            }
+            for source in data_sources.snapshot().data_sources:
+                if source.name not in registered_sources:
+                    runtime.agent_registry.register_data_source(source)
+                    registered_sources.add(source.name)
         self._clock = clock
         self._max_timeout = max_timeout
         self._max_delegation_depth = max_delegation_depth

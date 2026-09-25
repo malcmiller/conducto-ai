@@ -86,6 +86,66 @@ The declared metadata is available through immutable capability descriptors and
 is published in Conducto's optional Agent Card extension; it does not alter A2A
 standard fields or grant additional authority.
 
+## Declaring external data sources
+
+Declare external systems as metadata-only data sources, then bind capabilities to
+them by stable name. The registry stores no connector, callable, endpoint, or
+credential; trusted runtime configuration resolves each opaque binding:
+
+```python
+from conducto import (
+    BaseAgent,
+    DataSourceRegistry,
+    a2a_capability,
+    data_source,
+    requires_scope,
+    uses_data_source,
+)
+from conducto.core.registry import AgentRegistry
+
+
+@data_source(
+    name="fabric_customer_ontology",
+    kind="fabric_ontology",
+    description="Customer ontology metadata.",
+    read_scopes={"customer.read"},
+)
+class CustomerOntology:
+    pass
+
+
+@data_source(
+    name="onelake_customer_documents",
+    kind="onelake",
+    read_scopes={"customer.documents.read"},
+)
+class CustomerDocuments:
+    pass
+
+
+class CustomerAgent(BaseAgent):
+    @a2a_capability(name="lookup_customer", description="Looks up a customer.")
+    @requires_scope("customer.read")
+    @uses_data_source("fabric_customer_ontology", "onelake_customer_documents")
+    def lookup_customer(self, customer_id: str) -> str:
+        return customer_id
+
+
+sources = DataSourceRegistry()
+sources.register(CustomerOntology)
+sources.register(CustomerDocuments)
+registry = AgentRegistry(data_sources=sources)
+registry.register(CustomerAgent())
+```
+
+`kind` is descriptive metadata, not a request to install or contact a provider.
+The same contract can describe Fabric ontology and OneLake/blob storage, as well
+as SharePoint, SQL warehouses, CRM systems, or document stores. No cloud package
+or credential is required for local declaration and snapshot inspection.
+Capability snapshots and Agent Card extensions contain dependencies in sorted
+name order. Connector binding IDs remain in trusted registry and audit metadata,
+not in model-facing tool definitions or Agent Card dependency lists.
+
 ### Backend-neutral retrievers and RAG
 
 Use `@retriever` for retrieval operations that should remain portable across

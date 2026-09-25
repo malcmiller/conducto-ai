@@ -14,6 +14,10 @@ from conducto.security.guardrails import discover_guardrails
 
 from .agent import BaseAgent
 from .agent_card import capability_parameter_map
+from .data_sources import (
+    DataSourceMetadata,
+    DataSourceRegistry,
+)
 from .gateway_models import (
     AgentDescriptor,
     CapabilityDescriptor,
@@ -37,9 +41,20 @@ class _Registration:
 class AgentRegistry:
     """Own mutable local registrations and publish atomic immutable snapshots."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, data_sources: DataSourceRegistry | None = None) -> None:
+        """Create an agent registry with optional runtime-owned source metadata.
+
+        Args:
+            data_sources: Initial registry of credential-free data-source
+                declarations required by registered capabilities. Its immutable
+                snapshot is copied; later mutations remain owned by this registry.
+        """
         self.agents: dict[str, BaseAgent] = {}
         self.lock = threading.RLock()
+        self._data_sources = DataSourceRegistry()
+        if data_sources is not None:
+            for source in data_sources.snapshot().data_sources:
+                self._data_sources.register(source)
         self._registrations: dict[str, _Registration] = {}
         self._capability_index: dict[str, dict[str, _Registration]] = {}
         self._removed: set[str] = set()
@@ -61,7 +76,28 @@ class AgentRegistry:
                     registration.descriptor
                     for _, registration in sorted(self._registrations.items())
                 ),
+                data_sources=self._data_sources.snapshot().data_sources,
             )
+
+    def register_data_source(
+        self, declaration: type[object] | DataSourceMetadata
+    ) -> DataSourceMetadata:
+        """Register metadata for a configured source without retaining clients.
+
+        Args:
+            declaration: A decorated declaration class or immutable metadata.
+
+        Returns:
+            The registered immutable declaration.
+
+        Raises:
+            DataSourceRegistrationError: If the declaration is invalid or
+                duplicates an existing name.
+        """
+        with self.lock:
+            metadata = self._data_sources.register(declaration)
+            self._revision += 1
+            return metadata
 
     def registered_agents(self) -> tuple[BaseAgent, ...]:
         """Return all registered agents in sorted order."""
@@ -99,6 +135,16 @@ class AgentRegistry:
         if not agent_name or not agent_name.strip():
             raise ValueError("Agent name cannot be empty")
 
+        dependencies = tuple(
+            sorted(
+                {
+                    name
+                    for registered in agent.capabilities.values()
+                    for name in registered.data_sources
+                }
+            )
+        )
+        self._data_sources.resolve(dependencies)
         agent.get_agent_card(card_url_for(agent))
         with self.lock:
             existing = self._registrations.get(agent_name)
@@ -417,6 +463,7 @@ def _build_agent_descriptor(
                 required_scopes=guardrails.scopes,
                 approval_required=bool(guardrails.approvals),
                 policy=registered.policy,
+                data_sources=registered.data_sources,
             )
         )
     return AgentDescriptor(

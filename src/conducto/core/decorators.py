@@ -11,6 +11,8 @@ from typing import Any, Literal, TypeVar, cast, overload
 
 from conducto.security.guardrails import require_scope
 
+from .data_sources import DataSourceRegistrationError
+
 _AGENT_METADATA_ATTRIBUTE = "__conducto_agent_metadata__"
 _METHOD_METADATA_ATTRIBUTE = "__conducto_method_metadata__"
 
@@ -60,14 +62,14 @@ class CapabilityBudget:
         Returns:
             Declared budget limits using Agent Card extension field names.
         """
-        budget: dict[str, int | str] = {}
+        limits: dict[str, int | str] = {}
         if self.max_model_calls is not None:
-            budget["maxModelCalls"] = self.max_model_calls
+            limits["maxModelCalls"] = self.max_model_calls
         if self.max_tool_calls is not None:
-            budget["maxToolCalls"] = self.max_tool_calls
+            limits["maxToolCalls"] = self.max_tool_calls
         if self.max_cost_usd is not None:
-            budget["maxCostUsd"] = str(self.max_cost_usd)
-        return budget
+            limits["maxCostUsd"] = str(self.max_cost_usd)
+        return limits
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,12 +190,14 @@ class MethodMetadata:
         capability: A2A capability metadata, when declared.
         tool: Internal Conducto tool metadata, when declared.
         policy: Governance metadata that is applied to any declared exports.
+        data_sources: Named external data sources used by the method.
         retriever: Retrieval-specific metadata when this is a retriever capability.
     """
 
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
     policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
+    data_sources: tuple[str, ...] = ()
     retriever: RetrieverMetadata | None = None
 
 
@@ -494,6 +498,41 @@ def requires_scope(*scopes: str) -> Callable[[F], F]:
                 required_scopes=tuple(sorted(set(policy.required_scopes) | set(normalized))),
             ),
         )
+
+    return decorate
+
+
+def uses_data_source(*names: str) -> Callable[[F], F]:
+    """Declare named data-source dependencies for a capability.
+
+    This decorator records dependency names only. Runtime configuration owns
+    the corresponding connectors and resolves opaque bindings separately.
+
+    Args:
+        *names: One or more non-empty data-source names.
+
+    Returns:
+        A decorator that attaches sorted, immutable dependency names.
+
+    Raises:
+        DataSourceRegistrationError: If no names are supplied or any name is
+            blank or not a string.
+    """
+    if not names:
+        raise DataSourceRegistrationError("uses_data_source requires at least one data-source name")
+    normalized_values = tuple(name.strip() if isinstance(name, str) else "" for name in names)
+    if any(not name for name in normalized_values):
+        raise DataSourceRegistrationError(
+            "uses_data_source requires non-empty string data-source names"
+        )
+    normalized = tuple(sorted(set(normalized_values)))
+
+    def decorate(value: F) -> F:
+        target = _decorator_target(value)
+        current = get_method_metadata(target) or MethodMetadata()
+        dependencies = tuple(sorted(set(current.data_sources) | set(normalized)))
+        setattr(target, _METHOD_METADATA_ATTRIBUTE, replace(current, data_sources=dependencies))
+        return value
 
     return decorate
 
