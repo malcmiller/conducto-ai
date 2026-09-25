@@ -77,6 +77,11 @@ from .handler import (
     A2ARequestHandler,
 )
 from .hardening import A2AHostSecurityConfig, A2AMTLSIdentityExtractor, A2ATransportFacts
+from .identity import (
+    JWTBearerIdentityResolver,
+    StaticTokenIdentityResolver,
+    TransportIdentityResolver,
+)
 from .lifecycle import A2AConcurrencyLimiter, A2AHostLifecycle, A2AHostState
 from .profile import A2A_SERVER_EXTRA, require_a2a_server_dependency
 from .runtime import (
@@ -247,6 +252,7 @@ __all__ = [
     "A2AHostSecurityConfig",
     "A2AHostState",
     "A2AIdentityResolver",
+    "JWTBearerIdentityResolver",
     "A2AMTLSIdentityExtractor",
     "A2APayloadLimitError",
     "A2AProtocolError",
@@ -259,6 +265,8 @@ __all__ = [
     "A2AShutdownError",
     "A2AStartupError",
     "A2ATransportFacts",
+    "StaticTokenIdentityResolver",
+    "TransportIdentityResolver",
     "CONDUCTO_PARAMETER_EXTENSION_URI",
     "create_a2a_app",
     "invocation_result_to_task",
