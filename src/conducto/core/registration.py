@@ -13,6 +13,7 @@ from .decorators import (
     AgentMetadata,
     CapabilityPolicyMetadata,
     ExportMetadata,
+    RetrieverMetadata,
     get_agent_metadata,
     get_method_metadata,
 )
@@ -43,6 +44,7 @@ class RegisteredMethod:
         tool: Tool metadata, if the method is exported as a tool.
         policy: Immutable governance policy declared for the method.
         data_sources: Sorted external data-source names declared for the method.
+        retriever: Retrieval-specific metadata for retriever capabilities.
     """
 
     attribute_name: str
@@ -54,6 +56,7 @@ class RegisteredMethod:
     tool: ExportMetadata | None = None
     policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
     data_sources: tuple[str, ...] = ()
+    retriever: RetrieverMetadata | None = None
 
 
 def register_decorated_methods(
@@ -104,6 +107,10 @@ def register_decorated_methods(
             )
         except ParameterSchemaError as error:
             raise AgentRegistrationError(str(error)) from error.__cause__
+        if metadata.retriever is not None and "query" not in parameter_model.model_fields:
+            raise AgentRegistrationError(
+                f"{agent_type.__name__}.{attribute_name} retrievers require a 'query' parameter"
+            )
 
         capability_metadata = resolve_export_metadata(
             attribute_name,
@@ -132,6 +139,7 @@ def register_decorated_methods(
             ),
             policy=metadata.policy,
             data_sources=metadata.data_sources,
+            retriever=metadata.retriever,
         )
         if registered.capability is not None:
             capability_name = registered.capability.name

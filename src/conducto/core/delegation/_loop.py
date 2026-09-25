@@ -119,6 +119,7 @@ async def run_delegation(
             resolution_source=base_metadata.resolution_source,
             usage=usage or aggregate_usage(ordered_model_calls),
             model_calls=tuple(ordered_model_calls),
+            retrievals=base_metadata.retrievals,
             attributes=base_metadata.attributes,
             instruction_chain=base_metadata.instruction_chain,
         )
@@ -322,6 +323,9 @@ async def run_delegation(
                 else ()
             )
             ordered_model_calls.extend(child_model_calls)
+            if isinstance(child_metadata, InvocationMetadata):
+                for retrieval in child_metadata.retrievals:
+                    context.record_retrieval(retrieval)
             fallback_allowed = config.fallback.permits(envelope.status)
             records.append(
                 DelegationToolCallRecord(

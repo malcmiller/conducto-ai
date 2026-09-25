@@ -20,6 +20,7 @@ from .core.decorators import (
     budget,
     classification,
     requires_scope,
+    retriever,
     side_effect,
     timeout,
     tool,
@@ -34,6 +35,12 @@ from .core.model_config import (
 )
 from .core.orchestrator import OrchestratorAgent
 from .core.registry import AgentRegistry
+from .core.retrieval import (
+    RetrievalQuery,
+    RetrievalResult,
+    RetrievedDocument,
+    RetrieverProtocol,
+)
 from .core.run_context import RunContext, get_run_context, require_run_context
 from .core.runtime import Runtime
 
@@ -49,6 +56,10 @@ __all__ = [
     "ModelRequirement",
     "MissingDataSourceError",
     "OrchestratorAgent",
+    "RetrievedDocument",
+    "RetrievalQuery",
+    "RetrievalResult",
+    "RetrieverProtocol",
     "RunConfig",
     "RunContext",
     "Runtime",
@@ -61,6 +72,7 @@ __all__ = [
     "get_run_context",
     "require_run_context",
     "requires_scope",
+    "retriever",
     "side_effect",
     "timeout",
     "tool",
