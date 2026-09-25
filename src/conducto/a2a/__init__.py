@@ -204,7 +204,8 @@ def invocation_result_to_task(result: InvocationResult, *, task_id: str, context
     elif isinstance(result, InvocationFailure):
         reason = result.classification or "capability_failure"
         message = (
-            str(result.exception)
+            f"Capability '{result.exception.capability}' failed during "
+            f"{result.exception.stage.value} stage."
             if isinstance(result.exception, CapabilityError)
             else "The capability failed during execution."
         )

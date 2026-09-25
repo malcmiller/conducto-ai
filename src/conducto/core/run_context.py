@@ -605,6 +605,9 @@ class RunContext:
 
         Args:
             usage: Optional usage snapshot to attach when no model calls have been logged.
+            failure_classification: Optional stable taxonomy code. Set this
+                only when the invocation fails; successful metadata leaves it
+                unset.
 
         Returns:
             A normalized metadata object describing the run and model provenance.

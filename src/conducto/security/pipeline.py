@@ -500,6 +500,9 @@ class SecurityPipeline:
             instruction_chain: Resolved, ordered instruction chain -- runtime
                 policy, then agent, then capability instructions -- recorded
                 on this lifecycle event for provenance and audit output.
+            failure_classification: Optional stable capability failure code
+                recorded for failed execution events; distinct from the
+                broader lifecycle ``reason_code``.
         """
         await self._emit(
             name,

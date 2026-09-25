@@ -22,6 +22,7 @@ from .agent_card import stable_skill_id
 from .capability_errors import (
     CapabilityError,
     InvalidCapabilityInputError,
+    OutputInvariantError,
     map_provider_error,
 )
 from .instructions import resolve_instruction_chain
@@ -494,29 +495,32 @@ async def invoke_agent(
                 context.invocation_metadata(failure_classification=classification),
                 classification,
             )
-        except UnsupportedReturnValueError as error:
+        except UnsupportedReturnValueError:
+            invariant_error = OutputInvariantError(capability_name)
             await pipeline.emit_execution(
                 AuditEventName.EXECUTION_FAILED,
                 context.authorization,
                 agent_id=agent_id,
                 capability_id=capability_name,
                 outcome=AuditOutcome.FAILURE,
-                reason_code="unsupported_return_value",
+                reason_code=invariant_error.code.value,
                 instruction_chain=context.instruction_chain,
+                failure_classification=invariant_error.code.value,
             )
             emit_event(
                 INVOCATION_FAILED,
                 level=30,
                 outcome="failure",
                 duration_ms=(time.perf_counter() - started) * 1000,
-                error_category="unsupported_return_value",
+                error_category=invariant_error.code.value,
             )
-            invocation_span.set_error("unsupported_return_value")
+            invocation_span.set_error(invariant_error.code.value)
             return InvocationFailure(
                 correlation_id,
-                str(error),
-                error,
-                context.invocation_metadata(),
+                str(invariant_error),
+                invariant_error,
+                context.invocation_metadata(failure_classification=invariant_error.code.value),
+                invariant_error.code.value,
             )
         except AuditDeliveryError as error:
             from .invocation_results import InvocationAuditFailure
