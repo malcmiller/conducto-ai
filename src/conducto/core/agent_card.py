@@ -95,6 +95,7 @@ def build_agent_card(
     parameter_schemas: dict[str, dict[str, Any]] = {}
     capability_policies: dict[str, dict[str, Any]] = {}
     output_schemas: dict[str, dict[str, Any]] = {}
+    data_source_dependencies: dict[str, list[str]] = {}
     # Registration already inserts capabilities in deterministic attribute
     # order; preserve that order because it is part of the Agent Card wire output.
     for capability_name, registered in registered_capabilities.items():
@@ -123,15 +124,19 @@ def build_agent_card(
             capability_policies[skill_id] = registered.policy.to_dict()
         if registered.output_contract is not None:
             output_schemas[skill_id] = registered.output_contract.schema
+        if registered.data_sources:
+            data_source_dependencies[skill_id] = list(registered.data_sources)
 
     conducto_params: dict[str, Any] = {
         "parameters": parameter_schemas,
-        "skillIdStrategy": ("conducto-<sha256(agent-name:capability-name)[:16]>"),
+        "skillIdStrategy": "conducto-<sha256(agent-name:capability-name)[:16]>",
     }
     if capability_policies:
         conducto_params["capabilityPolicies"] = capability_policies
     if output_schemas:
         conducto_params["outputSchemas"] = output_schemas
+    if data_source_dependencies:
+        conducto_params["dataSourceDependencies"] = data_source_dependencies
     if metadata.publish_instructions and metadata.instructions is not None:
         conducto_params["instructions"] = metadata.instructions
 

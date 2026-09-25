@@ -69,6 +69,7 @@ class CatalogCapabilityDescriptor:
         required_scopes: Scopes required to authorize an invocation.
         approval_required: Whether the destination requires human approval.
         policy: Immutable governance metadata declared by the capability.
+        data_sources: Sorted logical data-source dependencies from the Agent Card.
     """
 
     capability_id: str
@@ -82,6 +83,7 @@ class CatalogCapabilityDescriptor:
     required_scopes: tuple[str, ...] = ()
     approval_required: bool = False
     policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
+    data_sources: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Freeze mutable fields so the descriptor is safe to share."""
@@ -90,6 +92,27 @@ class CatalogCapabilityDescriptor:
         if self.output_schema is not None:
             object.__setattr__(self, "output_schema", freeze_json(self.output_schema))
         object.__setattr__(self, "required_scopes", tuple(self.required_scopes))
+        object.__setattr__(self, "data_sources", tuple(sorted(set(self.data_sources))))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return deterministic public metadata for this catalog capability."""
+        descriptor: dict[str, Any] = {
+            "capability_id": self.capability_id,
+            "name": self.name,
+            "description": self.description,
+            "tags": sorted(self.tags),
+            "input_schema": thaw_json(self.input_schema),
+            "output_schema": thaw_json(self.output_schema),
+            "version": self.version,
+            "modality": self.modality,
+            "required_scopes": list(self.required_scopes),
+            "approval_required": self.approval_required,
+        }
+        if self.data_sources:
+            descriptor["data_sources"] = list(self.data_sources)
+        if not self.policy.is_empty:
+            descriptor["policy"] = self.policy.to_dict()
+        return descriptor
 
     def to_capability_descriptor(
         self, *, agent_id: str, agent_version: str
@@ -120,6 +143,7 @@ class CatalogCapabilityDescriptor:
             required_scopes=self.required_scopes,
             approval_required=self.approval_required,
             policy=self.policy,
+            data_sources=self.data_sources,
         )
 
 
@@ -162,6 +186,22 @@ class AgentInstanceRecord:
     def is_expired(self, now: float) -> bool:
         """Return whether this instance's lease has expired at ``now``."""
         return now >= self.lease_expires_at
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return credential-free public instance metadata."""
+        return {
+            "instance_id": self.instance_id,
+            "deployment_type": self.deployment_type.value,
+            "transports": sorted(self.transports),
+            "healthy": self.healthy,
+            "lease_expires_at": self.lease_expires_at,
+            "last_heartbeat_at": self.last_heartbeat_at,
+            "environment": self.environment,
+            "deployment_id": self.deployment_id,
+            "provenance": self.provenance,
+            "subject_id": self.subject_id,
+            "issuer": self.issuer,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,10 +249,30 @@ class CatalogAgentRecord:
             if instance.healthy and not instance.is_expired(now)
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return deterministic public agent metadata and capability dependencies."""
+        return {
+            "agent_id": self.agent_id,
+            "owner": self.owner,
+            "provenance": self.provenance,
+            "trust_policy_ref": self.trust_policy_ref,
+            "supported_versions": sorted(self.supported_versions),
+            "card_digest": self.card_digest,
+            "capabilities": [capability.to_dict() for capability in self.capabilities],
+            "lifecycle": self.lifecycle.value,
+            "generation": self.generation,
+            "instances": [instance.to_dict() for instance in self.instances],
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class CatalogSnapshot:
-    """Atomic immutable view of catalog registrations eligible for discovery."""
+    """Atomic immutable view of catalog registrations eligible for discovery.
+
+    Attributes:
+        revision: Monotonic catalog mutation counter.
+        agents: Eligible agents in stable identity order.
+    """
 
     revision: int
     agents: tuple[CatalogAgentRecord, ...]
@@ -225,6 +285,13 @@ class CatalogSnapshot:
     def capabilities(self) -> tuple[CatalogCapabilityDescriptor, ...]:
         """Return all eligible capabilities in stable agent/capability order."""
         return tuple(capability for agent in self.agents for capability in agent.capabilities)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a deterministic JSON-compatible catalog snapshot."""
+        return {
+            "revision": self.revision,
+            "agents": [agent.to_dict() for agent in self.agents],
+        }
 
 
 @dataclass(frozen=True, slots=True)

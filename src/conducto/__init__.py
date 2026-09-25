@@ -6,6 +6,14 @@ adapters from ``conducto.providers``, and deterministic fakes from
 """
 
 from .core.agent import BaseAgent
+from .core.data_sources import (
+    DataSourceMetadata,
+    DataSourceRegistrationError,
+    DataSourceRegistry,
+    DataSourceSnapshot,
+    MissingDataSourceError,
+    data_source,
+)
 from .core.decorators import (
     a2a_agent,
     a2a_capability,
@@ -15,6 +23,7 @@ from .core.decorators import (
     side_effect,
     timeout,
     tool,
+    uses_data_source,
 )
 from .core.model_config import (
     AgentModelConfig,
@@ -32,8 +41,13 @@ __all__ = [
     "AgentModelConfig",
     "AgentRegistry",
     "BaseAgent",
+    "DataSourceMetadata",
+    "DataSourceRegistrationError",
+    "DataSourceRegistry",
+    "DataSourceSnapshot",
     "ModelReference",
     "ModelRequirement",
+    "MissingDataSourceError",
     "OrchestratorAgent",
     "RunConfig",
     "RunContext",
@@ -43,10 +57,12 @@ __all__ = [
     "a2a_capability",
     "budget",
     "classification",
+    "data_source",
     "get_run_context",
     "require_run_context",
     "requires_scope",
     "side_effect",
     "timeout",
     "tool",
+    "uses_data_source",
 ]

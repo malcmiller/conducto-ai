@@ -102,8 +102,10 @@ class AdmissionPolicy:
 def _capabilities_from_card(card: Mapping[str, Any]) -> tuple[CatalogCapabilityDescriptor, ...]:
     version = str(card.get("version", ""))
     parameter_map = capability_parameter_map(card)
+    skills = card.get("skills", [])
+    dependencies = _data_source_dependencies(card, {skill.get("id") for skill in skills})
     descriptors: list[CatalogCapabilityDescriptor] = []
-    for skill in card.get("skills", []):
+    for skill in skills:
         capability_id = skill.get("id")
         input_modes = tuple(skill.get("inputModes", ()))
         policy = _capability_policy(card, capability_id)
@@ -121,9 +123,56 @@ def _capabilities_from_card(card: Mapping[str, Any]) -> tuple[CatalogCapabilityD
                     sorted(set(_required_scopes(skill)) | set(policy.required_scopes))
                 ),
                 policy=policy,
+                data_sources=dependencies.get(capability_id, ()),
             )
         )
     return tuple(descriptors)
+
+
+def _data_source_dependencies(
+    card: Mapping[str, Any], skill_ids: set[Any]
+) -> dict[str, tuple[str, ...]]:
+    """Read and validate stable dependency names from the Conducto card extension."""
+    extension = next(
+        (
+            item
+            for item in card.get("capabilities", {}).get("extensions", ())
+            if (
+                isinstance(item, Mapping)
+                and item.get("uri") == CONDUCTO_PARAMETER_EXTENSION_URI
+                and isinstance(item.get("params"), Mapping)
+            )
+        ),
+        None,
+    )
+    if extension is None:
+        return {}
+    conducto = extension["params"].get("x-conducto")
+    if not isinstance(conducto, Mapping):
+        return {}
+    declared = conducto.get("dataSourceDependencies", {})
+    if not isinstance(declared, Mapping):
+        raise CatalogValidationError("dataSourceDependencies must be an object")
+    unknown_skills = set(declared) - skill_ids
+    if unknown_skills:
+        raise CatalogValidationError(
+            "dataSourceDependencies references unknown skill(s): "
+            + ", ".join(sorted(str(skill_id) for skill_id in unknown_skills))
+        )
+    dependencies: dict[str, tuple[str, ...]] = {}
+    for skill_id, names in declared.items():
+        if not isinstance(skill_id, str):
+            raise CatalogValidationError("dataSourceDependencies keys must be skill IDs")
+        if isinstance(names, (str, bytes)) or not isinstance(names, Sequence):
+            raise CatalogValidationError(
+                f"Capability '{skill_id}' data-source dependencies must be a sequence"
+            )
+        if any(not isinstance(name, str) or not name.strip() for name in names):
+            raise CatalogValidationError(
+                f"Capability '{skill_id}' data-source dependencies must be non-empty strings"
+            )
+        dependencies[skill_id] = tuple(sorted({name.strip() for name in names}))
+    return dependencies
 
 
 def _capability_policy(card: Mapping[str, Any], capability_id: Any) -> CapabilityPolicyMetadata:

@@ -10,6 +10,7 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from .data_sources import DataSourceMetadata
 from .decorators import CapabilityPolicyMetadata
 
 
@@ -85,7 +86,18 @@ class CapabilityDescriptor:
     """Credential-free description of one discoverable capability.
 
     Attributes:
+        agent_id: Stable identifier of the owning agent.
+        agent_version: Published version of the owning agent.
+        capability_id: Stable capability identifier.
+        description: Human-readable description, when available.
+        tags: Immutable discovery labels.
+        input_schema: Frozen JSON Schema for arguments.
+        output_schema: Frozen JSON Schema for results, when available.
+        schema_digest: Digest binding this descriptor to its schemas.
+        required_scopes: Exact scopes required for invocation.
+        approval_required: Whether invocation requires approval.
         policy: Immutable capability governance metadata.
+        data_sources: Sorted logical names of required external sources.
     """
 
     agent_id: str
@@ -99,12 +111,14 @@ class CapabilityDescriptor:
     required_scopes: tuple[str, ...] = ()
     approval_required: bool = False
     policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
+    data_sources: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", frozenset(self.tags))
         object.__setattr__(self, "input_schema", freeze_json(self.input_schema))
         if self.output_schema is not None:
             object.__setattr__(self, "output_schema", freeze_json(self.output_schema))
+        object.__setattr__(self, "data_sources", tuple(sorted(set(self.data_sources))))
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-safe descriptor without execution details."""
@@ -122,12 +136,25 @@ class CapabilityDescriptor:
         }
         if not self.policy.is_empty:
             descriptor["policy"] = self.policy.to_dict()
+        if self.data_sources:
+            descriptor["data_sources"] = list(self.data_sources)
         return descriptor
 
 
 @dataclass(frozen=True, slots=True)
 class AgentDescriptor:
-    """Immutable public metadata for one registered local agent."""
+    """Immutable public metadata for one registered local agent.
+
+    Attributes:
+        agent_id: Stable agent identifier.
+        version: Published agent version.
+        description: Human-readable description, when available.
+        tags: Immutable discovery labels.
+        lifecycle: Current local registration state.
+        healthy: Whether the local target is healthy.
+        generation: Monotonic generation for this registration.
+        capabilities: Capability descriptors in stable name order.
+    """
 
     agent_id: str
     version: str
@@ -142,21 +169,52 @@ class AgentDescriptor:
         object.__setattr__(self, "tags", frozenset(self.tags))
         object.__setattr__(self, "capabilities", tuple(self.capabilities))
 
+    def to_dict(self) -> dict[str, Any]:
+        """Return deterministic public agent metadata."""
+        return {
+            "agent_id": self.agent_id,
+            "version": self.version,
+            "description": self.description,
+            "tags": sorted(self.tags),
+            "lifecycle": self.lifecycle.value,
+            "healthy": self.healthy,
+            "generation": self.generation,
+            "capabilities": [capability.to_dict() for capability in self.capabilities],
+        }
+
 
 @dataclass(frozen=True, slots=True)
 class RegistrySnapshot:
-    """Atomic immutable view of local registration metadata."""
+    """Atomic immutable view of local registration and data-source metadata.
+
+    Attributes:
+        revision: Monotonic registry revision.
+        agents: Registered agents in stable identifier order.
+        data_sources: Configured source declarations in stable name order.
+    """
 
     revision: int
     agents: tuple[AgentDescriptor, ...]
+    data_sources: tuple[DataSourceMetadata, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "agents", tuple(self.agents))
+        object.__setattr__(
+            self, "data_sources", tuple(sorted(self.data_sources, key=lambda source: source.name))
+        )
 
     @property
     def capabilities(self) -> tuple[CapabilityDescriptor, ...]:
         """Return all capabilities in stable agent/capability order."""
         return tuple(capability for agent in self.agents for capability in agent.capabilities)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a deterministic JSON-compatible registry snapshot."""
+        return {
+            "revision": self.revision,
+            "agents": [agent.to_dict() for agent in self.agents],
+            "data_sources": [source.to_dict() for source in self.data_sources],
+        }
 
 
 @dataclass(frozen=True, slots=True)

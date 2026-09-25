@@ -13,8 +13,13 @@ def test_application_facade_has_an_explicit_small_surface() -> None:
         "AgentModelConfig",
         "AgentRegistry",
         "BaseAgent",
+        "DataSourceMetadata",
+        "DataSourceRegistrationError",
+        "DataSourceRegistry",
+        "DataSourceSnapshot",
         "ModelReference",
         "ModelRequirement",
+        "MissingDataSourceError",
         "OrchestratorAgent",
         "RunConfig",
         "RunContext",
@@ -24,12 +29,14 @@ def test_application_facade_has_an_explicit_small_surface() -> None:
         "a2a_capability",
         "budget",
         "classification",
+        "data_source",
         "get_run_context",
         "require_run_context",
         "requires_scope",
         "side_effect",
         "timeout",
         "tool",
+        "uses_data_source",
     }
     assert all(getattr(conducto, name) is not None for name in conducto.__all__)
     assert not hasattr(conducto, "FakeModel")
