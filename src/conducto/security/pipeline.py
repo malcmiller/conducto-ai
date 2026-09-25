@@ -486,6 +486,7 @@ class SecurityPipeline:
         outcome: AuditOutcome,
         reason_code: str,
         instruction_chain: tuple[str, ...] = (),
+        failure_classification: str | None = None,
     ) -> None:
         """Emit lifecycle evidence after pre-execution acceptance.
 
@@ -499,6 +500,9 @@ class SecurityPipeline:
             instruction_chain: Resolved, ordered instruction chain -- runtime
                 policy, then agent, then capability instructions -- recorded
                 on this lifecycle event for provenance and audit output.
+            failure_classification: Optional stable capability failure code
+                recorded for failed execution events; distinct from the
+                broader lifecycle ``reason_code``.
         """
         await self._emit(
             name,
@@ -510,6 +514,7 @@ class SecurityPipeline:
             reason_code,
             required=False,
             instruction_chain=instruction_chain,
+            failure_classification=failure_classification,
         )
 
     async def _emit(
@@ -526,6 +531,7 @@ class SecurityPipeline:
         policy_version: str = "1",
         required: bool,
         instruction_chain: tuple[str, ...] = (),
+        failure_classification: str | None = None,
     ) -> None:
         if self.audit_emitter is None:
             return
@@ -566,6 +572,11 @@ class SecurityPipeline:
                     else AuditSeverity.INFO
                 ),
                 instruction_chain=instruction_chain,
+                extensions=(
+                    {"failure_classification": failure_classification}
+                    if failure_classification is not None
+                    else {}
+                ),
             ),
             required=required,
         )

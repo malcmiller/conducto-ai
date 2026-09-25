@@ -40,6 +40,7 @@ from conducto.core.a2a_profile import (
     validate_jsonrpc_method,
     validate_task_transition,
 )
+from conducto.core.capability_errors import CapabilityError
 from conducto.core.invocation_results import (
     InvocationApprovalRequired,
     InvocationAuditFailure,
@@ -160,7 +161,11 @@ def invocation_result_to_task(result: InvocationResult, *, task_id: str, context
         message = "The capability requires approval before it can execute."
     elif isinstance(result, InvocationValidationFailure):
         state = TaskState.TASK_STATE_REJECTED
-        reason = "invalid_arguments"
+        reason = (
+            result.metadata.failure_classification
+            if result.metadata is not None and result.metadata.failure_classification is not None
+            else "invalid_arguments"
+        )
         message = "The arguments did not match the capability schema."
     elif isinstance(result, InvocationTargetNotFound):
         state = TaskState.TASK_STATE_REJECTED
@@ -197,8 +202,13 @@ def invocation_result_to_task(result: InvocationResult, *, task_id: str, context
         reason = "delegation_rejected"
         message = "The delegation request was rejected."
     elif isinstance(result, InvocationFailure):
-        reason = "capability_failure"
-        message = "The capability failed during execution."
+        reason = result.classification or "capability_failure"
+        message = (
+            f"Capability '{result.exception.capability}' failed during "
+            f"{result.exception.stage.value} stage."
+            if isinstance(result.exception, CapabilityError)
+            else "The capability failed during execution."
+        )
     elif isinstance(result, InvocationInternalFailure):
         reason = "internal_error"
         message = "The capability invocation failed internally."
