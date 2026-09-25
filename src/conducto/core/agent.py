@@ -28,12 +28,6 @@ if TYPE_CHECKING:
 
 __all__ = ["BaseAgent"]
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
-# The provider contract always requires a request; this preserves optional output validation.
-_OPTIONAL_STRUCTURED_OUTPUT = StructuredOutputRequest(
-    name="completion",
-    schema={"type": "object"},
-    required=False,
-)
 
 
 class BaseAgent:
@@ -151,7 +145,12 @@ class BaseAgent:
         )
         return await require_run_context().models.require(model).complete(
             messages,
-            structured_output=structured_output or _OPTIONAL_STRUCTURED_OUTPUT,
+            structured_output=structured_output
+            or StructuredOutputRequest(
+                name="completion",
+                schema={"type": "object"},
+                required=False,
+            ),
             tools=tools,
         )
 
