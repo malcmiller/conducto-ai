@@ -204,6 +204,7 @@ async def invoke_agent(
         delegation_frame=DelegationFrame(agent_id, capability_name),
         cancellation=cancellation,
         instruction_chain=instruction_chain,
+        output_contract=registered.output_contract,
     )
     invocation_timeout = context.timeout
     target = registered.callable

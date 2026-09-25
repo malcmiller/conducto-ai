@@ -1,0 +1,1 @@
+{"additionalProperties":false,"description":"Golden object response model.","properties":{"text":{"title":"Text","type":"string"}},"required":["text"],"title":"GoldenAnswer","type":"object"}

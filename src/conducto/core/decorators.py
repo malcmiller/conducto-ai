@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from math import isfinite
@@ -156,6 +156,8 @@ class ExportMetadata:
             resolved instruction chain; never removes or replaces the
             instructions that precede it.
         policy: Immutable governance metadata declared for the method.
+        output_schema: Optional explicit structured-output JSON Schema used
+            instead of deriving one from the capability return annotation.
     """
 
     name: str | None = None
@@ -164,6 +166,7 @@ class ExportMetadata:
     tags: frozenset[str] = frozenset()
     instructions: str | None = None
     policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
+    output_schema: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +306,7 @@ def a2a_capability(
     model_required: bool | None = None,
     tags: tuple[str, ...] = (),
     instructions: str | None = None,
+    output_schema: Mapping[str, Any] | None = None,
 ) -> Callable[[F], F]:
     """Expose a method as an A2A capability.
 
@@ -322,6 +326,8 @@ def a2a_capability(
             the agent's instructions. Composed last in the resolved
             instruction chain, after runtime policy and agent instructions;
             never removes or replaces the instructions that precede it.
+        output_schema: Optional explicit structured-output JSON Schema. When
+            omitted, Conducto derives a schema from Pydantic return annotations.
 
     Returns:
         A decorator that preserves and returns the decorated callable.
@@ -339,6 +345,7 @@ def a2a_capability(
         model_required=model_required,
         tags=tags,
         instructions=instructions,
+        output_schema=output_schema,
     )
 
 
@@ -383,6 +390,7 @@ def tool(
         model_required=model_required,
         tags=tags,
         instructions=instructions,
+        output_schema=None,
     )
 
 
@@ -562,6 +570,7 @@ def _export_decorator(
     model_required: bool | None,
     tags: tuple[str, ...],
     instructions: str | None = None,
+    output_schema: Mapping[str, Any] | None = None,
 ) -> Callable[[F], F]:
     """Create a decorator for one of the supported method export kinds."""
 
@@ -571,6 +580,7 @@ def _export_decorator(
         model_required=model_required,
         tags=_normalize_tags(tags),
         instructions=_normalize_optional_text(instructions),
+        output_schema=output_schema,
     )
 
     def decorate(value: F) -> F:

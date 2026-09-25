@@ -94,6 +94,7 @@ def build_agent_card(
     skills: list[dict[str, Any]] = []
     parameter_schemas: dict[str, dict[str, Any]] = {}
     capability_policies: dict[str, dict[str, Any]] = {}
+    output_schemas: dict[str, dict[str, Any]] = {}
     # Registration already inserts capabilities in deterministic attribute
     # order; preserve that order because it is part of the Agent Card wire output.
     for capability_name, registered in registered_capabilities.items():
@@ -120,6 +121,8 @@ def build_agent_card(
         parameter_schemas[skill_id] = registered.parameter_schema
         if not registered.policy.is_empty:
             capability_policies[skill_id] = registered.policy.to_dict()
+        if registered.output_contract is not None:
+            output_schemas[skill_id] = registered.output_contract.schema
 
     conducto_params: dict[str, Any] = {
         "parameters": parameter_schemas,
@@ -127,6 +130,8 @@ def build_agent_card(
     }
     if capability_policies:
         conducto_params["capabilityPolicies"] = capability_policies
+    if output_schemas:
+        conducto_params["outputSchemas"] = output_schemas
     if metadata.publish_instructions and metadata.instructions is not None:
         conducto_params["instructions"] = metadata.instructions
 
@@ -248,6 +253,37 @@ def capability_parameter_map(card: Mapping[str, Any]) -> Mapping[str, Any]:
         parameters = conducto.get("parameters")
         if isinstance(parameters, Mapping):
             return parameters
+    return {}
+
+
+def capability_output_schema_map(card: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Return Conducto output schemas from an Agent Card, keyed by skill ID.
+
+    Args:
+        card: A validated Agent Card payload.
+
+    Returns:
+        A mapping from A2A skill ID to its structured-output JSON Schema, or an
+        empty mapping when the card carries no Conducto output-schema extension.
+    """
+    capabilities = card.get("capabilities")
+    if not isinstance(capabilities, Mapping):
+        return {}
+    extensions = capabilities.get("extensions", [])
+    if isinstance(extensions, (str, bytes)) or not isinstance(extensions, Sequence):
+        return {}
+    for extension in extensions:
+        if not isinstance(extension, Mapping):
+            continue
+        params = extension.get("params")
+        if not isinstance(params, Mapping):
+            continue
+        conducto = params.get("x-conducto")
+        if not isinstance(conducto, Mapping):
+            continue
+        output_schemas = conducto.get("outputSchemas")
+        if isinstance(output_schemas, Mapping):
+            return output_schemas
     return {}
 
 

@@ -21,6 +21,7 @@ from .run_context import (
 
 if TYPE_CHECKING:
     from .runtime import Runtime
+    from .structured import CapabilityOutputContract
 
 
 def build_run_context(
@@ -37,6 +38,7 @@ def build_run_context(
     delegation_frame: DelegationFrame | None,
     cancellation: CancellationState | None,
     instruction_chain: tuple[str, ...] = (),
+    output_contract: CapabilityOutputContract | None = None,
 ) -> RunContext:
     """Build a context without amplifying its parent's deadlines or authority.
 
@@ -58,6 +60,8 @@ def build_run_context(
         instruction_chain: Resolved, ordered instruction chain -- runtime
             policy, then agent, then capability instructions -- to record on
             the created context and compose into its model calls.
+        output_contract: Optional structured-output contract for the active
+            capability return value.
 
     Returns:
         A task-local run context associated with this runtime.
@@ -132,6 +136,7 @@ def build_run_context(
         ),
         policy_context=run,
         instruction_chain=instruction_chain,
+        output_contract=output_contract,
         _runtime=runtime,
         _agent_registry=runtime.agent_registry,
         _binding=binding,
