@@ -14,7 +14,7 @@ from .agent_card import (
     serialize_agent_card,
 )
 from .model_config import AgentModelConfig, ModelReference, ModelRequirement
-from .provider import ChatMessage
+from .provider import ChatMessage, ProviderToolDefinition, StructuredOutputRequest
 from .registration import (
     RegisteredMethod,
     register_decorated_methods,
@@ -24,9 +24,15 @@ from .run_context import require_run_context
 
 if TYPE_CHECKING:
     from .delegation import DelegationConfig, DelegationOutcome
+    from .model_gateway import ModelCallResult
 
 __all__ = ["BaseAgent"]
 ResponseT = TypeVar("ResponseT", bound=BaseModel)
+_OPTIONAL_STRUCTURED_OUTPUT = StructuredOutputRequest(
+    name="completion",
+    schema={"type": "object"},
+    required=False,
+)
 
 
 class BaseAgent:
@@ -104,6 +110,46 @@ class BaseAgent:
             messages,
             config=effective,
             response_type=response_type,
+        )
+
+    async def complete(
+        self,
+        prompt: str | Sequence[ChatMessage],
+        *,
+        model: ModelReference | str | None = None,
+        tools: Sequence[ProviderToolDefinition] = (),
+        structured_output: StructuredOutputRequest | None = None,
+    ) -> ModelCallResult:
+        """Complete a prompt through the active runtime's governed model path.
+
+        This method requires an active capability invocation. The runtime owns
+        provider resolution, client leases, deadlines, cancellation, security,
+        instruction composition, and audit provenance. Agent code must not
+        construct provider clients directly.
+
+        Args:
+            prompt: A user prompt string or provider-neutral message sequence.
+            model: Optional model reference override for this completion.
+            tools: Optional provider-neutral tools available to the model.
+            structured_output: Optional native structured-output contract. When
+                omitted, the completion may return provider content without
+                requiring structured output.
+
+        Returns:
+            The provider result and invocation metadata.
+
+        Raises:
+            NoActiveRunContextError: If called outside an active runtime invocation.
+        """
+        messages = (
+            (ChatMessage(role="user", content=prompt),)
+            if isinstance(prompt, str)
+            else tuple(prompt)
+        )
+        return await require_run_context().models.require(model).complete(
+            messages,
+            structured_output=structured_output or _OPTIONAL_STRUCTURED_OUTPUT,
+            tools=tools,
         )
 
     @property

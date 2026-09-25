@@ -171,8 +171,15 @@ Declared on a method to mark it as an internal Conducto tool, separate from the 
 - `registered_methods` — tuple of all reflected methods
 - `capabilities` — mapping of capability name to `RegisteredMethod`
 - `tools` — mapping of helper-tool name to `RegisteredMethod`
+- `await complete(prompt, model=..., tools=..., structured_output=...)` — make a
+  governed model completion from an active capability invocation
 - `get_agent_card(url, ...)`
 - `get_agent_card_json(url, ...)`
+
+`BaseAgent.complete()` resolves the active run context and uses the runtime
+completion path, including instruction composition, authorization, audit,
+deadlines, cancellation, and runtime-owned provider leases. Agent code must not
+construct provider clients or manage provider client lifecycles directly.
 
 ### Constraint
 
