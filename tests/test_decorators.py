@@ -178,6 +178,7 @@ def test_capability_policy_decorators_stack_in_any_order(capability_outermost: b
         (lambda: side_effect(" "), "non-empty"),
         (lambda: timeout(seconds=0), "finite positive"),
         (lambda: timeout(seconds=float("inf")), "finite positive"),
+        (lambda: timeout(seconds=10**400), "finite positive"),
         (lambda: budget(), "at least one"),
         (lambda: budget(max_model_calls=-1), "non-negative"),
         (lambda: budget(max_tool_calls=True), "non-negative"),

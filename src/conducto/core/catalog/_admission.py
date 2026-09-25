@@ -1,7 +1,7 @@
 """Agent Card preparation and admission policy, separate from lease mutation."""
 
 import hashlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -151,7 +151,7 @@ def _capability_policy(card: Mapping[str, Any], capability_id: Any) -> Capabilit
     policy = policies.get(capability_id) if isinstance(policies, Mapping) else None
     if not isinstance(policy, Mapping):
         return CapabilityPolicyMetadata()
-    required_scopes = policy.get("requiredScopes", ())
+    required_scopes = _policy_scopes(policy, capability_id)
     budget = policy.get("budget")
     max_cost = budget.get("maxCostUsd") if isinstance(budget, Mapping) else None
     try:
@@ -169,7 +169,7 @@ def _capability_policy(card: Mapping[str, Any], capability_id: Any) -> Capabilit
             f"Capability '{capability_id}' has an invalid policy budget"
         ) from error
     return CapabilityPolicyMetadata(
-        required_scopes=tuple(required_scopes) if isinstance(required_scopes, list) else (),
+        required_scopes=required_scopes,
         side_effect=policy.get("sideEffect") if isinstance(policy.get("sideEffect"), str) else None,
         timeout_seconds=(
             float(policy["timeoutSeconds"])
@@ -183,6 +183,22 @@ def _capability_policy(card: Mapping[str, Any], capability_id: Any) -> Capabilit
             else None
         ),
     )
+
+
+def _policy_scopes(policy: Mapping[str, Any], capability_id: str) -> tuple[str, ...]:
+    """Validate and normalize declared policy scopes from an Agent Card extension."""
+    scopes = policy.get("requiredScopes", ())
+    if isinstance(scopes, (str, bytes)) or not isinstance(scopes, Sequence):
+        raise CatalogValidationError(
+            f"Capability '{capability_id}' policy requiredScopes must be a sequence "
+            "of non-empty strings"
+        )
+    if any(not isinstance(scope, str) or not scope.strip() for scope in scopes):
+        raise CatalogValidationError(
+            f"Capability '{capability_id}' policy requiredScopes must be a sequence "
+            "of non-empty strings"
+        )
+    return tuple(sorted({scope.strip() for scope in scopes}))
 
 
 def _required_scopes(skill: Mapping[str, Any]) -> tuple[str, ...]:

@@ -448,7 +448,10 @@ def timeout(*, seconds: float) -> Callable[[F], F]:
     """
     if isinstance(seconds, bool) or not isinstance(seconds, int | float):
         raise PolicyMetadataError("timeout seconds must be a finite positive number")
-    normalized = float(seconds)
+    try:
+        normalized = float(seconds)
+    except OverflowError as error:
+        raise PolicyMetadataError("timeout seconds must be a finite positive number") from error
     if not isfinite(normalized) or normalized <= 0:
         raise PolicyMetadataError("timeout seconds must be a finite positive number")
     return _policy_decorator(lambda policy: replace(policy, timeout_seconds=normalized))

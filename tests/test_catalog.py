@@ -407,6 +407,27 @@ def test_static_file_provider_reports_non_array_document(tmp_path: Path) -> None
         provider.list_entries()
 
 
+@pytest.mark.parametrize("scopes", [{"refund.write": True}, ["refund.write", ""], "refund.write"])
+def test_catalog_rejects_invalid_capability_policy_scopes(scopes: object) -> None:
+    card = _card()
+    card["capabilities"]["extensions"].append(
+        {
+            "uri": "https://conducto.ai/a2a/extensions/parameters/v1",
+            "description": "params",
+            "required": False,
+            "params": {
+                "x-conducto": {
+                    "parameters": {},
+                    "capabilityPolicies": {"skill-1": {"requiredScopes": scopes}},
+                }
+            },
+        }
+    )
+
+    with pytest.raises(CatalogValidationError, match="requiredScopes"):
+        AgentCatalog(clock=_Clock()).register_instance(_entry(card=card))
+
+
 def test_provider_unavailable_is_explicit_and_does_not_admit_entries() -> None:
     class BrokenProvider:
         def list_entries(self) -> tuple[CatalogEntry, ...]:
