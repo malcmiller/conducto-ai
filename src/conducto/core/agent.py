@@ -157,10 +157,14 @@ class BaseAgent:
         )
         if not messages:
             raise ValueError("Completion requires at least one message")
-        return await require_run_context().models.require(model).complete(
-            messages,
-            structured_output=structured_output or _optional_structured_output(),
-            tools=tools,
+        return (
+            await require_run_context()
+            .models.require(model)
+            .complete(
+                messages,
+                structured_output=structured_output or _optional_structured_output(),
+                tools=tools,
+            )
         )
 
     @property
