@@ -147,6 +147,7 @@ class AuditEvent:
     occurred_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     sequence: int = 0
     extensions: Mapping[str, str | int | float | bool] = field(default_factory=dict, repr=False)
+    instruction_chain: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Normalize UTC timestamps and reject unsafe extension data."""

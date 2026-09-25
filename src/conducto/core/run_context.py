@@ -170,6 +170,7 @@ class ModelCallProvenance:
     provider: str
     resolution_source: ModelResolutionSource
     usage: Usage = field(default_factory=Usage)
+    instruction_chain: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize provenance metadata to a JSON-serializable dictionary.
@@ -183,6 +184,7 @@ class ModelCallProvenance:
             "provider": self.provider,
             "resolution_source": self.resolution_source.value,
             "usage": self.usage.model_dump(),
+            "instruction_chain": list(self.instruction_chain),
         }
 
 
@@ -307,6 +309,7 @@ class InvocationMetadata:
     usage: Usage = field(default_factory=Usage)
     model_calls: tuple[ModelCallProvenance, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
+    instruction_chain: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "attributes", freeze_metadata(self.attributes))
@@ -333,6 +336,7 @@ class InvocationMetadata:
             "usage": self.usage.model_dump(),
             "model_calls": [call.to_dict() for call in self.model_calls],
             "attributes": thaw_metadata(self.attributes),
+            "instruction_chain": list(self.instruction_chain),
         }
 
     def with_model_calls(
@@ -388,6 +392,7 @@ class RunContext:
     )
     authorization: AuthorizationContext | None = field(default=None, repr=False, compare=False)
     policy_context: RunConfig = field(default_factory=RunConfig, repr=False, compare=False)
+    instruction_chain: tuple[str, ...] = ()
     _runtime: Runtime | None = field(default=None, repr=False, compare=False)
     _agent_registry: AgentRegistry | None = field(default=None, repr=False, compare=False)
     _binding: _ResolvedModelBinding | None = field(default=None, repr=False, compare=False)
@@ -405,6 +410,7 @@ class RunContext:
     def __post_init__(self) -> None:
         object.__setattr__(self, "metadata", freeze_metadata(self.metadata))
         object.__setattr__(self, "delegation_path", tuple(self.delegation_path))
+        object.__setattr__(self, "instruction_chain", tuple(self.instruction_chain))
         if self.allowed_capabilities is not None:
             object.__setattr__(
                 self,
@@ -543,6 +549,7 @@ class RunContext:
                 for frame in self.delegation_path
             ],
             "remaining_delegation_budget": asdict(self.remaining_delegation_budget),
+            "instruction_chain": list(self.instruction_chain),
         }
 
     def invocation_metadata(self, usage: Usage | None = None) -> InvocationMetadata:
@@ -566,6 +573,7 @@ class RunContext:
             usage=aggregate_usage(calls) if calls else (usage or Usage()),
             model_calls=calls,
             attributes=self.metadata,
+            instruction_chain=self.instruction_chain,
         )
 
 

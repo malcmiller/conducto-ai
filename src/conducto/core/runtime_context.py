@@ -36,6 +36,7 @@ def build_run_context(
     delegation_budget: DelegationBudget | None,
     delegation_frame: DelegationFrame | None,
     cancellation: CancellationState | None,
+    instruction_chain: tuple[str, ...] = (),
 ) -> RunContext:
     """Build a context without amplifying its parent's deadlines or authority.
 
@@ -111,6 +112,7 @@ def build_run_context(
             else (delegation_budget or DelegationBudget())
         ),
         policy_context=run,
+        instruction_chain=instruction_chain,
         _runtime=runtime,
         _agent_registry=runtime.agent_registry,
         _binding=binding,

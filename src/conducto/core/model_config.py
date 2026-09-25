@@ -172,9 +172,18 @@ class RunConfig:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeConfig:
-    """Immutable runtime-wide model defaults."""
+    """Immutable runtime-wide model defaults and policy instructions."""
 
     default_model: ModelReference | str | None = None
+    policy_instructions: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "default_model", normalize_reference(self.default_model))
+        instructions = tuple(self.policy_instructions)
+        if any(not isinstance(value, str) or not value.strip() for value in instructions):
+            raise ValueError("Runtime policy instructions must be non-empty strings")
+        object.__setattr__(
+            self,
+            "policy_instructions",
+            tuple(value.strip() for value in instructions),
+        )

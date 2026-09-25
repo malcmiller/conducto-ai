@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import dataclasses
 import os
 import threading
 import time
@@ -18,6 +19,7 @@ from conducto.security import (
     SecurityPipeline,
 )
 
+from .instructions import compose_system_message
 from .model_config import (
     AgentModelConfig,
     ModelReference,
@@ -98,10 +100,16 @@ class Runtime:
         gateway_max_results: int = 20,
         gateway_max_serialized_bytes: int = 64 * 1024,
         gateway_clock: Callable[[], float] = time.monotonic,
+        policy_instructions: Sequence[str] | None = None,
     ) -> None:
         self._provider_registry = provider_registry or ProviderRegistry()
         self._model_resolver = ModelResolver(self._provider_registry)
         self.config = config or RuntimeConfig()
+        if policy_instructions is not None:
+            self.config = dataclasses.replace(
+                self.config,
+                policy_instructions=tuple(policy_instructions),
+            )
         self.policy = policy
         self.security_pipeline = security_pipeline or SecurityPipeline(InMemoryApprovalStore())
         if agent_registry is None:
@@ -359,6 +367,7 @@ class Runtime:
         delegation_budget: DelegationBudget | None = None,
         delegation_frame: DelegationFrame | None = None,
         cancellation: CancellationState | None = None,
+        instruction_chain: tuple[str, ...] = (),
     ) -> RunContext:
         """Create a new run context for an invocation.
 
@@ -375,6 +384,7 @@ class Runtime:
             delegation_budget: Root delegation limits when there is no parent context.
             delegation_frame: Optional frame appended to the parent's delegation path.
             cancellation: Optional cancellation state for a root invocation.
+            instruction_chain: Runtime-resolved trusted instructions applied to model calls.
 
         Returns:
             A task-local run context associated with this runtime.
@@ -401,6 +411,7 @@ class Runtime:
             delegation_budget=delegation_budget,
             delegation_frame=delegation_frame,
             cancellation=cancellation,
+            instruction_chain=instruction_chain,
         )
 
     def resolve_model(
@@ -521,6 +532,7 @@ class Runtime:
         if not context.belongs_to(self):
             raise ValueError("Run context belongs to a different runtime")
         self._ensure_open()
+        messages = compose_system_message(messages, context.instruction_chain)
         required = frozenset(
             {
                 "structured_output",

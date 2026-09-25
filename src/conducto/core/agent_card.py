@@ -118,6 +118,10 @@ def build_agent_card(
         )
         parameter_schemas[skill_id] = registered.parameter_schema
 
+    conducto_params: dict[str, Any] = {
+        "parameters": parameter_schemas,
+        "skillIdStrategy": "conducto-<sha256(agent-name:capability-name)[:16]>",
+    }
     card = {
         "name": metadata.name,
         "description": metadata.description,
@@ -140,12 +144,7 @@ def build_agent_card(
                     ),
                     "required": False,
                     "params": {
-                        "x-conducto": {
-                            "parameters": parameter_schemas,
-                            "skillIdStrategy": (
-                                "conducto-<sha256(agent-name:capability-name)[:16]>"
-                            ),
-                        }
+                        "x-conducto": conducto_params,
                     },
                 }
             ],
@@ -157,6 +156,8 @@ def build_agent_card(
         "securityRequirements": normalized_security,
         "signatures": [],
     }
+    if metadata.publish_instructions and metadata.instructions is not None:
+        conducto_params["instructions"] = metadata.instructions
     try:
         parse_agent_card(card)
     except A2AProtocolError as exc:

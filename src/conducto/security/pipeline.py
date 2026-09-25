@@ -177,11 +177,15 @@ class SecurityPipeline:
         agent_id: str = "",
         capability_id: str = "",
         approved_approval_id: str | None = None,
+        instruction_chain: tuple[str, ...] = (),
     ) -> GuardrailResult:
         """Check guardrails and deliver mandatory pre-execution evidence.
 
         Existing synchronous callers may retain ``check``; runtime invocation
         uses this method, so required audit acceptance is enforced before work.
+
+        Args:
+            instruction_chain: Trusted resolved instructions to attribute to audit events.
         """
         from conducto.core.telemetry import (
             SPAN_SECURITY_APPROVAL,
@@ -235,6 +239,7 @@ class SecurityPipeline:
                 challenge_id=result.challenge.approval_id,
                 policy_version=result.challenge.policy_version,
                 required=True,
+                instruction_chain=instruction_chain,
             )
         elif result.allowed:
             await self._emit(
@@ -246,6 +251,7 @@ class SecurityPipeline:
                 AuditOutcome.SUCCESS,
                 "authorized",
                 required=True,
+                instruction_chain=instruction_chain,
             )
             await self._emit(
                 AuditEventName.EXECUTION_ACCEPTED,
@@ -256,6 +262,7 @@ class SecurityPipeline:
                 AuditOutcome.SUCCESS,
                 "audit_accepted",
                 required=True,
+                instruction_chain=instruction_chain,
             )
         else:
             assert result.error is not None
@@ -441,8 +448,13 @@ class SecurityPipeline:
         capability_id: str,
         outcome: AuditOutcome,
         reason_code: str,
+        instruction_chain: tuple[str, ...] = (),
     ) -> None:
-        """Emit lifecycle evidence after pre-execution acceptance."""
+        """Emit lifecycle evidence after pre-execution acceptance.
+
+        Args:
+            instruction_chain: Trusted resolved instructions to attribute to the event.
+        """
         await self._emit(
             name,
             context,
@@ -452,6 +464,7 @@ class SecurityPipeline:
             outcome,
             reason_code,
             required=False,
+            instruction_chain=instruction_chain,
         )
 
     async def _emit(
@@ -467,6 +480,7 @@ class SecurityPipeline:
         challenge_id: str = "",
         policy_version: str = "1",
         required: bool,
+        instruction_chain: tuple[str, ...] = (),
     ) -> None:
         if self.audit_emitter is None:
             return
@@ -506,6 +520,7 @@ class SecurityPipeline:
                     if outcome in (AuditOutcome.FAILURE, AuditOutcome.REJECTED)
                     else AuditSeverity.INFO
                 ),
+                instruction_chain=instruction_chain,
             ),
             required=required,
         )
