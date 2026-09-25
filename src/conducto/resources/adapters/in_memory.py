@@ -46,6 +46,7 @@ class _SourceState:
     indexing: IndexingState = IndexingState.EMPTY
     accepted: dict[str, ContentItem] = field(default_factory=dict)
     indexed: dict[str, ContentItem] = field(default_factory=dict)
+    outstanding: set[str] = field(default_factory=set)
     applied_digests: set[str] = field(default_factory=set)
 
     @property
@@ -237,13 +238,16 @@ class InMemoryDataSourceBackend:
                 resolved.check(data_source=binding.data_source, operation="ingest")
                 if item.content_id in self._reject_content_ids:
                     refused.append(item.content_id)
+                    state.outstanding.add(item.content_id)
                     continue
                 current = state.accepted.get(item.content_id)
                 if current is not None and current.body_digest == item.body_digest:
                     skipped += 1
+                    state.outstanding.discard(item.content_id)
                     continue
                 state.accepted[item.content_id] = item
                 state.indexed.pop(item.content_id, None)
+                state.outstanding.discard(item.content_id)
                 accepted += 1
             if accepted or skipped:
                 state.indexing = (
@@ -295,10 +299,16 @@ class InMemoryDataSourceBackend:
             queryable.
 
         Raises:
-            IngestionError: If the binding is stale, no content was accepted, or
-                indexing was configured to fail for this source.
+            IngestionError: If the binding is stale, content from an earlier
+                batch is still unresolved, no content was accepted, or indexing
+                was configured to fail for this source.
             LifecycleTimeoutError: If the deadline was exceeded.
             LifecycleCancelledError: If cancellation was requested.
+
+        Notes:
+            Indexing never promotes a partial corpus to a complete one. While
+            content refused by an earlier batch is outstanding, the source stays
+            ``PARTIAL`` until that content is supplied again and accepted.
         """
         resolved = resolve_budget(budget)
         resolved.check(data_source=binding.data_source, operation="index")
@@ -310,6 +320,13 @@ class InMemoryDataSourceBackend:
                     "Indexing did not complete",
                     data_source=binding.data_source,
                     reason="index_failed",
+                )
+            if state.outstanding:
+                state.indexing = IndexingState.PARTIAL
+                raise IngestionError(
+                    "Content from an earlier batch is still unresolved",
+                    data_source=binding.data_source,
+                    reason="index_incomplete",
                 )
             if not state.accepted:
                 state.indexing = IndexingState.EMPTY

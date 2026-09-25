@@ -15,7 +15,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import timedelta
 from enum import Flag, auto
 from typing import Any, Protocol
@@ -244,7 +244,10 @@ class ReadinessGate:
             data_source: Logical name to look up.
 
         Returns:
-            The cached verdict when it has not expired, otherwise ``None``.
+            An equivalent verdict marked :attr:`ReadinessVerdict.from_cache`
+            when the cached entry has not expired, otherwise ``None``. The
+            original ``evaluated_at`` timestamp is preserved so callers can see
+            when the affirmative conclusion was actually reached.
         """
         entry = self._verdicts.get(data_source)
         if entry is None:
@@ -253,7 +256,7 @@ class ReadinessGate:
         if self._clock() >= expires_at:
             self._verdicts.pop(data_source, None)
             return None
-        return verdict
+        return replace(verdict, from_cache=True)
 
     async def verify_on_start(
         self,
@@ -362,3 +365,10 @@ class ReadinessGate:
         except ReadinessProbeError:
             self.invalidate(data_source)
             raise
+        except Exception as error:  # noqa: BLE001 - backend detail must not escape
+            self.invalidate(data_source)
+            raise ReadinessProbeError(
+                "Readiness probe failed",
+                data_source=data_source,
+                reason="readiness_probe_failed",
+            ) from error

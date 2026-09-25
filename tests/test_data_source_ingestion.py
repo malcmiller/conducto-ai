@@ -58,9 +58,11 @@ def test_content_identity_is_deterministic_and_order_independent() -> None:
     assert changed.digest != forward.digest
 
 
-def test_an_empty_or_duplicated_batch_is_rejected() -> None:
+def test_an_empty_duplicated_or_untyped_batch_is_rejected() -> None:
     with pytest.raises(ValueError, match="at least one item"):
         ContentBatch(())
+    with pytest.raises(ValueError, match="ContentItem"):
+        ContentBatch([object()])  # type: ignore[list-item]
     with pytest.raises(ValueError, match="must not repeat"):
         ContentBatch(
             (
@@ -134,6 +136,50 @@ def test_partial_ingestion_is_reported_explicitly_and_never_as_success() -> None
         verdict = await backend.probe("policy_corpus")
         assert verdict.ready is False
         assert verdict.reason == "index_partial"
+
+    asyncio.run(exercise())
+
+
+def test_indexing_refuses_to_promote_a_partial_corpus_to_a_complete_one() -> None:
+    backend = InMemoryDataSourceBackend(reject_content_ids=("doc-3",))
+
+    async def exercise() -> None:
+        binding = await backend.provision(_CONFIG)
+        with pytest.raises(PartialIngestionError):
+            await backend.ingest(binding, _batch())
+
+        with pytest.raises(IngestionError) as refused:
+            await backend.index(binding)
+        assert refused.value.reason == "index_incomplete"
+        description = await backend.describe("policy_corpus")
+        assert description.indexing is IndexingState.PARTIAL
+        assert not description.is_queryable
+        assert not (await backend.probe("policy_corpus")).ready
+
+    asyncio.run(exercise())
+
+
+def test_reprovisioning_clears_an_unresolved_partial_corpus() -> None:
+    backend = InMemoryDataSourceBackend(reject_content_ids=("doc-3",))
+
+    async def exercise() -> None:
+        binding = await backend.provision(_CONFIG)
+        with pytest.raises(PartialIngestionError):
+            await backend.ingest(binding, _batch())
+
+        replacement = await backend.provision(
+            ProvisioningConfig(
+                data_source="policy_corpus",
+                backend_kind="in_memory",
+                parameters={"dimension": 16},
+            )
+        )
+        assert replacement.revision == binding.revision + 1
+        description = await backend.describe("policy_corpus")
+        assert description.indexing is IndexingState.EMPTY
+        with pytest.raises(IngestionError) as empty:
+            await backend.index(replacement)
+        assert empty.value.reason == "index_empty"
 
     asyncio.run(exercise())
 

@@ -70,6 +70,11 @@ batch. Re-ingesting a batch with the same digest is a no-op.
 `IndexingState`. Partial ingestion raises `PartialIngestionError`, which carries
 that progress; it is never reported as success.
 
+Indexing never promotes a partial corpus to a complete one. While content
+refused by an earlier batch is still outstanding, `index()` fails with
+`IngestionError` and reason `index_incomplete`, and the source stays `PARTIAL`
+so readiness cannot pass over an incomplete corpus.
+
 ## Retirement
 
 `retire()` raises `RetirementError` when the backend cannot remove the resource
@@ -97,7 +102,9 @@ reused by `ON_INVOKE`:
 - A zero duration probes on every invocation.
 - A non-zero duration reuses a cached affirmative verdict until it expires.
 - Only affirmative verdicts are cached. A negative or failed verdict is never
-  cached and never suppresses the next check.
+  cached and never suppresses the next check. A reused verdict is returned with
+  `from_cache=True` and its original `evaluated_at`, so callers can always tell a
+  cached check from a fresh probe.
 - The cache is keyed by data source identity and is invalidated by
   re-provisioning, re-ingestion, indexing, and retirement of that source.
 
@@ -121,12 +128,20 @@ Check timing and failure handling are separate axes.
 Every lifecycle failure derives from `DataSourceLifecycleError`, is attributed
 to the named data source, and carries a stable snake_case `reason`. Its message
 and `to_dict()` payload disclose no backend endpoint, credential, or raw
-exception text.
+exception text. An unexpected backend exception — a connection error or client
+failure carrying an endpoint or key in its message — is mapped to a generic
+`ReadinessProbeError` with reason `readiness_probe_failed`; the original
+exception is preserved only as `__cause__` for local debugging.
 
 Provisioning, ingestion, indexing, and readiness probes all accept a
 `LifecycleBudget` carrying an optional timeout and a `CancellationState`. A probe
 that exceeds its budget raises `ReadinessProbeError` with reason
 `readiness_timeout`; it is never treated as a pass.
+
+`ReadinessCheckedRetriever` derives that bound from the active
+`RunContext` through `run_context_budget()`, so an invocation-time probe honours
+the run's remaining deadline and cancellation state instead of running
+unbounded. Pass `budget_factory` to supply the bound explicitly instead.
 
 ## Conformance fixtures
 

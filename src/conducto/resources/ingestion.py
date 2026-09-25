@@ -111,11 +111,12 @@ class ContentBatch:
             ValueError: If the batch is empty, contains a non-item value, or
                 repeats a ``content_id``.
         """
-        ordered = tuple(sorted(items, key=lambda item: item.content_id))
-        if not ordered:
+        materialized = tuple(items)
+        if not materialized:
             raise ValueError("a content batch must contain at least one item")
-        if any(not isinstance(item, ContentItem) for item in ordered):
+        if any(not isinstance(item, ContentItem) for item in materialized):
             raise ValueError("a content batch must contain ContentItem values")
+        ordered = tuple(sorted(materialized, key=lambda item: item.content_id))
         identities = [item.content_id for item in ordered]
         if len(set(identities)) != len(identities):
             raise ValueError("a content batch must not repeat a content_id")

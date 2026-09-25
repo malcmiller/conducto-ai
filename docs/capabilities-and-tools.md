@@ -180,7 +180,8 @@ A data source that must be created, populated, and verified before an agent can
 read it is a deployment concern; see
 [Data source lifecycle](./data-source-lifecycle.md).
 
-Successful invocation metadata includes ordered `RetrievalProvenance` with theretriever id, result count, sources, and citations. Document text and arbitrary
+Successful invocation metadata includes ordered `RetrievalProvenance` with the
+retriever id, result count, sources, and citations. Document text and arbitrary
 document metadata are deliberately excluded from provenance and audit events;
 they appear only in the explicitly returned capability value. See
 [`examples/in_memory_rag.py`](../examples/in_memory_rag.py) for a complete local

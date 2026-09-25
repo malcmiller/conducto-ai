@@ -13,7 +13,9 @@ from collections.abc import Awaitable, Callable, Iterable
 from typing import Protocol
 
 from conducto.core.retrieval import RetrievalQuery, RetrievalResult, RetrieverProtocol
+from conducto.core.run_context import get_run_context
 
+from .errors import ReadinessProbeError
 from .ingestion import ContentBatch, DataSourceIngestor, IngestionProgress
 from .provisioning import (
     DataSourceDescription,
@@ -24,7 +26,41 @@ from .provisioning import (
 )
 from .readiness import ReadinessGate, ReadinessPolicy, ReadinessProbe, ReadinessVerdict
 
-__all__ = ["DataSourceBackend", "DataSourceLifecycle", "ReadinessCheckedRetriever"]
+__all__ = [
+    "DataSourceBackend",
+    "DataSourceLifecycle",
+    "ReadinessCheckedRetriever",
+    "run_context_budget",
+]
+
+
+def run_context_budget(data_source: str) -> LifecycleBudget | None:
+    """Derive a lifecycle budget from the active invocation context.
+
+    Args:
+        data_source: Logical name used to attribute a deadline failure.
+
+    Returns:
+        A budget carrying the run's remaining timeout and cooperative
+        cancellation state, or ``None`` when no run context is active.
+
+    Raises:
+        ReadinessProbeError: If the active run deadline is already exhausted. A
+            probe that cannot start inside its budget is a readiness failure
+            rather than an assumed pass.
+    """
+    context = get_run_context()
+    if context is None:
+        return None
+    try:
+        remaining = context.remaining_timeout()
+    except TimeoutError as error:
+        raise ReadinessProbeError(
+            "Readiness probe exceeded its deadline",
+            data_source=data_source,
+            reason="readiness_timeout",
+        ) from error
+    return LifecycleBudget(timeout_seconds=remaining, cancellation=context.cancellation)
 
 
 class DataSourceBackend(DataSourceProvisioner, DataSourceIngestor, ReadinessProbe, Protocol):
@@ -271,6 +307,10 @@ class ReadinessCheckedRetriever:
             source it reads.
         lifecycle: Deployment-owned lifecycle that owns the readiness policy.
         data_source: Logical name of the data source being read.
+        budget_factory: Optional supplier of the bound applied to the readiness
+            probe. When omitted, the bound is derived from the active
+            :class:`~conducto.core.run_context.RunContext` so the probe honours
+            the invocation's remaining deadline and cancellation state.
 
     Notes:
         A refused invocation raises a typed failure. It never degrades to an
@@ -279,7 +319,7 @@ class ReadinessCheckedRetriever:
         unavailable is precisely the failure this contract prevents.
     """
 
-    __slots__ = ("_data_source", "_lifecycle", "_retriever")
+    __slots__ = ("_budget_factory", "_data_source", "_lifecycle", "_retriever")
 
     def __init__(
         self,
@@ -287,10 +327,12 @@ class ReadinessCheckedRetriever:
         retriever: RetrieverProtocol,
         lifecycle: DataSourceLifecycle,
         data_source: str,
+        budget_factory: Callable[[], LifecycleBudget | None] | None = None,
     ) -> None:
         self._retriever = retriever
         self._lifecycle = lifecycle
         self._data_source = data_source
+        self._budget_factory = budget_factory
 
     async def retrieve(self, query: RetrievalQuery) -> RetrievalResult:
         """Verify readiness, then delegate to the wrapped retriever.
@@ -303,9 +345,16 @@ class ReadinessCheckedRetriever:
 
         Raises:
             DataSourceNotReadyError: If the source is not queryable.
-            ReadinessProbeError: If the probe failed, timed out, or was cancelled.
+            ReadinessProbeError: If the probe failed, timed out, or was
+                cancelled, including when the active run deadline is already
+                exhausted before the probe starts.
         """
-        await self._lifecycle.verify_on_invoke(self._data_source)
+        budget = (
+            self._budget_factory()
+            if self._budget_factory is not None
+            else run_context_budget(self._data_source)
+        )
+        await self._lifecycle.verify_on_invoke(self._data_source, budget=budget)
         result = self._retriever.retrieve(query)
         if isinstance(result, RetrievalResult):
             return result

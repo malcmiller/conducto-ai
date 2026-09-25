@@ -26,7 +26,12 @@ from .errors import (
     RetirementError,
 )
 from .ingestion import ContentBatch, ContentItem, DataSourceIngestor, IngestionProgress
-from .lifecycle import DataSourceBackend, DataSourceLifecycle, ReadinessCheckedRetriever
+from .lifecycle import (
+    DataSourceBackend,
+    DataSourceLifecycle,
+    ReadinessCheckedRetriever,
+    run_context_budget,
+)
 from .provisioning import (
     DataSourceDescription,
     DataSourceProvisioner,
@@ -78,4 +83,5 @@ __all__ = [
     "RetirementError",
     "resolve_budget",
     "resolve_readiness_policy",
+    "run_context_budget",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from datetime import timedelta
 
 import pytest
@@ -11,7 +12,7 @@ from conducto.a2a.errors import A2AStartupError
 from conducto.a2a.hardening import A2AHostSecurityConfig
 from conducto.a2a.lifecycle import A2AHostLifecycle
 from conducto.core.retrieval import RetrievalQuery
-from conducto.core.run_context import CancellationState
+from conducto.core.run_context import CancellationState, RunContext, use_run_context
 from conducto.resources import (
     ContentBatch,
     ContentItem,
@@ -24,6 +25,7 @@ from conducto.resources import (
     ReadinessCheckedRetriever,
     ReadinessPolicy,
     ReadinessProbeError,
+    ReadinessVerdict,
     resolve_readiness_policy,
 )
 from conducto.resources.adapters import InMemoryDataSourceBackend
@@ -172,12 +174,16 @@ def test_an_affirmative_verdict_is_reused_within_the_ttl_and_reprobed_after_expi
 
         await lifecycle.verify_on_invoke(_DATA_SOURCE)
         clock.advance(29.0)
-        await lifecycle.verify_on_invoke(_DATA_SOURCE)
+        cached = await lifecycle.verify_on_invoke(_DATA_SOURCE)
         assert backend.probe_count == 1
+        assert cached is not None
+        assert cached.from_cache
+        assert cached.evaluated_at == first.evaluated_at
 
         clock.advance(1.0)
-        await lifecycle.verify_on_invoke(_DATA_SOURCE)
+        refreshed = await lifecycle.verify_on_invoke(_DATA_SOURCE)
         assert backend.probe_count == 2
+        assert refreshed is not None and not refreshed.from_cache
 
     asyncio.run(exercise())
 
@@ -285,6 +291,91 @@ def test_a_probe_that_exceeds_its_budget_or_is_cancelled_is_a_readiness_failure(
                 _DATA_SOURCE, budget=LifecycleBudget(cancellation=cancellation)
             )
         assert cancelled.value.reason == "readiness_cancelled"
+
+    asyncio.run(exercise())
+
+
+def test_an_unexpected_backend_failure_is_mapped_to_a_redacted_probe_error() -> None:
+    class LeakyBackend(InMemoryDataSourceBackend):
+        """Backend whose probe raises a raw client error carrying secrets."""
+
+        async def probe(
+            self,
+            data_source: str,
+            *,
+            budget: LifecycleBudget | None = None,
+        ) -> ReadinessVerdict:
+            """Raise an untyped client failure the way a real SDK would."""
+            raise ConnectionError(
+                "connect https://search.internal.example/indexes?api-key=SECRET failed"
+            )
+
+    backend = LeakyBackend()
+    lifecycle = DataSourceLifecycle(
+        backend=backend, policy=ReadinessPolicy(checks=ReadinessCheck.ON_INVOKE)
+    )
+
+    async def exercise() -> None:
+        with pytest.raises(ReadinessProbeError) as failure:
+            await lifecycle.verify_on_invoke(_DATA_SOURCE)
+
+        assert failure.value.reason == "readiness_probe_failed"
+        assert failure.value.data_source == _DATA_SOURCE
+        rendered = str(failure.value)
+        payload = repr(failure.value.to_dict())
+        for secret in ("https://", "api-key", "SECRET", "search.internal"):
+            assert secret not in rendered
+            assert secret not in payload
+        assert isinstance(failure.value.__cause__, ConnectionError)
+
+    asyncio.run(exercise())
+
+
+def test_the_readiness_gated_retriever_honours_the_active_run_deadline() -> None:
+    backend = InMemoryDataSourceBackend()
+    lifecycle = DataSourceLifecycle(
+        backend=backend, policy=ReadinessPolicy(checks=ReadinessCheck.ON_INVOKE)
+    )
+    guarded = ReadinessCheckedRetriever(
+        retriever=backend.retriever(_DATA_SOURCE),
+        lifecycle=lifecycle,
+        data_source=_DATA_SOURCE,
+    )
+
+    def context(*, deadline: float | None, cancellation: CancellationState) -> RunContext:
+        return RunContext(
+            run_id="run-1",
+            correlation_id="corr-1",
+            deadline=deadline,
+            cancellation=cancellation,
+        )
+
+    async def exercise() -> None:
+        await _populate(backend)
+
+        expired = context(
+            deadline=time.monotonic() - 1.0,
+            cancellation=CancellationState(),
+        )
+        with use_run_context(expired):
+            with pytest.raises(ReadinessProbeError) as timed_out:
+                await guarded.retrieve(RetrievalQuery(query="leave"))
+        assert timed_out.value.reason == "readiness_timeout"
+        assert backend.probe_count == 0
+
+        cancellation = CancellationState()
+        cancellation.cancel()
+        with use_run_context(context(deadline=None, cancellation=cancellation)):
+            with pytest.raises(ReadinessProbeError) as cancelled:
+                await guarded.retrieve(RetrievalQuery(query="leave"))
+        assert cancelled.value.reason == "readiness_cancelled"
+        assert backend.probe_count == 0
+
+        live = context(deadline=time.monotonic() + 30.0, cancellation=CancellationState())
+        with use_run_context(live):
+            served = await guarded.retrieve(RetrievalQuery(query="leave"))
+        assert len(served.documents) == 1
+        assert backend.probe_count == 1
 
     asyncio.run(exercise())
 
