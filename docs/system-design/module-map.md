@@ -16,6 +16,7 @@ Use this map to find the owner of a behavior before changing code.
 | `conducto.a2a` | A2A profile projection, ASGI host, runtime bridge, result mapping | Direct capability execution, server process ownership | Identity resolver, task repository, low-level handler |
 | `conducto.mcp` | Policy-filtered MCP projection and server adapters | A second reflection or invocation path | Export policy and identity resolver |
 | `conducto.registration` | Authenticated deployment admission and leases | Capability invocation | Registration grants, service, client, ASGI adapter |
+| `conducto.resources` | Deployment-owned data source provisioning, ingestion, indexing state, readiness policy and retirement | Agent-owned reading, backend SDKs, credentials, background polling | Provisioner, ingestor, readiness probe, lifecycle backends |
 | `conducto.testing` | Deterministic public test helpers | Production defaults or hidden test behavior | Fake providers and conformance fixtures |
 
 ## Dependency direction
