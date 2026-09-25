@@ -487,6 +487,7 @@ class SecurityPipeline:
         reason_code: str,
         instruction_chain: tuple[str, ...] = (),
         failure_classification: str | None = None,
+        extensions: Mapping[str, str | int | float | bool] | None = None,
     ) -> None:
         """Emit lifecycle evidence after pre-execution acceptance.
 
@@ -503,6 +504,7 @@ class SecurityPipeline:
             failure_classification: Optional stable capability failure code
                 recorded for failed execution events; distinct from the
                 broader lifecycle ``reason_code``.
+            extensions: Optional payload-free execution metadata.
         """
         await self._emit(
             name,
@@ -515,6 +517,7 @@ class SecurityPipeline:
             required=False,
             instruction_chain=instruction_chain,
             failure_classification=failure_classification,
+            extensions=extensions,
         )
 
     async def _emit(
@@ -532,6 +535,7 @@ class SecurityPipeline:
         required: bool,
         instruction_chain: tuple[str, ...] = (),
         failure_classification: str | None = None,
+        extensions: Mapping[str, str | int | float | bool] | None = None,
     ) -> None:
         if self.audit_emitter is None:
             return
@@ -572,11 +576,14 @@ class SecurityPipeline:
                     else AuditSeverity.INFO
                 ),
                 instruction_chain=instruction_chain,
-                extensions=(
-                    {"failure_classification": failure_classification}
-                    if failure_classification is not None
-                    else {}
-                ),
+                extensions={
+                    **dict(extensions or {}),
+                    **(
+                        {"failure_classification": failure_classification}
+                        if failure_classification is not None
+                        else {}
+                    ),
+                },
             ),
             required=required,
         )

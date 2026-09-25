@@ -119,6 +119,7 @@ async def run_delegation(
             resolution_source=base_metadata.resolution_source,
             usage=usage or aggregate_usage(ordered_model_calls),
             model_calls=tuple(ordered_model_calls),
+            retrievals=base_metadata.retrievals,
             attributes=base_metadata.attributes,
             instruction_chain=base_metadata.instruction_chain,
         )
