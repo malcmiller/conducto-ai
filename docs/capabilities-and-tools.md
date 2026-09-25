@@ -10,6 +10,7 @@ used to show work to a model or MCP client.
 |---|---|---|
 | `@a2a_capability` | Applications and, when admitted by policy, other agents, A2A callers, models, or MCP clients | Through the governed `Runtime` capability path |
 | `@tool` | Code inspecting that specific `BaseAgent` instance | No automatic execution path currently exists |
+| `@retriever` | The same governed callers as `@a2a_capability` | Through the governed `Runtime` capability path with retrieval validation |
 | Model-facing tool | The active model call only | Resolves an opaque binding to a policy-approved capability |
 | MCP tool | An authenticated MCP client, subject to export policy | Maps back to a policy-approved capability and enters `Runtime` |
 
@@ -84,6 +85,43 @@ These decorators may be stacked in any order with `@a2a_capability`.
 The declared metadata is available through immutable capability descriptors and
 is published in Conducto's optional Agent Card extension; it does not alter A2A
 standard fields or grant additional authority.
+
+### Backend-neutral retrievers and RAG
+
+Use `@retriever` for retrieval operations that should remain portable across
+search, vector, document, and in-memory backends:
+
+```python
+from conducto import BaseAgent, RetrievedDocument, retriever
+
+
+class PolicyKnowledge(BaseAgent):
+    @retriever(name="policy_docs", citations=True)
+    def policy_docs(self, query: str) -> list[RetrievedDocument]:
+        return [
+            RetrievedDocument(
+                text="Employees receive 25 days of annual leave.",
+                source="employee-handbook",
+                citation="employee-handbook#annual-leave",
+                score=0.98,
+                metadata={"document_id": "leave", "collection": "policies"},
+            )
+        ]
+```
+
+A retriever is an ordinary governed capability for registration, discovery,
+authorization, gateways, A2A, model tools, and MCP. Conducto adds validation for
+blank queries, non-finite scores, JSON-unsafe metadata, and required citations.
+Use `RetrievalQuery` and `RetrievalResult` when a backend needs typed filters,
+limits, cursors, or page metadata; backend adapters can implement
+`RetrieverProtocol` without adding a runtime dependency to core.
+
+Successful invocation metadata includes ordered `RetrievalProvenance` with the
+retriever id, result count, sources, and citations. Document text and arbitrary
+document metadata are deliberately excluded from provenance and audit events;
+they appear only in the explicitly returned capability value. See
+[`examples/in_memory_rag.py`](../examples/in_memory_rag.py) for a complete local
+flow that requires no network or model.
 
 ## `@tool`: internal export metadata
 

@@ -49,6 +49,7 @@ from .logging import (
 )
 from .model_config import ModelReference, ModelRequirement, RunConfig
 from .registration import RegisteredMethod
+from .retrieval import RetrievalValidationError, validate_retrieval_output
 from .run_context import CancellationState, DelegationBudget, DelegationFrame, use_run_context
 from .runtime import Runtime
 from .serialization import freeze_mapping, serialize_result
@@ -276,6 +277,43 @@ async def invoke_agent(
                 context.invocation_metadata(failure_classification=typed_error.code.value),
                 typed_error,
             )
+        if registered.retriever is not None:
+            query = validated.__dict__["query"]
+            query_text = query.query if hasattr(query, "query") else query
+            if isinstance(query_text, str) and not query_text.strip():
+                typed_error = InvalidCapabilityInputError(capability_name)
+                errors = (
+                    freeze_mapping(
+                        {
+                            "type": "value_error",
+                            "loc": ("query",),
+                            "msg": "Value error, query must not be empty",
+                            "input": query_text,
+                        }
+                    ),
+                )
+                await pipeline.emit_execution(
+                    AuditEventName.EXECUTION_FAILED,
+                    context.authorization,
+                    agent_id=agent_id,
+                    capability_id=capability_name,
+                    outcome=AuditOutcome.REJECTED,
+                    reason_code=typed_error.code.value,
+                    instruction_chain=context.instruction_chain,
+                    failure_classification=typed_error.code.value,
+                )
+                emit_event(
+                    ARGUMENTS_VALIDATED,
+                    outcome="failure",
+                    error_category="argument_validation",
+                )
+                invocation_span.set_outcome("validation_failure", reason="argument_validation")
+                return InvocationValidationFailure(
+                    correlation_id,
+                    errors,
+                    context.invocation_metadata(failure_classification=typed_error.code.value),
+                    typed_error,
+                )
         emit_event(ARGUMENTS_VALIDATED, outcome="success")
         security_result = await pipeline.check_async(
             target,
@@ -393,6 +431,14 @@ async def invoke_agent(
                 with contextlib.suppress(asyncio.CancelledError):
                     await execution_task
                 raise
+            retrieval_provenance = None
+            if registered.retriever is not None:
+                result, retrieval_provenance = validate_retrieval_output(
+                    result,
+                    retriever_id=capability_name,
+                    citations_required=registered.retriever.citations_required,
+                )
+                context.record_retrieval(retrieval_provenance)
             serialized = serialize_result(result)
             emit_event(
                 INVOCATION_COMPLETED,
@@ -407,6 +453,14 @@ async def invoke_agent(
                 outcome=AuditOutcome.SUCCESS,
                 reason_code="completed",
                 instruction_chain=context.instruction_chain,
+                extensions=(
+                    {
+                        "retrieval_document_count": retrieval_provenance.document_count,
+                        "retrieval_source_count": len(set(retrieval_provenance.sources)),
+                    }
+                    if retrieval_provenance is not None
+                    else None
+                ),
             )
             invocation_span.set_outcome("success")
             return InvocationSuccess(
@@ -496,7 +550,7 @@ async def invoke_agent(
                 context.invocation_metadata(failure_classification=classification),
                 classification,
             )
-        except UnsupportedReturnValueError:
+        except (UnsupportedReturnValueError, RetrievalValidationError) as error:
             invariant_error = OutputInvariantError(capability_name)
             await pipeline.emit_execution(
                 AuditEventName.EXECUTION_FAILED,
@@ -518,8 +572,8 @@ async def invoke_agent(
             invocation_span.set_error(invariant_error.code.value)
             return InvocationFailure(
                 correlation_id,
-                str(invariant_error),
-                invariant_error,
+                str(error) if isinstance(error, RetrievalValidationError) else str(invariant_error),
+                error if isinstance(error, RetrievalValidationError) else invariant_error,
                 context.invocation_metadata(failure_classification=invariant_error.code.value),
                 invariant_error.code.value,
             )

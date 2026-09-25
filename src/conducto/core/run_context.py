@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from .model_gateway import ModelGatewayCollection
     from .model_resolution import ResolvedModel, _ResolvedModelBinding
     from .registry import AgentRegistry
+    from .retrieval import RetrievalProvenance
     from .runtime import Runtime
     from .structured import CapabilityOutputContract
 
@@ -233,6 +234,22 @@ class _ModelCallRecorder:
             return tuple(self._calls)
 
 
+class _RetrievalRecorder:
+    def __init__(self) -> None:
+        self._retrievals: list[RetrievalProvenance] = []
+        self._lock = threading.Lock()
+
+    def append(self, retrieval: RetrievalProvenance) -> None:
+        """Record one retrieval summary in invocation order."""
+        with self._lock:
+            self._retrievals.append(retrieval)
+
+    def snapshot(self) -> tuple[RetrievalProvenance, ...]:
+        """Return a snapshot of payload-free retrieval provenance."""
+        with self._lock:
+            return tuple(self._retrievals)
+
+
 class _InvocationState:
     def __init__(self) -> None:
         self._active = False
@@ -321,6 +338,7 @@ class InvocationMetadata:
         resolution_source: Precedence source that selected the model.
         usage: Aggregated provider-neutral usage across recorded calls.
         model_calls: Ordered provenance for each recorded provider call.
+        retrievals: Ordered payload-free provenance for retriever executions.
         attributes: Frozen run metadata attributes.
         instruction_chain: Resolved, ordered instruction chain applied to
             this run's model calls, in runtime policy, agent, then
@@ -339,12 +357,14 @@ class InvocationMetadata:
     resolution_source: ModelResolutionSource | None = None
     usage: Usage = field(default_factory=Usage)
     model_calls: tuple[ModelCallProvenance, ...] = ()
+    retrievals: tuple[RetrievalProvenance, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
     instruction_chain: tuple[str, ...] = ()
     failure_classification: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "attributes", freeze_metadata(self.attributes))
+        object.__setattr__(self, "retrievals", tuple(self.retrievals))
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the invocation metadata to JSON-safe values.
@@ -367,6 +387,7 @@ class InvocationMetadata:
             ),
             "usage": self.usage.model_dump(),
             "model_calls": [call.to_dict() for call in self.model_calls],
+            "retrievals": [retrieval.to_dict() for retrieval in self.retrievals],
             "attributes": thaw_metadata(self.attributes),
             "instruction_chain": list(self.instruction_chain),
             "failure_classification": self.failure_classification,
@@ -443,6 +464,11 @@ class RunContext:
     _binding: _ResolvedModelBinding | None = field(default=None, repr=False, compare=False)
     _model_calls: _ModelCallRecorder = field(
         default_factory=_ModelCallRecorder,
+        repr=False,
+        compare=False,
+    )
+    _retrievals: _RetrievalRecorder = field(
+        default_factory=_RetrievalRecorder,
         repr=False,
         compare=False,
     )
@@ -554,6 +580,14 @@ class RunContext:
         """Return model provenance recorded before a delegated invocation."""
         return self._model_calls.snapshot()
 
+    def record_retrieval(self, retrieval: RetrievalProvenance) -> None:
+        """Append payload-free retrieval provenance to this invocation."""
+        self._retrievals.append(retrieval)
+
+    def retrievals(self) -> tuple[RetrievalProvenance, ...]:
+        """Return retrieval provenance recorded by this invocation."""
+        return self._retrievals.snapshot()
+
     def activate_invocation(self) -> contextvars.Token[int]:
         """Activate invocation-scoped model access for this context."""
         return self._invocation_state.activate()
@@ -625,6 +659,7 @@ class RunContext:
             resolution_source=self.model.source if self.model is not None else None,
             usage=aggregate_usage(calls) if calls else (usage or Usage()),
             model_calls=calls,
+            retrievals=self._retrievals.snapshot(),
             attributes=self.metadata,
             instruction_chain=self.instruction_chain,
             failure_classification=failure_classification,

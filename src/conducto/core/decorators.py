@@ -30,6 +30,17 @@ class PolicyMetadataError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class RetrieverMetadata:
+    """Immutable behavior declared for a retriever capability.
+
+    Attributes:
+        citations_required: Whether every returned document needs a citation.
+    """
+
+    citations_required: bool = True
+
+
+@dataclass(frozen=True, slots=True)
 class CapabilityBudget:
     """Immutable execution limits declared for a capability.
 
@@ -177,11 +188,13 @@ class MethodMetadata:
         capability: A2A capability metadata, when declared.
         tool: Internal Conducto tool metadata, when declared.
         policy: Governance metadata that is applied to any declared exports.
+        retriever: Retrieval-specific metadata when this is a retriever capability.
     """
 
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
     policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
+    retriever: RetrieverMetadata | None = None
 
 
 @overload
@@ -347,6 +360,67 @@ def a2a_capability(
         instructions=instructions,
         output_schema=output_schema,
     )
+
+
+def retriever(
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    citations: bool = True,
+    model_required: bool | None = False,
+    tags: tuple[str, ...] = (),
+    instructions: str | None = None,
+) -> Callable[[F], F]:
+    """Expose a backend-neutral retriever as a governed capability.
+
+    Retriever capabilities use the same registration, policy, gateway, and
+    invocation path as ``@a2a_capability`` while adding query, result, citation,
+    and payload-free provenance validation.
+
+    Args:
+        name: Optional published retriever capability name.
+        description: Optional published capability description.
+        citations: Whether every returned document must include a citation.
+        model_required: Whether invocation requires a configured model. Defaults
+            to ``False`` because retrieval backends are normally deterministic.
+        tags: Opaque tags used by capability discovery.
+        instructions: Optional capability-level instructions.
+
+    Returns:
+        A decorator that preserves and returns the decorated callable.
+
+    Raises:
+        TypeError: If ``citations`` is not a boolean or the target is not callable.
+        ValueError: If textual decorator metadata is blank.
+    """
+    if not isinstance(citations, bool):
+        raise TypeError("retriever citations must be a boolean")
+    capability_decorator = _export_decorator(
+        kind="capability",
+        name=name,
+        description=description,
+        model_required=model_required,
+        tags=tags,
+        instructions=instructions,
+        output_schema=None,
+    )
+
+    def decorate(value: F) -> F:
+        decorated = capability_decorator(value)
+        target = _decorator_target(decorated)
+        metadata = get_method_metadata(target)
+        assert metadata is not None
+        setattr(
+            target,
+            _METHOD_METADATA_ATTRIBUTE,
+            replace(
+                metadata,
+                retriever=RetrieverMetadata(citations_required=citations),
+            ),
+        )
+        return decorated
+
+    return decorate
 
 
 def tool(
