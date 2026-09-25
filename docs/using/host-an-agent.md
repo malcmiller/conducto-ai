@@ -25,32 +25,23 @@ the request and returns immutable identity and authority facts.
 ```python
 from conducto import Runtime
 from conducto.a2a import (
-    A2AAuthenticatedIdentity,
-    A2AAuthenticationRequest,
+    StaticTokenIdentityResolver,
     create_a2a_app,
 )
-from conducto.security import AuthorizationContext, Principal
+from conducto.security import Principal
 
 from my_agents import WeatherAgent
 
-
-async def resolve_identity(
-    request: A2AAuthenticationRequest,
-) -> A2AAuthenticatedIdentity:
-    # Development example only. Production code must validate a token and,
-    # when required, an already verified mTLS peer identity.
-    return A2AAuthenticatedIdentity(
-        AuthorizationContext(
-            principal=Principal(
-                subject_id="local-development",
-                issuer="local-development",
-                audience="weather-agent",
-                scopes=frozenset({"weather:read"}),
-            ),
-            task_id=request.task_id,
-            correlation_id=request.correlation_id,
+identity_resolver = StaticTokenIdentityResolver(
+    {
+        "replace-with-a-secret-token": Principal(
+            subject_id="local-client",
+            issuer="local-development",
+            audience="weather-agent",
+            scopes=frozenset({"weather:read"}),
         )
-    )
+    }
+)
 
 
 agent = WeatherAgent()
@@ -60,9 +51,29 @@ app = create_a2a_app(
     agent=agent,
     runtime=runtime,
     public_url="http://127.0.0.1:8001",
-    identity_resolver=resolve_identity,
+    identity_resolver=identity_resolver,
 )
 ```
+
+`StaticTokenIdentityResolver` is suitable for a small local deployment or
+application-owned API-key map. It compares bearer tokens without returning or
+logging them. For production OIDC-backed deployments, configure the existing
+`TrustPolicy` and `JWKSKeyResolver` for the issuer and compose them with
+`JWTBearerTokenValidator`:
+
+```python
+from conducto.a2a import JWTBearerIdentityResolver
+from conducto.security import JWTBearerTokenValidator, TrustPolicy
+
+identity_resolver = JWTBearerIdentityResolver(
+    validator=JWTBearerTokenValidator(application_jwks_resolver),
+    policy=application_trust_policy,
+)
+```
+
+The same provider-neutral resolver supports Microsoft Entra ID, Auth0, Okta,
+or any other OIDC-compliant issuer; only the application's trust-policy and
+JWKS configuration changes.
 
 Save this as `app.py`, then use an application-owned ASGI server:
 

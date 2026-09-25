@@ -158,6 +158,22 @@ protected material.
 
 ## Inbound A2A identity and replay boundary
 
+### Reference A2A identity resolvers
+
+Conducto ships composable reference resolvers for the injected
+`A2AIdentityResolver` boundary:
+
+- `StaticTokenIdentityResolver` maps one or more bearer tokens to immutable
+  principals for simple shared-secret or API-key deployments.
+- `JWTBearerIdentityResolver` adapts the existing
+  `JWTBearerTokenValidator` and `TrustPolicy` for production OIDC-backed
+  issuers such as Microsoft Entra ID, Auth0, or Okta.
+- `TransportIdentityResolver` composes the shared transport authentication
+  boundary for bearer tokens, verified mTLS, or both.
+- `AllowAllIdentityResolver` is for development and tests only. It
+  authenticates no one, is intentionally insecure, and is available only from
+  `conducto.testing`, never from `conducto.a2a` or top-level `conducto`.
+
 `conducto.a2a.A2ARuntimeHandler` composes with these contracts through an
 injected `A2AIdentityResolver`. The resolver receives immutable task, context,
 message, JSON-RPC request, correlation, header, and safe metadata facts and may

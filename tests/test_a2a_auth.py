@@ -89,6 +89,41 @@ def test_authenticate_incoming_request_succeeds() -> None:
     asyncio.run(run())
 
 
+def test_authenticate_incoming_request_accepts_case_insensitive_bearer_scheme() -> None:
+    validator = _StaticValidator(identity=_identity())
+
+    async def run() -> None:
+        context = await authenticate_incoming_request(
+            authorization_header="bearer opaque-token",
+            validator=validator,
+            policy=_policy(),
+            task_id="task-1",
+            correlation_id="corr-1",
+        )
+        assert context.principal.subject_id == "workload-a"
+
+    asyncio.run(run())
+
+
+def test_authenticate_incoming_request_supports_mtls_only() -> None:
+    validator = _StaticValidator(identity=_identity())
+    policy = _policy(certificate=CertificatePolicy(trusted_ca_pem=b"ca-pem"))
+
+    async def run() -> None:
+        context = await authenticate_incoming_request(
+            authorization_header=None,
+            validator=validator,
+            policy=policy,
+            task_id="task-1",
+            correlation_id="corr-1",
+            mtls_peer=MTLSPeerIdentity(subject_common_name="svc-a"),
+        )
+        assert context.principal.subject_id == "svc-a"
+        assert context.principal.issuer == "mtls"
+
+    asyncio.run(run())
+
+
 def test_authenticate_incoming_request_rejects_missing_header() -> None:
     validator = _StaticValidator(identity=_identity())
 
