@@ -49,6 +49,11 @@ class CapabilityOutputContract:
         Raises:
             MalformedStructuredOutputError: If provider output does not match
                 the derived schema or the Pydantic return annotation.
+
+        Notes:
+            Pydantic validation is intentionally strict so Conducto never
+            coerces or repairs provider output after schema-constrained
+            generation.
         """
         if value is None:
             raise MalformedStructuredOutputError("Provider returned no structured response")
