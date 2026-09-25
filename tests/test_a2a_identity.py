@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from unittest.mock import Mock
 
 import pytest
@@ -17,6 +18,7 @@ from conducto.a2a import (
 )
 from conducto.security import (
     AudiencePolicy,
+    CertificatePolicy,
     InvalidSignatureTokenError,
     IssuerPolicy,
     Principal,
@@ -62,7 +64,7 @@ def _policy() -> TrustPolicy:
 def test_static_token_identity_resolver_authenticates_without_echoing_token() -> None:
     token = "secret-token"
     identity = StaticTokenIdentityResolver({token: _principal()})(
-        _request({"Authorization": f"Bearer {token}"})
+        _request({"Authorization": f"bearer {token}"})
     )
     assert identity.authorization.principal == _principal()
     assert token not in repr(identity)
@@ -94,7 +96,7 @@ def test_jwt_bearer_identity_resolver_maps_validated_identity() -> None:
     validator.validate.return_value = validated
     resolver = JWTBearerIdentityResolver(validator, _policy())  # type: ignore[arg-type]
 
-    result = resolver(_request({"authorization": "Bearer opaque-token"}))
+    result = resolver(_request({"authorization": "bearer opaque-token"}))
 
     assert result.authorization.principal.subject_id == "subject"
     assert result.authorization.principal.roles == frozenset({"operator"})
@@ -139,7 +141,7 @@ def test_transport_identity_resolver_delegates_and_supports_mtls_peer() -> None:
         _policy(),
         mtls_identity_extractor=lambda _request: MTLSPeerIdentity("client"),
     )
-    result = asyncio.run(resolver(_request({"authorization": "Bearer token"})))
+    result = asyncio.run(resolver(_request({"authorization": "bearer token"})))
     assert isinstance(result, A2AAuthenticatedIdentity)
     assert result.authorization.principal.subject_id == "subject"
 
@@ -149,6 +151,19 @@ def test_transport_identity_resolver_rejects_missing_header() -> None:
 
     with pytest.raises(AuthenticationError):
         asyncio.run(resolver(_request()))
+
+
+def test_transport_identity_resolver_supports_mtls_only() -> None:
+    resolver = TransportIdentityResolver(
+        Mock(),
+        replace(_policy(), certificate=CertificatePolicy(trusted_ca_pem=b"ca-pem")),
+        mtls_identity_extractor=lambda _request: MTLSPeerIdentity("client"),
+    )
+
+    result = asyncio.run(resolver(_request()))
+
+    assert result.authorization.principal.subject_id == "client"
+    assert result.authorization.principal.issuer == "mtls"
 
 
 def test_allow_all_fixture_is_only_exported_from_testing() -> None:
@@ -162,6 +177,10 @@ def test_allow_all_fixture_is_only_exported_from_testing() -> None:
 
 def test_resolvers_conform_to_a2a_identity_protocol() -> None:
     static_resolver: A2AIdentityResolver = StaticTokenIdentityResolver({"token": _principal()})
+    jwt_resolver: A2AIdentityResolver = JWTBearerIdentityResolver(Mock(), _policy())  # type: ignore[arg-type]
+    transport_resolver: A2AIdentityResolver = TransportIdentityResolver(Mock(), _policy())
     test_resolver: A2AIdentityResolver = AllowAllIdentityResolver()
     assert static_resolver
+    assert jwt_resolver
+    assert transport_resolver
     assert test_resolver

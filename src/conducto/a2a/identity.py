@@ -36,6 +36,13 @@ def _authorization_header(request: A2AAuthenticationRequest) -> str | None:
     return None
 
 
+def _bearer_token(header: str | None) -> str:
+    """Extract a bearer token while accepting the scheme case-insensitively."""
+    if header is None or not header[:7].lower() == "bearer ":
+        raise AuthenticationError("a bearer authorization header is required")
+    return header[7:]
+
+
 def _roles(identity: ValidatedIdentity) -> frozenset[str]:
     """Read normalized role claims without treating malformed claims as roles."""
     value = identity.claims.get("roles", identity.claims.get("role", ()))
@@ -82,10 +89,7 @@ class StaticTokenIdentityResolver:
 
     def __call__(self, request: A2AAuthenticationRequest) -> A2AAuthenticatedIdentity:
         """Authenticate one request using constant-time token comparisons."""
-        header = _authorization_header(request)
-        if header is None or not header.startswith("Bearer "):
-            raise AuthenticationError("a bearer authorization header is required")
-        token = header[7:]
+        token = _bearer_token(_authorization_header(request))
         matched: Principal | None = None
         for expected, principal in self.principals.items():
             if secrets.compare_digest(token, expected):
@@ -110,10 +114,10 @@ class JWTBearerIdentityResolver:
 
     def __call__(self, request: A2AAuthenticationRequest) -> A2AAuthenticatedIdentity:
         """Validate the request bearer token without exposing the raw token."""
-        header = _authorization_header(request)
-        if header is None or not header.startswith("Bearer "):
-            raise AuthenticationError("a bearer authorization header is required")
-        identity = self.validator.validate(header[7:], policy=self.policy)
+        identity = self.validator.validate(
+            _bearer_token(_authorization_header(request)),
+            policy=self.policy,
+        )
         return A2AAuthenticatedIdentity(
             authorization=AuthorizationContext(
                 principal=_principal(identity),
