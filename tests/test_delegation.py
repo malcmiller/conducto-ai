@@ -299,6 +299,47 @@ def test_delegated_retriever_preserves_payload_free_provenance() -> None:
     asyncio.run(exercise())
 
 
+def test_nested_delegation_propagates_retrieval_provenance_to_invocation() -> None:
+    class DelegatingAgent(BaseAgent):
+        """Invoke a retriever through the model-selected delegation loop."""
+
+        @a2a_capability(name="answer", description="Answer with retrieved context.")
+        async def answer(self) -> str:
+            outcome = await self.run_delegation(
+                (ChatMessage(role="user", content="retrieve policy"),),
+                response_type=Answer,
+            )
+            assert outcome.value is not None
+            return outcome.value.value
+
+    async def exercise() -> None:
+        agents = AgentRegistry()
+        agents.register(Worker())
+        probe = Runtime(agent_registry=agents)
+        tool_id = await _tool_id(probe, _policy("retrieve"))
+        runtime, _model = _runtime(
+            FakeModel(
+                script=(
+                    _call(tool_id, "retrieve-1", {"query": "policy"}),
+                    _terminal("complete"),
+                )
+            ),
+            registry=agents,
+        )
+        delegator = DelegatingAgent(
+            model_reference="model",
+            delegation_config=DelegationConfig(toolbox=_policy("retrieve")),
+        )
+        agents.register(delegator)
+
+        result = await runtime.invoke(delegator, "answer", {})
+
+        assert result.metadata is not None
+        assert [item.retriever_id for item in result.metadata.retrievals] == ["retrieve"]
+
+    asyncio.run(exercise())
+
+
 def test_missing_provider_call_id_is_synthesized_once_and_round_tripped() -> None:
     async def exercise() -> None:
         Worker.calls = 0
