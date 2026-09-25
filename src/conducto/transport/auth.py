@@ -166,6 +166,21 @@ async def _authenticate_incoming_request(
             correlation_id,
         )
 
+        if not authorization_header:
+            return AuthorizationContext(
+                principal=Principal(
+                    subject_id=mtls_peer.subject_common_name,
+                    issuer="mtls",
+                    audience=tuple(sorted(policy.audience.audiences)),
+                ),
+                task_id=task_id,
+                correlation_id=correlation_id,
+                policy_metadata={
+                    "trust_policy_version": policy.version,
+                    "authentication_method": "mtls",
+                },
+            )
+
     if not authorization_header or len(authorization_header) > MAX_AUTHORIZATION_HEADER_SIZE:
         await _audit(
             audit,
@@ -176,7 +191,7 @@ async def _authenticate_incoming_request(
             correlation_id,
         )
         raise AuthenticationError("a bearer authorization header is required")
-    if not authorization_header.startswith(BEARER_PREFIX):
+    if authorization_header[: len(BEARER_PREFIX)].lower() != BEARER_PREFIX.lower():
         await _audit(
             audit,
             AuditEventName.TOKEN_VALIDATION_REJECTED,

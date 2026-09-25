@@ -2,6 +2,7 @@
 
 from .a2a_transport import InMemoryA2ATransport
 from .fake_model import FakeModel, FakeModelRequest
+from .identity import AllowAllIdentityResolver
 from .provider_conformance import (
     MANDATORY_FIXTURES,
     PROVIDER_FIXTURE_VERSION,
@@ -19,6 +20,7 @@ __all__ = [
     "ConformanceFixture",
     "FakeModel",
     "FakeModelRequest",
+    "AllowAllIdentityResolver",
     "InMemoryA2ATransport",
     "ScriptedProvider",
     "ScriptedProviderCall",
