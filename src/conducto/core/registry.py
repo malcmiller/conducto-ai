@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import hashlib
-import inspect
 import json
 import threading
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, get_type_hints
-
-from pydantic import PydanticInvalidForJsonSchema, TypeAdapter
+from typing import Any
 
 from conducto.security.guardrails import discover_guardrails
 
@@ -25,6 +22,7 @@ from .gateway_models import (
     canonical_json,
 )
 from .logging import AGENT_DISCOVERED, AGENT_REGISTERED, emit_event
+from .structured import build_return_schema
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,7 +394,11 @@ def _build_agent_descriptor(
     for capability_id, registered in sorted(agent.capabilities.items()):
         metadata = registered.capability
         assert metadata is not None
-        output_schema = _return_schema(registered.callable)
+        output_schema = (
+            registered.output_contract.schema
+            if registered.output_contract is not None
+            else build_return_schema(registered.callable)
+        )
         input_schema = registered.parameter_schema
         digest = hashlib.sha256(
             canonical_json({"input": input_schema, "output": output_schema}).encode()
@@ -426,23 +428,6 @@ def _build_agent_descriptor(
         generation=generation,
         capabilities=tuple(capabilities),
     )
-
-
-def _return_schema(target: Any) -> dict[str, Any] | None:
-    try:
-        annotation = get_type_hints(target).get("return", inspect.Signature.empty)
-    except (NameError, TypeError) as error:
-        raise ValueError(
-            f"Could not resolve return annotation for gateway capability: {error}"
-        ) from error
-    if annotation is inspect.Signature.empty or annotation is None:
-        return None
-    try:
-        schema = TypeAdapter(annotation).json_schema()
-        canonical_json(schema)
-        return schema
-    except (PydanticInvalidForJsonSchema, TypeError, ValueError) as error:
-        raise ValueError(f"Unsupported gateway output schema: {error}") from error
 
 
 def routing_prompt_context(routing: list[dict[str, Any]]) -> str:

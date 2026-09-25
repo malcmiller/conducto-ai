@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
@@ -136,11 +137,23 @@ class BaseAgent:
             model: Optional model reference override for this completion.
             tools: Optional provider-neutral tools available to the model.
             structured_output: Optional native structured-output contract. When
-                omitted, the runtime sends a permissive non-required object
+                omitted inside a capability with a Pydantic return annotation,
+                Conducto derives the contract from that annotation and stores
+                the validated typed value in ``result.structured``. When
+                explicitly supplied, this schema is used as an escape hatch even
+                when a derived capability contract exists. Outside a typed
+                capability, omission sends a permissive non-required object
                 contract because the provider protocol requires one.
 
         Returns:
-            The provider result and invocation metadata.
+            The provider result and invocation metadata. For derived contracts,
+            ``result.structured`` contains the validated typed value.
+
+        Notes:
+            Passing ``structured_output`` is an explicit override and disables
+            derived capability return validation for this call. Omit it to use
+            the active capability's Pydantic return annotation while preserving
+            the standard ``ModelCallResult`` envelope.
 
         Raises:
             asyncio.CancelledError: If the active invocation is cancelled.
@@ -157,15 +170,27 @@ class BaseAgent:
         )
         if not messages:
             raise ValueError("Completion requires at least one message")
-        return (
-            await require_run_context()
-            .models.require(model)
-            .complete(
+        context = require_run_context()
+        if structured_output is not None:
+            return await context.models.require(model).complete(
                 messages,
-                structured_output=structured_output or _optional_structured_output(),
+                structured_output=structured_output,
                 tools=tools,
             )
+        output_contract = context.output_contract
+        if output_contract is None:
+            return await context.models.require(model).complete(
+                messages,
+                structured_output=_optional_structured_output(),
+                tools=tools,
+            )
+        call = await context.models.require(model).complete(
+            messages,
+            structured_output=output_contract.request,
+            tools=tools,
         )
+        typed_value = output_contract.validate(call.result.structured)
+        return replace(call, result=call.result.model_copy(update={"structured": typed_value}))
 
     @property
     def registered_methods(self) -> tuple[RegisteredMethod, ...]:

@@ -1,0 +1,1 @@
+{"$defs":{"GoldenItem":{"additionalProperties":false,"description":"Golden sequence item response model.","properties":{"name":{"title":"Name","type":"string"}},"required":["name"],"title":"GoldenItem","type":"object"}},"items":{"$ref":"#/$defs/GoldenItem"},"type":"array"}
