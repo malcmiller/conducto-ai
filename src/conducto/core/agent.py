@@ -31,7 +31,7 @@ ResponseT = TypeVar("ResponseT", bound=BaseModel)
 
 
 def _optional_structured_output() -> StructuredOutputRequest:
-    """Build the permissive contract required by the provider protocol."""
+    """Build a fresh permissive contract required by the provider protocol."""
     return StructuredOutputRequest(
         name="completion",
         schema={"type": "object"},
@@ -146,8 +146,10 @@ class BaseAgent:
             asyncio.CancelledError: If the active invocation is cancelled.
             NoActiveRunContextError: If called outside an active runtime invocation.
             TimeoutError: If the active invocation's deadline has expired.
-            ValueError: If no prompt messages are provided.
+            ValueError: If the prompt is blank or no messages are provided.
         """
+        if isinstance(prompt, str) and not prompt.strip():
+            raise ValueError("Completion prompt cannot be blank")
         messages = (
             (ChatMessage(role="user", content=prompt),)
             if isinstance(prompt, str)

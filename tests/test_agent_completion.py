@@ -119,6 +119,11 @@ def test_agent_completion_rejects_empty_message_sequences() -> None:
         asyncio.run(_CompletionAgent().complete(()))
 
 
+def test_agent_completion_rejects_blank_prompts() -> None:
+    with pytest.raises(ValueError, match="prompt cannot be blank"):
+        asyncio.run(_CompletionAgent().complete("   "))
+
+
 def test_agent_completion_honors_cancellation_and_deadlines() -> None:
     async def exercise() -> None:
         runtime, _registry, provider = _runtime()
