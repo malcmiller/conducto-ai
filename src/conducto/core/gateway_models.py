@@ -10,6 +10,8 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
 
+from .decorators import CapabilityPolicyMetadata
+
 
 def freeze_json(value: Any) -> Any:
     """Recursively freeze a JSON-compatible value."""
@@ -80,7 +82,11 @@ class DiscoveryQuery:
 
 @dataclass(frozen=True, slots=True)
 class CapabilityDescriptor:
-    """Credential-free description of one discoverable capability."""
+    """Credential-free description of one discoverable capability.
+
+    Attributes:
+        policy: Immutable capability governance metadata.
+    """
 
     agent_id: str
     agent_version: str
@@ -92,6 +98,7 @@ class CapabilityDescriptor:
     schema_digest: str
     required_scopes: tuple[str, ...] = ()
     approval_required: bool = False
+    policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tags", frozenset(self.tags))
@@ -101,7 +108,7 @@ class CapabilityDescriptor:
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-safe descriptor without execution details."""
-        return {
+        descriptor = {
             "agent_id": self.agent_id,
             "agent_version": self.agent_version,
             "capability_id": self.capability_id,
@@ -113,6 +120,9 @@ class CapabilityDescriptor:
             "required_scopes": list(self.required_scopes),
             "approval_required": self.approval_required,
         }
+        if not self.policy.is_empty:
+            descriptor["policy"] = self.policy.to_dict()
+        return descriptor
 
 
 @dataclass(frozen=True, slots=True)

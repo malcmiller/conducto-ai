@@ -5,14 +5,107 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from decimal import Decimal
+from math import isfinite
 from typing import Any, Literal, TypeVar, cast, overload
+
+from conducto.security.guardrails import require_scope
 
 _AGENT_METADATA_ATTRIBUTE = "__conducto_agent_metadata__"
 _METHOD_METADATA_ATTRIBUTE = "__conducto_method_metadata__"
 
 ExportKind = Literal["capability", "tool"]
+SideEffectKind = Literal[
+    "read_only",
+    "writes_external_system",
+    "sends_message",
+    "mutates_state",
+]
 F = TypeVar("F", bound=Callable[..., Any])
 T = TypeVar("T")
+
+
+class PolicyMetadataError(ValueError):
+    """Raised when capability policy metadata has an invalid declaration."""
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityBudget:
+    """Immutable execution limits declared for a capability.
+
+    Attributes:
+        max_model_calls: Maximum model calls permitted during execution.
+        max_tool_calls: Maximum nested tool calls permitted during execution.
+        max_cost_usd: Maximum USD cost permitted during execution.
+    """
+
+    max_model_calls: int | None = None
+    max_tool_calls: int | None = None
+    max_cost_usd: Decimal | None = None
+
+    def to_dict(self) -> dict[str, int | str]:
+        """Return a deterministic JSON-safe budget representation.
+
+        Returns:
+            Declared budget limits using Agent Card extension field names.
+        """
+        budget: dict[str, int | str] = {}
+        if self.max_model_calls is not None:
+            budget["maxModelCalls"] = self.max_model_calls
+        if self.max_tool_calls is not None:
+            budget["maxToolCalls"] = self.max_tool_calls
+        if self.max_cost_usd is not None:
+            budget["maxCostUsd"] = str(self.max_cost_usd)
+        return budget
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityPolicyMetadata:
+    """Immutable governance metadata declared for a capability.
+
+    Attributes:
+        required_scopes: Exact authorization scopes required for invocation.
+        side_effect: Declared external or stateful behavior of the capability.
+        timeout_seconds: Maximum execution time declared by the capability.
+        budget: Optional execution budget declared by the capability.
+        data_classification: Sensitivity classification for capability data.
+    """
+
+    required_scopes: tuple[str, ...] = ()
+    side_effect: str | None = None
+    timeout_seconds: float | None = None
+    budget: CapabilityBudget | None = None
+    data_classification: str | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        """Return whether no policy metadata was declared."""
+        return (
+            not self.required_scopes
+            and self.side_effect is None
+            and self.timeout_seconds is None
+            and self.budget is None
+            and self.data_classification is None
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a deterministic JSON-safe policy representation.
+
+        Returns:
+            Declared policy metadata using Agent Card extension field names.
+        """
+        policy: dict[str, Any] = {}
+        if self.required_scopes:
+            policy["requiredScopes"] = list(self.required_scopes)
+        if self.side_effect is not None:
+            policy["sideEffect"] = self.side_effect
+        if self.timeout_seconds is not None:
+            policy["timeoutSeconds"] = self.timeout_seconds
+        if self.budget is not None:
+            policy["budget"] = self.budget.to_dict()
+        if self.data_classification is not None:
+            policy["dataClassification"] = self.data_classification
+        return policy
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +155,7 @@ class ExportMetadata:
             agent and runtime policy instructions. Composed last in the
             resolved instruction chain; never removes or replaces the
             instructions that precede it.
+        policy: Immutable governance metadata declared for the method.
         output_schema: Optional explicit structured-output JSON Schema used
             instead of deriving one from the capability return annotation.
     """
@@ -71,6 +165,7 @@ class ExportMetadata:
     model_required: bool | None = None
     tags: frozenset[str] = frozenset()
     instructions: str | None = None
+    policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
     output_schema: Mapping[str, Any] | None = None
 
 
@@ -81,10 +176,12 @@ class MethodMetadata:
     Attributes:
         capability: A2A capability metadata, when declared.
         tool: Internal Conducto tool metadata, when declared.
+        policy: Governance metadata that is applied to any declared exports.
     """
 
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
+    policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
 
 
 @overload
@@ -297,6 +394,124 @@ def tool(
     )
 
 
+def requires_scope(*scopes: str) -> Callable[[F], F]:
+    """Declare exact authorization scopes required to invoke a capability.
+
+    The declaration also composes with Conducto's existing runtime scope
+    guardrail, so local invocations enforce the metadata immediately.
+
+    Args:
+        *scopes: One or more non-empty, case-sensitive scope values.
+
+    Returns:
+        A decorator that attaches immutable scope policy metadata.
+
+    Raises:
+        PolicyMetadataError: If no scopes are supplied or a scope is blank.
+    """
+    normalized = _normalize_scopes(scopes)
+
+    def decorate(value: F) -> F:
+        require_scope(*normalized)(value)
+        return _attach_policy(
+            value,
+            lambda policy: replace(
+                policy,
+                required_scopes=tuple(sorted(set(policy.required_scopes) | set(normalized))),
+            ),
+        )
+
+    return decorate
+
+
+def side_effect(kind: SideEffectKind | str) -> Callable[[F], F]:
+    """Declare the external or stateful effect of a capability.
+
+    Args:
+        kind: A non-empty side-effect classification. Built-in classifications
+            include ``read_only``, ``writes_external_system``,
+            ``sends_message``, and ``mutates_state``.
+
+    Returns:
+        A decorator that attaches immutable side-effect policy metadata.
+
+    Raises:
+        PolicyMetadataError: If ``kind`` is not a non-empty string.
+    """
+    normalized = _require_policy_text(kind, "side_effect kind")
+    return _policy_decorator(lambda policy: replace(policy, side_effect=normalized))
+
+
+def timeout(*, seconds: float) -> Callable[[F], F]:
+    """Declare the maximum execution time for a capability.
+
+    Args:
+        seconds: A finite positive timeout in seconds.
+
+    Returns:
+        A decorator that attaches immutable timeout policy metadata.
+
+    Raises:
+        PolicyMetadataError: If ``seconds`` is not a finite positive number.
+    """
+    if isinstance(seconds, bool) or not isinstance(seconds, int | float):
+        raise PolicyMetadataError("timeout seconds must be a finite positive number")
+    try:
+        normalized = float(seconds)
+    except OverflowError as error:
+        raise PolicyMetadataError("timeout seconds must be a finite positive number") from error
+    if not isfinite(normalized) or normalized <= 0:
+        raise PolicyMetadataError("timeout seconds must be a finite positive number")
+    return _policy_decorator(lambda policy: replace(policy, timeout_seconds=normalized))
+
+
+def budget(
+    *,
+    max_model_calls: int | None = None,
+    max_tool_calls: int | None = None,
+    max_cost_usd: Decimal | None = None,
+) -> Callable[[F], F]:
+    """Declare execution budget limits for a capability.
+
+    Args:
+        max_model_calls: Optional non-negative limit on model calls.
+        max_tool_calls: Optional non-negative limit on nested tool calls.
+        max_cost_usd: Optional finite non-negative USD cost limit.
+
+    Returns:
+        A decorator that attaches immutable budget policy metadata.
+
+    Raises:
+        PolicyMetadataError: If no limit is supplied or a limit is invalid.
+    """
+    if max_model_calls is None and max_tool_calls is None and max_cost_usd is None:
+        raise PolicyMetadataError("budget requires at least one limit")
+    _validate_budget_limit(max_model_calls, "max_model_calls")
+    _validate_budget_limit(max_tool_calls, "max_tool_calls")
+    if max_cost_usd is not None and (
+        not isinstance(max_cost_usd, Decimal) or not max_cost_usd.is_finite() or max_cost_usd < 0
+    ):
+        raise PolicyMetadataError("max_cost_usd must be a finite non-negative Decimal")
+    declared_budget = CapabilityBudget(max_model_calls, max_tool_calls, max_cost_usd)
+    return _policy_decorator(lambda policy: replace(policy, budget=declared_budget))
+
+
+def classification(level: str) -> Callable[[F], F]:
+    """Declare the sensitivity classification of a capability's data.
+
+    Args:
+        level: A non-empty data classification level.
+
+    Returns:
+        A decorator that attaches immutable classification policy metadata.
+
+    Raises:
+        PolicyMetadataError: If ``level`` is not a non-empty string.
+    """
+    normalized = _require_policy_text(level, "classification level")
+    return _policy_decorator(lambda policy: replace(policy, data_classification=normalized))
+
+
 def get_agent_metadata(agent_class: type) -> AgentMetadata | None:
     """Return metadata declared directly on an agent class.
 
@@ -359,7 +574,7 @@ def _export_decorator(
 ) -> Callable[[F], F]:
     """Create a decorator for one of the supported method export kinds."""
 
-    export = ExportMetadata(
+    declared_export = ExportMetadata(
         name=_normalize_optional_text(name),
         description=_normalize_optional_text(description),
         model_required=model_required,
@@ -379,6 +594,7 @@ def _export_decorator(
         """
         target = _decorator_target(value)
         current = get_method_metadata(target) or MethodMetadata()
+        export = replace(declared_export, policy=current.policy)
 
         metadata = (
             replace(current, capability=export)
@@ -390,6 +606,37 @@ def _export_decorator(
         return value
 
     return decorate
+
+
+def _policy_decorator(
+    update: Callable[[CapabilityPolicyMetadata], CapabilityPolicyMetadata],
+) -> Callable[[F], F]:
+    """Create a decorator that updates immutable capability policy metadata."""
+
+    def decorate(value: F) -> F:
+        return _attach_policy(value, update)
+
+    return decorate
+
+
+def _attach_policy(
+    value: F,
+    update: Callable[[CapabilityPolicyMetadata], CapabilityPolicyMetadata],
+) -> F:
+    """Attach policy metadata to a callable while preserving export metadata."""
+    target = _decorator_target(value)
+    current = get_method_metadata(target) or MethodMetadata()
+    policy = update(current.policy)
+    metadata = replace(
+        current,
+        capability=(
+            replace(current.capability, policy=policy) if current.capability is not None else None
+        ),
+        tool=replace(current.tool, policy=policy) if current.tool is not None else None,
+        policy=policy,
+    )
+    setattr(target, _METHOD_METADATA_ATTRIBUTE, metadata)
+    return value
 
 
 def _decorator_target(value: Any) -> Callable[..., Any]:
@@ -423,3 +670,26 @@ def _normalize_tags(values: tuple[str, ...]) -> frozenset[str]:
     if any(not isinstance(value, str) or not value.strip() for value in values):
         raise ValueError("Decorator tags must be non-empty strings")
     return frozenset(value.strip() for value in values)
+
+
+def _normalize_scopes(scopes: tuple[str, ...]) -> tuple[str, ...]:
+    """Validate and canonically order declared capability scopes."""
+    if not scopes:
+        raise PolicyMetadataError("requires_scope requires at least one non-empty scope")
+    normalized = tuple(scope.strip() if isinstance(scope, str) else "" for scope in scopes)
+    if any(not scope for scope in normalized):
+        raise PolicyMetadataError("requires_scope requires non-empty string scopes")
+    return tuple(sorted(set(normalized)))
+
+
+def _require_policy_text(value: str, field: str) -> str:
+    """Validate one non-empty policy classification string."""
+    if not isinstance(value, str) or not (normalized := value.strip()):
+        raise PolicyMetadataError(f"{field} must be a non-empty string")
+    return normalized
+
+
+def _validate_budget_limit(value: int | None, field: str) -> None:
+    """Validate one optional non-negative integer budget limit."""
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
+        raise PolicyMetadataError(f"{field} must be a non-negative integer")

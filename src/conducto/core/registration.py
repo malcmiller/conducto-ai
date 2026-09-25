@@ -9,7 +9,13 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from .decorators import AgentMetadata, ExportMetadata, get_agent_metadata, get_method_metadata
+from .decorators import (
+    AgentMetadata,
+    CapabilityPolicyMetadata,
+    ExportMetadata,
+    get_agent_metadata,
+    get_method_metadata,
+)
 from .parameter_schema import (
     ParameterSchemaError,
     build_parameter_model,
@@ -35,6 +41,7 @@ class RegisteredMethod:
             return value, if the return annotation or metadata declares one.
         capability: Capability metadata, if the method is exported as a capability.
         tool: Tool metadata, if the method is exported as a tool.
+        policy: Immutable governance policy declared for the method.
     """
 
     attribute_name: str
@@ -44,6 +51,7 @@ class RegisteredMethod:
     output_contract: CapabilityOutputContract | None = None
     capability: ExportMetadata | None = None
     tool: ExportMetadata | None = None
+    policy: CapabilityPolicyMetadata = CapabilityPolicyMetadata()
 
 
 def register_decorated_methods(
@@ -115,6 +123,7 @@ def register_decorated_methods(
                 bound_method,
                 metadata.tool,
             ),
+            policy=metadata.policy,
         )
         if registered.capability is not None:
             capability_name = registered.capability.name
@@ -209,6 +218,7 @@ def resolve_export_metadata(
         model_required=metadata.model_required,
         tags=metadata.tags,
         instructions=metadata.instructions,
+        policy=metadata.policy,
         output_schema=metadata.output_schema,
     )
 

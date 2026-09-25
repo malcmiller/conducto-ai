@@ -1,12 +1,14 @@
 """Agent Card preparation and admission policy, separate from lease mutation."""
 
 import hashlib
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
-from ..a2a_profile import A2AProtocolError, parse_agent_card
+from ..a2a_profile import CONDUCTO_PARAMETER_EXTENSION_URI, A2AProtocolError, parse_agent_card
 from ..agent_card import capability_parameter_map
+from ..decorators import CapabilityBudget, CapabilityPolicyMetadata
 from ..gateway_models import canonical_json, thaw_json
 from ._models import CatalogCapabilityDescriptor, CatalogEntry, CatalogValidationError
 
@@ -104,6 +106,7 @@ def _capabilities_from_card(card: Mapping[str, Any]) -> tuple[CatalogCapabilityD
     for skill in card.get("skills", []):
         capability_id = skill.get("id")
         input_modes = tuple(skill.get("inputModes", ()))
+        policy = _capability_policy(card, capability_id)
         descriptors.append(
             CatalogCapabilityDescriptor(
                 capability_id=capability_id,
@@ -114,10 +117,88 @@ def _capabilities_from_card(card: Mapping[str, Any]) -> tuple[CatalogCapabilityD
                 output_schema=None,
                 version=version,
                 modality=input_modes[0] if input_modes else "text/plain",
-                required_scopes=_required_scopes(skill),
+                required_scopes=tuple(
+                    sorted(set(_required_scopes(skill)) | set(policy.required_scopes))
+                ),
+                policy=policy,
             )
         )
     return tuple(descriptors)
+
+
+def _capability_policy(card: Mapping[str, Any], capability_id: Any) -> CapabilityPolicyMetadata:
+    """Read optional Conducto policy metadata for one Agent Card skill."""
+    if not isinstance(capability_id, str):
+        return CapabilityPolicyMetadata()
+    extension = next(
+        (
+            item
+            for item in card.get("capabilities", {}).get("extensions", ())
+            if (
+                isinstance(item, Mapping)
+                and item.get("uri") == CONDUCTO_PARAMETER_EXTENSION_URI
+                and isinstance(item.get("params"), Mapping)
+            )
+        ),
+        None,
+    )
+    if extension is None:
+        return CapabilityPolicyMetadata()
+    conducto = extension["params"].get("x-conducto")
+    if not isinstance(conducto, Mapping):
+        return CapabilityPolicyMetadata()
+    policies = conducto.get("capabilityPolicies")
+    policy = policies.get(capability_id) if isinstance(policies, Mapping) else None
+    if not isinstance(policy, Mapping):
+        return CapabilityPolicyMetadata()
+    required_scopes = _policy_scopes(policy, capability_id)
+    budget = policy.get("budget")
+    max_cost = budget.get("maxCostUsd") if isinstance(budget, Mapping) else None
+    try:
+        declared_budget = (
+            CapabilityBudget(
+                max_model_calls=budget.get("maxModelCalls"),
+                max_tool_calls=budget.get("maxToolCalls"),
+                max_cost_usd=Decimal(str(max_cost)) if max_cost is not None else None,
+            )
+            if isinstance(budget, Mapping)
+            else None
+        )
+    except InvalidOperation as error:
+        raise CatalogValidationError(
+            f"Capability '{capability_id}' has an invalid policy budget"
+        ) from error
+    return CapabilityPolicyMetadata(
+        required_scopes=required_scopes,
+        side_effect=policy.get("sideEffect") if isinstance(policy.get("sideEffect"), str) else None,
+        timeout_seconds=(
+            float(policy["timeoutSeconds"])
+            if isinstance(policy.get("timeoutSeconds"), int | float)
+            else None
+        ),
+        budget=declared_budget,
+        data_classification=(
+            policy.get("dataClassification")
+            if isinstance(policy.get("dataClassification"), str)
+            else None
+        ),
+    )
+
+
+def _policy_scopes(policy: Mapping[str, Any], capability_id: str) -> tuple[str, ...]:
+    """Validate and normalize declared policy scopes from an Agent Card extension."""
+    scopes = policy.get("requiredScopes", ())
+    if isinstance(scopes, (str, bytes)) or not isinstance(scopes, Sequence):
+        raise CatalogValidationError(
+            f"Capability '{capability_id}' policy requiredScopes must be a sequence "
+            "of non-empty strings"
+        )
+    if any(not isinstance(scope, str) or not scope.strip() for scope in scopes):
+        raise CatalogValidationError(
+            f"Capability '{capability_id}' policy requiredScopes must be a sequence "
+            "of non-empty strings"
+        )
+    return tuple(sorted({scope.strip() for scope in scopes}))
 
 
 def _required_scopes(skill: Mapping[str, Any]) -> tuple[str, ...]:

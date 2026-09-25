@@ -22,8 +22,13 @@ def test_application_facade_has_an_explicit_small_surface() -> None:
         "RuntimeConfig",
         "a2a_agent",
         "a2a_capability",
+        "budget",
+        "classification",
         "get_run_context",
         "require_run_context",
+        "requires_scope",
+        "side_effect",
+        "timeout",
         "tool",
     }
     assert all(getattr(conducto, name) is not None for name in conducto.__all__)
