@@ -38,11 +38,15 @@ class InvocationValidationFailure:
         correlation_id: Correlation identifier shared with the invocation.
         errors: Validation errors produced by the request schema.
         metadata: Optional invocation metadata captured by the runtime.
+        exception: Typed validation failure retained for local callers.
     """
 
     correlation_id: str
     errors: tuple[Mapping[str, Any], ...]
     metadata: InvocationMetadata | None = None
+    exception: BaseException | None = dataclasses.field(
+        default=None, repr=False, compare=False, hash=False
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,12 +103,14 @@ class InvocationFailure:
         message: Human-readable failure summary.
         exception: The originating exception, when available.
         metadata: Optional invocation metadata captured by the runtime.
+        classification: Stable capability failure code, when classified.
     """
 
     correlation_id: str
     message: str
     exception: BaseException = dataclasses.field(repr=False, compare=False, hash=False)
     metadata: InvocationMetadata | None = None
+    classification: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

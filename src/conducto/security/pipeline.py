@@ -486,6 +486,7 @@ class SecurityPipeline:
         outcome: AuditOutcome,
         reason_code: str,
         instruction_chain: tuple[str, ...] = (),
+        failure_classification: str | None = None,
     ) -> None:
         """Emit lifecycle evidence after pre-execution acceptance.
 
@@ -510,6 +511,7 @@ class SecurityPipeline:
             reason_code,
             required=False,
             instruction_chain=instruction_chain,
+            failure_classification=failure_classification,
         )
 
     async def _emit(
@@ -526,6 +528,7 @@ class SecurityPipeline:
         policy_version: str = "1",
         required: bool,
         instruction_chain: tuple[str, ...] = (),
+        failure_classification: str | None = None,
     ) -> None:
         if self.audit_emitter is None:
             return
@@ -566,6 +569,11 @@ class SecurityPipeline:
                     else AuditSeverity.INFO
                 ),
                 instruction_chain=instruction_chain,
+                extensions=(
+                    {"failure_classification": failure_classification}
+                    if failure_classification is not None
+                    else {}
+                ),
             ),
             required=required,
         )

@@ -19,6 +19,11 @@ from conducto.security.errors import SecurityError
 
 from .agent import BaseAgent
 from .agent_card import stable_skill_id
+from .capability_errors import (
+    CapabilityError,
+    InvalidCapabilityInputError,
+    map_provider_error,
+)
 from .instructions import resolve_instruction_chain
 from .invocation_results import (
     InvocationCancelled,
@@ -237,9 +242,21 @@ async def invoke_agent(
         if context.cancellation.cancelled:
             invocation_span.set_outcome("cancelled", reason="cancellation")
             return InvocationCancelled(correlation_id, context.invocation_metadata())
+        pipeline = security_pipeline or SecurityPipeline()
         try:
             validated = parameter_model.model_validate(dict(arguments))
         except ValidationError as error:
+            typed_error = InvalidCapabilityInputError(capability_name)
+            await pipeline.emit_execution(
+                AuditEventName.EXECUTION_FAILED,
+                context.authorization,
+                agent_id=agent_id,
+                capability_id=capability_name,
+                outcome=AuditOutcome.REJECTED,
+                reason_code=typed_error.code.value,
+                instruction_chain=context.instruction_chain,
+                failure_classification=typed_error.code.value,
+            )
             emit_event(
                 ARGUMENTS_VALIDATED,
                 outcome="failure",
@@ -254,10 +271,10 @@ async def invoke_agent(
             return InvocationValidationFailure(
                 correlation_id,
                 tuple(freeze_mapping(item) for item in error.errors()),
-                context.invocation_metadata(),
+                context.invocation_metadata(failure_classification=typed_error.code.value),
+                typed_error,
             )
         emit_event(ARGUMENTS_VALIDATED, outcome="success")
-        pipeline = security_pipeline or SecurityPipeline()
         security_result = await pipeline.check_async(
             target,
             context.authorization,
@@ -439,28 +456,43 @@ async def invoke_agent(
                 context.invocation_metadata(),
             )
         except _CapabilityExecutionError as error:
+            capability_error = (
+                error.exception
+                if isinstance(error.exception, CapabilityError)
+                else map_provider_error(error.exception, capability_name)
+            )
+            if capability_error is not None:
+                classification = capability_error.code.value
+                message = str(capability_error)
+                exception: BaseException = capability_error
+            else:
+                classification = None
+                message = "Capability execution failed"
+                exception = error.exception
             await pipeline.emit_execution(
                 AuditEventName.EXECUTION_FAILED,
                 context.authorization,
                 agent_id=agent_id,
                 capability_id=capability_name,
                 outcome=AuditOutcome.FAILURE,
-                reason_code="capability_exception",
+                reason_code=classification or "capability_exception",
                 instruction_chain=context.instruction_chain,
+                failure_classification=classification,
             )
             emit_event(
                 INVOCATION_FAILED,
                 level=40,
                 outcome="failure",
                 duration_ms=(time.perf_counter() - started) * 1000,
-                error_category="capability_exception",
+                error_category=classification or "capability_exception",
             )
-            invocation_span.set_error("capability_exception")
+            invocation_span.set_error(classification or "capability_exception")
             return InvocationFailure(
                 correlation_id,
-                "Capability execution failed",
-                error.exception,
-                context.invocation_metadata(),
+                message,
+                exception,
+                context.invocation_metadata(failure_classification=classification),
+                classification,
             )
         except UnsupportedReturnValueError as error:
             await pipeline.emit_execution(

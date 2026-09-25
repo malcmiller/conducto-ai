@@ -325,6 +325,8 @@ class InvocationMetadata:
             this run's model calls, in runtime policy, agent, then
             capability precedence. Attributable evidence of instruction
             resolution for provenance and audit output.
+        failure_classification: Stable capability failure code, when the
+            invocation failed.
     """
 
     run_id: str
@@ -338,6 +340,7 @@ class InvocationMetadata:
     model_calls: tuple[ModelCallProvenance, ...] = ()
     attributes: Mapping[str, Any] = field(default_factory=dict)
     instruction_chain: tuple[str, ...] = ()
+    failure_classification: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "attributes", freeze_metadata(self.attributes))
@@ -365,6 +368,7 @@ class InvocationMetadata:
             "model_calls": [call.to_dict() for call in self.model_calls],
             "attributes": thaw_metadata(self.attributes),
             "instruction_chain": list(self.instruction_chain),
+            "failure_classification": self.failure_classification,
         }
 
     def with_model_calls(
@@ -381,6 +385,10 @@ class InvocationMetadata:
         """
         calls = self.model_calls + tuple(call for group in groups for call in group)
         return replace(self, usage=aggregate_usage(calls), model_calls=calls)
+
+    def with_failure_classification(self, classification: str) -> InvocationMetadata:
+        """Return a copy annotated with a stable failure classification."""
+        return replace(self, failure_classification=classification)
 
     def with_prior_model_calls(
         self,
@@ -587,7 +595,12 @@ class RunContext:
             "instruction_chain": list(self.instruction_chain),
         }
 
-    def invocation_metadata(self, usage: Usage | None = None) -> InvocationMetadata:
+    def invocation_metadata(
+        self,
+        usage: Usage | None = None,
+        *,
+        failure_classification: str | None = None,
+    ) -> InvocationMetadata:
         """Build invocation metadata for a capability or route result.
 
         Args:
@@ -609,6 +622,7 @@ class RunContext:
             model_calls=calls,
             attributes=self.metadata,
             instruction_chain=self.instruction_chain,
+            failure_classification=failure_classification,
         )
 
 
